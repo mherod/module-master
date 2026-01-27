@@ -23,6 +23,12 @@ bun src/cli.ts rename src/components/Button.tsx Button PrimaryButton
 # Discover tsconfig structure in a project
 bun src/cli.ts discover .
 
+# Find files and exports by name
+bun src/cli.ts find Button -p /path/to/project
+
+# Normalize import paths using aliases
+bun src/cli.ts alias src/components --prefer=alias
+
 # Preview changes without modifying files
 bun src/cli.ts move src/old.ts src/new.ts --dry-run
 ```
@@ -66,6 +72,7 @@ Features:
 - Updates barrel file re-exports
 - Handles dynamic imports and require() calls
 - Updates internal imports within the moved file
+- Type checking verification enabled by default (use `--no-verify` to skip)
 
 ### `rename <file> <oldName> <newName>`
 
@@ -96,9 +103,44 @@ Output includes:
 - File ownership map (which config controls each file)
 - Path aliases defined in each config
 
+### `find <query>`
+
+Search for files and exports by name across the project.
+
+```bash
+bun src/cli.ts find User -p /path/to/project
+bun src/cli.ts find Button --type export
+bun src/cli.ts find helpers --type file
+```
+
+Features:
+- Case-insensitive partial matching
+- Searches both filenames and export names
+- Filter by type: `--type file|export|all` (default: all)
+- Discovery-based: uses tsconfig ownership to find all files
+- Smart sorting: exact matches appear first
+
+### `alias <target>`
+
+Normalize import paths using tsconfig aliases, relative paths, or the shortest option.
+
+```bash
+bun src/cli.ts alias src/components --prefer=alias
+bun src/cli.ts alias src --prefer=relative
+bun src/cli.ts alias . --prefer=shortest
+```
+
+Features:
+- Three strategies: `alias` (use tsconfig paths), `relative` (use ./... paths), `shortest` (pick shorter option)
+- Batch processing: works on single files or entire directories
+- Automatic external package filtering (skips node_modules)
+- Type checking verification enabled by default
+- Use `--no-verify` to skip verification for faster execution
+
 ## Features
 
 - **Precise AST-based refactoring** using TypeScript Compiler API
+- **Type checking verification** runs `tsc --noEmit` before and after changes to catch breaking changes
 - **All import types supported**: named, default, namespace, dynamic, require, require.resolve
 - **Test mock support**: jest.mock(), vi.mock(), vitest.mock()
 - **Path alias preservation** from tsconfig.json
@@ -116,6 +158,9 @@ Output includes:
 | `--dry-run` | `-n` | Preview changes without modifying files |
 | `--project` | `-p` | Path to project directory or tsconfig.json |
 | `--verbose` | | Enable detailed output |
+| `--no-verify` | | Skip type checking verification (not recommended) |
+| `--type` | | Filter find results by type: `file`, `export`, or `all` |
+| `--prefer` | | Alias strategy: `alias`, `relative`, or `shortest` |
 
 ## How It Works
 
