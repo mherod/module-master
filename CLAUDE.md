@@ -226,6 +226,16 @@ For cross-package moves, `findCrossPackageImport()` resolves the optimal import 
 
 DON'T: Use relative paths like `../../../packages/foo/src/bar` for cross-package imports. Always prefer package imports.
 
+### Move Command File Handling
+
+The move command must handle all code paths for file copying:
+- Files with internal imports that need updating
+- Files with internal imports that don't change
+- Files with NO imports (utility functions, constants)
+- Files that fail to parse
+
+Use a `fileMoved` flag pattern to ensure the file copy always happens regardless of which code path executes. The fallback at the end catches any path that didn't move the file.
+
 ### DependencyGraph Barrel Tracking
 
 The `DependencyGraph` interface includes `barrelReExports: Map<string, string[]>` to track which files each barrel actually re-exports via `export ... from` statements. This distinguishes actual re-exports from regular imports within barrel files.
