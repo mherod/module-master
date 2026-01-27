@@ -1,0 +1,22 @@
+{
+	"name": "module-master",
+	"version": "0.1.0",
+	"type": "module",
+	"bin": {
+		"module-master": "./src/cli.ts"
+	},
+	"scripts": {
+		"dev": "bun run src/cli.ts",
+		"build": "bun build src/cli.ts --compile --outfile dist/module-master",
+		"test": "bun test",
+		"lint": "bunx @biomejs/biome check --write .",
+		"typecheck": "bunx tsc --noEmit"
+	},
+	"dependencies": {
+		"typescript": "^5.7.2"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^1.9.4",
+		"@types/bun": "latest"
+	}
+}
