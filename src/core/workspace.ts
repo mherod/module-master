@@ -218,18 +218,18 @@ async function parsePackage(
 		}
 	}
 
-	// Find barrel files (index.ts/index.tsx)
+	// Find barrel files (index.ts/index.tsx that contain exports)
 	const barrelFiles: string[] = [];
-	for (const barrelName of ["index.ts", "index.tsx"]) {
+	for (const barrelName of ["index.ts", "index.tsx", "index.js"]) {
 		// Check root
 		const rootBarrel = path.join(pkgDir, barrelName);
-		if (await fileExists(rootBarrel)) {
+		if (await isBarrelFile(rootBarrel)) {
 			barrelFiles.push(rootBarrel);
 		}
 		// Check src directory
 		if (srcDir) {
 			const srcBarrel = path.join(pkgDir, srcDir, barrelName);
-			if (await fileExists(srcBarrel)) {
+			if (await isBarrelFile(srcBarrel)) {
 				barrelFiles.push(srcBarrel);
 			}
 		}
@@ -290,6 +290,23 @@ async function fileExists(filePath: string): Promise<boolean> {
 		const { stat } = await import("node:fs/promises");
 		await stat(filePath);
 		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Check if a file is a barrel file (index.ts/js that contains at least one export)
+ */
+async function isBarrelFile(filePath: string): Promise<boolean> {
+	try {
+		const file = Bun.file(filePath);
+		if (!(await file.exists())) {
+			return false;
+		}
+		const content = await file.text();
+		// Check for export statements (export *, export {, export default, export const/function/class)
+		return /\bexport\s+(\*|{|default|const|let|var|function|class|type|interface|enum)\b/.test(content);
 	} catch {
 		return false;
 	}
