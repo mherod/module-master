@@ -92,3 +92,104 @@ Use cases:
 - Identifying dead code before major refactors
 - Cleaning up after removing features
 - Auditing public API surface of a library
+
+---
+
+### `alias` - Normalize relative imports vs. path aliases
+
+Rewrite import/export specifiers to either prefer `tsconfig` aliases or strict relative paths, ensuring the same module target and optionally updating nested re-exports.
+
+```bash
+module-master alias src --prefer=alias
+module-master alias src --prefer=relative
+module-master alias src/components/Button.tsx --prefer=alias --dry-run
+```
+
+Use cases:
+- Standardizing import flavor (alias vs. relative) after upheavals like folder moves
+- Eliminating brittle `../../../` chains by routing through defined aliases
+- Making it explicit when a file must only touch public API layers
+
+---
+
+### `cycles` - Detect circular dependencies and link paths
+
+Scan the dependency graph for cycles, report each edge, and optionally output JSON or even suggest breaking points.
+
+```bash
+module-master cycles
+module-master cycles src --max-depth=50
+module-master cycles --format=json
+```
+
+Use cases:
+- Finding initialization/order bugs caused by circular imports
+- Illuminating hidden coupling before large refactors
+- Supporting engineering metrics that track cycle counts or module depth
+
+---
+
+### `graph` - Render dependency relationships
+
+Export the project's dependency graph in human-readable or machine formats so teams can explore deep import trees, visualize hotspots, and feed diagrams into docs.
+
+```bash
+module-master graph
+module-master graph src --depth=3 --format=dot > deps.dot
+module-master graph src/components --format=json --include=barrels
+```
+
+Use cases:
+- Show how a module flows through the codebase before moving or deleting it
+- Generate DOT/JSON assets for documentation or architectural reviews
+- Spot high-degree modules that form refactor candidates
+
+---
+
+### `orphan` - List or delete unreferenced modules
+
+Detect TypeScript or JavaScript files that have zero incoming references (excluding test fixtures) so you can confidently retire them or gate their deletion behind a dry run.
+
+```bash
+module-master orphan
+module-master orphan src/utils --ignore="*.test.ts" --dry-run
+module-master orphan --delete
+```
+
+Use cases:
+- Cleaning unused utilities, helpers, or legacy adapters
+- Reducing bundle size in libraries by removing code that nobody imports
+- Auditing files introduced by quick spikes before merging back to main
+
+---
+
+### `aggregate` - Merge exports into a single module
+
+Combine several small modules into one target file while updating all imports/re-exports in the project, optionally collapsing barrels or applying a new public API surface.
+
+```bash
+module-master aggregate src/legacy/logger.ts src/legacy/metrics.ts --target=src/utils/logging.ts
+module-master aggregate src/ui/icons/* --target=src/ui/icons/index.ts --dry-run
+```
+
+Use cases:
+- Consolidating entry points for a library release
+- Reducing the number of filesystem hops for hot paths
+- Folding legacy helpers into a curated public module before deprecating the originals
+
+---
+
+### `doc` - Dump declaration JSDoc
+
+Generate the full JSDoc comment for a top-level declaration so you can review it without opening the file or share the aligned docblock with others.
+
+```bash
+module-master doc src/utils/logger.ts logRequest
+module-master doc src/index.ts --kind=function --format=markdown
+module-master doc src/components/Button.tsx --verbose
+```
+
+Use cases:
+- Quickly capture or sync documentation for exports you intend to rename or move
+- Review prop/constants docs from a CLI before publishing or updating a README
+- Export the docblock as markdown/JSON for changelog generation or automation

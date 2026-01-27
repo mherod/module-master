@@ -60,3 +60,10 @@ The codebase uses the TypeScript Compiler API (`typescript` package) for parsing
 ## Bun Runtime
 
 This project uses Bun exclusively. Use `Bun.file()` for file I/O instead of node:fs.
+
+## TypeScript Compiler API
+
+When calling `node.getStart()` on AST nodes, always pass the sourceFile parameter: `node.getStart(sourceFile)`. Without it, the method fails with "undefined is not an object" in Bun's runtime. `node.getEnd()` does not accept parameters.
+
+DON'T: `node.getStart()` — fails at runtime
+DO: `node.getStart(sourceFile)` — works correctly
