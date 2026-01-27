@@ -7,6 +7,10 @@ import {
 } from "../core/project.ts";
 import { normalizePath } from "../core/resolver.ts";
 import { scanModuleReferences } from "../core/scanner.ts";
+import {
+	printVerificationResults,
+	verifyTypeChecking,
+} from "../core/verify.ts";
 import type { ModuleReference, ProjectConfig } from "../types.ts";
 
 export interface AliasOptions {
@@ -14,6 +18,7 @@ export interface AliasOptions {
 	prefer: "alias" | "relative" | "shortest";
 	dryRun?: boolean;
 	verbose?: boolean;
+	verify?: boolean;
 	project?: string;
 }
 
@@ -37,6 +42,7 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 		prefer,
 		dryRun = false,
 		verbose = false,
+		verify = true,
 		project: projectArg,
 	} = options;
 
@@ -54,6 +60,9 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 	console.log(`\n${dryRun ? "🔍 Dry run:" : "🔧"} Normalizing imports...`);
 	console.log(`   Target: ${absoluteTarget}`);
 	console.log(`   Strategy: ${prefer}`);
+	if (verify) {
+		console.log("   Verification: enabled");
+	}
 	console.log();
 
 	const result = await normalizeImports(absoluteTarget, prefer, project);
@@ -65,12 +74,32 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 		return;
 	}
 
-	// Apply changes if not dry run
+	// Apply changes with optional verification
 	if (!dryRun) {
-		applyChanges(result.changes);
-	}
+		if (verify) {
+			const verifyResult = await verifyTypeChecking(
+				project,
+				() => {}, // No snapshot needed
+				() => applyChanges(result.changes),
+			);
 
-	printResults(result, dryRun, verbose);
+			printResults(result, dryRun, verbose);
+			console.log();
+			printVerificationResults(verifyResult);
+
+			if (!verifyResult.success) {
+				console.error(
+					"\n⚠️  Type checking failed. Changes were applied but introduced errors.",
+				);
+				process.exit(1);
+			}
+		} else {
+			applyChanges(result.changes);
+			printResults(result, dryRun, verbose);
+		}
+	} else {
+		printResults(result, dryRun, verbose);
+	}
 }
 
 async function normalizeImports(

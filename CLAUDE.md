@@ -28,6 +28,7 @@ bun test src/cli.test.ts
 bun src/cli.ts find <query> -p <project>           # Find files and exports by name
 bun src/cli.ts analyze <file>                      # Analyze imports/exports/references
 bun src/cli.ts discover <directory>                # Discover tsconfig files and project structure
+bun src/cli.ts alias <target> --prefer=<strategy>  # Normalize import paths
 bun src/cli.ts move <source> <target> [--dry-run]  # Move file, update all imports
 bun src/cli.ts rename <file> <old> <new> [--dry-run]  # Rename export, update all imports
 ```
@@ -37,6 +38,8 @@ Use `-p <project>` to specify a project directory for find/analyze:
 bun src/cli.ts find Entity -p /path/to/project              # Find Entity files and exports
 bun src/cli.ts find User -p . --type export                 # Find only User exports
 bun src/cli.ts analyze /path/to/file.ts -p /path/to/project
+bun src/cli.ts alias src --prefer=alias                     # Normalize to tsconfig aliases
+bun src/cli.ts alias src --prefer=shortest --no-verify     # Pick shortest path, skip verification
 ```
 
 ## Architecture
@@ -51,12 +54,14 @@ The codebase uses the TypeScript Compiler API (`typescript` package) for parsing
 - **resolver.ts** - Module path resolution, alias matching, relative path calculation
 - **graph.ts** - Builds dependency graph (imports/importedBy maps) for the entire project
 - **updater.ts** - Applies text changes to update import specifiers in files
+- **verify.ts** - Type checking verification using `tsc --noEmit` before/after changes
 
 ### Commands (`src/commands/`)
 
 - **find.ts** - Search for files and exports by name across the project
 - **analyze.ts** - Deep analysis of a module's imports, exports, and references
 - **discover.ts** - Map all tsconfig files and their ownership
+- **alias.ts** - Normalize import paths using aliases, relative paths, or shortest option
 - **move.ts** - Move files and update all references
 - **rename.ts** - Rename exports and update all imports
 
@@ -119,3 +124,27 @@ The `find` command (`src/commands/find.ts`) searches for files and exports acros
 - **Type filtering**: Use `--type file|export|all` to filter results
 
 The command scans exports by parsing each TypeScript/JavaScript file with the TS Compiler API and extracting exports using `scanExports()`. Files that fail to parse are silently skipped.
+
+## Alias Command
+
+The `alias` command (`src/commands/alias.ts`) normalizes import specifiers:
+
+- **Three strategies**: `--prefer=alias` (use tsconfig paths), `--prefer=relative` (use ./... paths), `--prefer=shortest` (pick shorter option)
+- **Batch processing**: Works on single files or entire directories
+- **External package filtering**: Automatically skips node_modules and external imports
+- **Verification enabled by default**: Runs `tsc --noEmit` before and after to catch breaking changes
+- **Simple text replacement**: Uses regex-based replacement on file contents
+
+DON'T: Apply alias command to files with complex dynamic imports or computed module paths—verification will catch issues but manual review may be needed.
+
+## Type Checking Verification
+
+The `verify.ts` module provides safety for refactoring operations:
+
+- **Before/after comparison**: Runs `tsc --noEmit -p <tsconfig>` before and after changes
+- **Error diffing**: Compares error output to identify new issues introduced by changes
+- **Exit on failure**: Commands exit with error code if new type errors are detected
+- **Bonus tracking**: Reports errors fixed by the refactoring as a side effect
+- **Enabled by default**: Use `--no-verify` to skip for faster execution (risky)
+
+Verification spawns `tsc` as a subprocess using `spawnSync` and parses error output. Errors are matched as lines containing `: error TS`. The tool tracks which errors existed before, which are new, and which were fixed.

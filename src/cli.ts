@@ -19,6 +19,7 @@ const { values, positionals } = parseArgs({
 		project: { type: "string", short: "p" },
 		type: { type: "string", short: "t" },
 		prefer: { type: "string" },
+		"no-verify": { type: "boolean" },
 	},
 	allowPositionals: true,
 });
@@ -47,6 +48,7 @@ Options:
   -p, --project     Path to project directory or tsconfig.json
   -t, --type        Filter type for find command (file, export, all)
   --prefer          Strategy for alias command (alias, relative, shortest)
+  --no-verify       Disable type checking verification (enabled by default)
   --verbose         Enable verbose output
 
 Examples:
@@ -202,6 +204,7 @@ Options:
   --prefer        Strategy: alias, relative, or shortest (required)
   -p, --project   Path to project directory or tsconfig.json
   -n, --dry-run   Preview changes without modifying files
+  --no-verify     Disable type checking verification (enabled by default)
   --verbose       Show detailed changes
 
 Strategies:
@@ -209,10 +212,15 @@ Strategies:
   relative   Convert to relative paths (./... or ../...)
   shortest   Pick whichever is shorter
 
+Verification:
+  By default, runs tsc --noEmit before and after changes to ensure no
+  type errors are introduced. Use --no-verify to skip this check.
+
 Examples:
   ${name} alias src --prefer=alias
   ${name} alias src/utils --prefer=relative --dry-run
   ${name} alias src/components/Button.tsx --prefer=shortest
+  ${name} alias src --prefer=alias --no-verify
 `);
 			break;
 		default:
@@ -355,6 +363,7 @@ async function main() {
 				prefer,
 				dryRun: values["dry-run"],
 				verbose: values.verbose,
+				verify: !values["no-verify"],
 				project: values.project,
 			});
 			break;
