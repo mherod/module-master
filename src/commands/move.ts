@@ -209,6 +209,8 @@ export async function moveModule(
 	// Also need to update imports WITHIN the file being moved
 	const program = createProgram(project);
 	const sourceAst = program.getSourceFile(sourcePath);
+	let fileMoved = false;
+
 	if (sourceAst) {
 		const internalRefs = scanModuleReferences(sourceAst, project);
 		if (internalRefs.length > 0) {
@@ -227,16 +229,20 @@ export async function moveModule(
 					// We'll write this as part of the move
 					await Bun.write(targetPath, newContent);
 					await Bun.file(sourcePath).delete();
+					fileMoved = true;
 				}
 			} else if (!dryRun) {
 				// No internal changes, just copy
 				const content = await sourceFile.text();
 				await Bun.write(targetPath, content);
 				await Bun.file(sourcePath).delete();
+				fileMoved = true;
 			}
 		}
-	} else if (!dryRun) {
-		// Couldn't parse, just copy as-is
+	}
+
+	// If file wasn't moved yet (no internal refs or couldn't parse), copy as-is
+	if (!fileMoved && !dryRun) {
 		const content = await sourceFile.text();
 		await Bun.write(targetPath, content);
 		await Bun.file(sourcePath).delete();
