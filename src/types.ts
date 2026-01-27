@@ -5,6 +5,23 @@ export interface ProjectConfig {
 	tsconfigPath: string;
 	compilerOptions: ts.CompilerOptions;
 	pathAliases: Map<string, string[]>;
+	/** Include glob patterns from tsconfig */
+	include: string[];
+	/** Exclude glob patterns from tsconfig */
+	exclude: string[];
+	/** All resolved file paths included in this project */
+	files: string[];
+	/** Project references (for solution-style tsconfigs) */
+	references?: ProjectReference[];
+}
+
+export interface ProjectReference {
+	/** Path to the referenced tsconfig */
+	path: string;
+	/** Whether the reference is prepended */
+	prepend?: boolean;
+	/** Whether the reference is circular */
+	circular?: boolean;
 }
 
 export interface ModuleReference {
@@ -36,7 +53,8 @@ export type ReferenceType =
 	| "export-all" // export * from './x'
 	| "export-all-as" // export * as x from './x'
 	| "require" // require('./x')
-	| "require-resolve"; // require.resolve('./x')
+	| "require-resolve" // require.resolve('./x')
+	| "jest-mock"; // jest.mock('./x') or vi.mock('./x')
 
 export interface ImportBinding {
 	name: string;

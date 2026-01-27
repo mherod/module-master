@@ -41,16 +41,13 @@ export async function renameCommand(options: RenameOptions): Promise<void> {
 
 	const absolutePath = path.resolve(file);
 
-	const tsconfigPath = resolveTsConfig(
-		projectArg,
-		path.dirname(absolutePath),
-	);
+	const tsconfigPath = resolveTsConfig(projectArg, path.dirname(absolutePath));
 	if (!tsconfigPath) {
 		console.error("Could not find tsconfig.json");
 		process.exit(1);
 	}
 
-	const project = loadProject(tsconfigPath);
+	const project = loadProject(tsconfigPath, absolutePath);
 
 	console.log(`\n${dryRun ? "🔍 Dry run:" : "🚀"} Renaming symbol...`);
 	console.log(`   File: ${absolutePath}`);

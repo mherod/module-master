@@ -3,6 +3,8 @@
 import { parseArgs } from "node:util";
 import { name, version } from "../package.json";
 import { analyzeCommand } from "./commands/analyze.ts";
+import { discoverCommand } from "./commands/discover.ts";
+import { findCommand } from "./commands/find.ts";
 import { moveCommand } from "./commands/move.ts";
 import { renameCommand } from "./commands/rename.ts";
 
@@ -14,6 +16,7 @@ const { values, positionals } = parseArgs({
 		verbose: { type: "boolean" },
 		"dry-run": { type: "boolean", short: "n" },
 		project: { type: "string", short: "p" },
+		type: { type: "string", short: "t" },
 	},
 	allowPositionals: true,
 });
@@ -28,18 +31,22 @@ Usage:
   ${name} <command> [options] [args]
 
 Commands:
+  find <query> -p <project>           Find files and exports by name
+  analyze <file>                      Analyze a module's imports, exports, and references
+  discover <directory>                Discover tsconfig files and project structure
   move <source> <target>              Move a module and update all references
   rename <file> <oldName> <newName>   Rename an export and update all imports
-  analyze <file>                      Analyze a module's imports, exports, and references
 
 Options:
   -h, --help      Show this help message
   -v, --version   Show version
   -n, --dry-run   Preview changes without modifying files
   -p, --project   Path to project directory or tsconfig.json
+  -t, --type      Filter type for find command (file, export, all)
   --verbose       Enable verbose output
 
 Examples:
+  ${name} find Entity -p /path/to/project
   ${name} analyze src/utils/helpers.ts
   ${name} move src/old/file.ts src/new/file.ts --dry-run
   ${name} rename src/components/Button.tsx Button PrimaryButton
@@ -129,6 +136,54 @@ Examples:
   ${name} analyze src/components/Button.tsx --verbose
 `);
 			break;
+		case "discover":
+			console.log(`
+Usage: ${name} discover <directory> [options]
+
+Discover all tsconfig.json files in a directory and understand project structure.
+
+Arguments:
+  directory    Path to the project directory to scan
+
+Options:
+  --verbose    Show detailed file ownership and path aliases
+
+Output includes:
+  • All tsconfig.json files found
+  • Include/exclude patterns for each config
+  • Project references (for solution-style configs)
+  • File ownership map (which config controls each file)
+
+Examples:
+  ${name} discover .
+  ${name} discover /path/to/project --verbose
+`);
+			break;
+		case "find":
+			console.log(`
+Usage: ${name} find <query> -p <project> [options]
+
+Find files and exports by name within a project.
+
+Arguments:
+  query    Name to search for (case-insensitive, partial match)
+
+Options:
+  -p, --project   Path to project directory (required)
+  -t, --type      Filter: file, export, or all (default: all)
+  --verbose       Show helpful tips for next steps
+
+Output includes:
+  • Files matching the query by filename
+  • Exports matching the query by name
+  • Line numbers for each export
+
+Examples:
+  ${name} find Entity -p /path/to/project
+  ${name} find User -p . --type export
+  ${name} find config -p . --type file --verbose
+`);
+			break;
 		default:
 			showHelp();
 	}
@@ -201,6 +256,46 @@ async function main() {
 				file,
 				verbose: values.verbose,
 				project: values.project,
+			});
+			break;
+		}
+
+		case "discover": {
+			const [directory] = args;
+			if (!directory) {
+				console.error("Error: discover requires a <directory> argument");
+				console.error(`Run '${name} discover --help' for usage`);
+				process.exit(1);
+			}
+			await discoverCommand({
+				directory,
+				verbose: values.verbose,
+			});
+			break;
+		}
+
+		case "find": {
+			const [query] = args;
+			if (!query) {
+				console.error("Error: find requires a <query> argument");
+				console.error(`Run '${name} find --help' for usage`);
+				process.exit(1);
+			}
+			if (!values.project) {
+				console.error("Error: find requires -p <project> option");
+				console.error(`Run '${name} find --help' for usage`);
+				process.exit(1);
+			}
+			const findType = values.type as "file" | "export" | "all" | undefined;
+			if (findType && !["file", "export", "all"].includes(findType)) {
+				console.error("Error: --type must be 'file', 'export', or 'all'");
+				process.exit(1);
+			}
+			await findCommand({
+				query,
+				project: values.project,
+				type: findType,
+				verbose: values.verbose,
 			});
 			break;
 		}

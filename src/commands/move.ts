@@ -50,7 +50,7 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 		process.exit(1);
 	}
 
-	const project = loadProject(tsconfigPath);
+	const project = loadProject(tsconfigPath, absoluteSource);
 
 	console.log(`\n${dryRun ? "🔍 Dry run:" : "🚀"} Moving module...`);
 	console.log(`   From: ${absoluteSource}`);

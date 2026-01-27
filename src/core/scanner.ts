@@ -71,6 +71,22 @@ function extractReference(
 		) {
 			return extractRequire(node, sourceFile, project, "require-resolve");
 		}
+
+		// jest.mock('...') or vi.mock('...')
+		if (
+			ts.isPropertyAccessExpression(node.expression) &&
+			ts.isIdentifier(node.expression.expression) &&
+			ts.isIdentifier(node.expression.name)
+		) {
+			const obj = node.expression.expression.text;
+			const prop = node.expression.name.text;
+			if (
+				(obj === "jest" || obj === "vi" || obj === "vitest") &&
+				(prop === "mock" || prop === "doMock" || prop === "unmock")
+			) {
+				return extractRequire(node, sourceFile, project, "jest-mock");
+			}
+		}
 	}
 
 	return null;
@@ -245,7 +261,7 @@ function extractRequire(
 	node: ts.CallExpression,
 	sourceFile: ts.SourceFile,
 	project: ProjectConfig,
-	type: "require" | "require-resolve",
+	type: "require" | "require-resolve" | "jest-mock",
 ): ModuleReference | null {
 	const arg = node.arguments[0];
 	if (!arg || !ts.isStringLiteral(arg)) {

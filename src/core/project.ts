@@ -1,6 +1,11 @@
 import path from "node:path";
 import ts from "typescript";
-import type { ProjectConfig } from "../types.ts";
+import type { ProjectConfig, ProjectReference } from "../types.ts";
+import {
+	discoverProject,
+	findOwningConfig,
+	toProjectConfig,
+} from "./tsconfig-discovery.ts";
 
 /**
  * Find and parse the tsconfig.json for a project
@@ -35,8 +40,31 @@ export function resolveTsConfig(
 
 /**
  * Load project configuration from tsconfig.json
+ * Uses smart discovery to find the best config for a target file
  */
-export function loadProject(tsconfigPath: string): ProjectConfig {
+export function loadProject(
+	tsconfigPath: string,
+	targetFile?: string,
+): ProjectConfig {
+	// If we have a target file, use smart discovery to find the owning config
+	if (targetFile) {
+		const projectDir = path.dirname(tsconfigPath);
+		const discovery = discoverProject(projectDir);
+		const owningConfig = findOwningConfig(targetFile, discovery);
+
+		if (owningConfig) {
+			return toProjectConfig(owningConfig);
+		}
+		// Fall through to traditional loading if no owner found
+	}
+
+	return loadProjectDirect(tsconfigPath);
+}
+
+/**
+ * Load project configuration directly from a tsconfig path (no discovery)
+ */
+export function loadProjectDirect(tsconfigPath: string): ProjectConfig {
 	const configFile = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
 
 	if (configFile.error) {
@@ -45,7 +73,22 @@ export function loadProject(tsconfigPath: string): ProjectConfig {
 		);
 	}
 
-	const rootDir = tsconfigPath.replace(/[/\\]tsconfig\.json$/, "");
+	const rootDir = path.dirname(tsconfigPath);
+
+	// If this is a solution-style config, load the first reference
+	if (configFile.config.references && !configFile.config.compilerOptions) {
+		const firstRef = configFile.config.references[0];
+		if (firstRef?.path) {
+			const refPath = path.resolve(rootDir, firstRef.path);
+			const resolvedRefPath = refPath.endsWith(".json")
+				? refPath
+				: path.join(refPath, "tsconfig.json");
+
+			if (ts.sys.fileExists(resolvedRefPath)) {
+				return loadProjectDirect(resolvedRefPath);
+			}
+		}
+	}
 
 	const parsed = ts.parseJsonConfigFileContent(
 		configFile.config,
@@ -55,18 +98,39 @@ export function loadProject(tsconfigPath: string): ProjectConfig {
 
 	if (parsed.errors.length > 0) {
 		const messages = parsed.errors
+			.filter((e) => e.code !== 18003) // Ignore "No inputs were found" error
 			.map((e) => ts.flattenDiagnosticMessageText(e.messageText, "\n"))
 			.join("\n");
-		throw new Error(`Failed to parse tsconfig: ${messages}`);
+		if (messages.length > 0) {
+			throw new Error(`Failed to parse tsconfig: ${messages}`);
+		}
 	}
 
 	const pathAliases = extractPathAliases(parsed.options);
+
+	const include: string[] = configFile.config.include ?? [];
+	const exclude: string[] = configFile.config.exclude ?? [];
+
+	const references: ProjectReference[] | undefined = configFile.config
+		.references
+		? configFile.config.references.map(
+				(ref: { path: string; prepend?: boolean; circular?: boolean }) => ({
+					path: path.resolve(rootDir, ref.path),
+					prepend: ref.prepend,
+					circular: ref.circular,
+				}),
+			)
+		: undefined;
 
 	return {
 		rootDir,
 		tsconfigPath,
 		compilerOptions: parsed.options,
 		pathAliases,
+		include,
+		exclude,
+		files: parsed.fileNames,
+		references,
 	};
 }
 
@@ -95,32 +159,13 @@ export function createProgram(
 	files?: string[],
 ): ts.Program {
 	const host = ts.createCompilerHost(project.compilerOptions);
-
-	if (files) {
-		return ts.createProgram(files, project.compilerOptions, host);
-	}
-
-	// Get all files from the project
-	const configPath = project.tsconfigPath;
-	const configFile = ts.readConfigFile(configPath, ts.sys.readFile);
-	const parsed = ts.parseJsonConfigFileContent(
-		configFile.config,
-		ts.sys,
-		project.rootDir,
-	);
-
-	return ts.createProgram(parsed.fileNames, project.compilerOptions, host);
+	const filesToCompile = files ?? project.files;
+	return ts.createProgram(filesToCompile, project.compilerOptions, host);
 }
 
 /**
  * Get all TypeScript/JavaScript files in the project
  */
 export function getProjectFiles(project: ProjectConfig): string[] {
-	const configFile = ts.readConfigFile(project.tsconfigPath, ts.sys.readFile);
-	const parsed = ts.parseJsonConfigFileContent(
-		configFile.config,
-		ts.sys,
-		project.rootDir,
-	);
-	return parsed.fileNames;
+	return project.files;
 }
