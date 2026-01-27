@@ -259,6 +259,7 @@ async function main() {
 				target,
 				dryRun: values["dry-run"],
 				verbose: values.verbose,
+				verify: !values["no-verify"],
 				project: values.project,
 			});
 			break;

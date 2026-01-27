@@ -13,6 +13,10 @@ import {
 import { calculateNewSpecifier, normalizePath } from "../core/resolver.ts";
 import { scanModuleReferences } from "../core/scanner.ts";
 import { updateBarrelExports, updateFileReferences } from "../core/updater.ts";
+import {
+	printVerificationResults,
+	verifyTypeChecking,
+} from "../core/verify.ts";
 import type {
 	MoveError,
 	MoveResult,
@@ -25,6 +29,7 @@ export interface MoveOptions {
 	target: string;
 	dryRun?: boolean;
 	verbose?: boolean;
+	verify?: boolean;
 	project?: string;
 }
 
@@ -34,6 +39,7 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 		target,
 		dryRun = false,
 		verbose = false,
+		verify = true,
 		project: projectArg,
 	} = options;
 
@@ -54,7 +60,11 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 
 	console.log(`\n${dryRun ? "🔍 Dry run:" : "🚀"} Moving module...`);
 	console.log(`   From: ${absoluteSource}`);
-	console.log(`   To:   ${absoluteTarget}\n`);
+	console.log(`   To:   ${absoluteTarget}`);
+	if (verify && !dryRun) {
+		console.log("   Verification: enabled");
+	}
+	console.log();
 
 	const result = await moveModule(
 		absoluteSource,
@@ -64,11 +74,53 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 		verbose,
 	);
 
+	if (!dryRun && verify && result.success) {
+		// Run type checking to verify the move didn't break anything
+		const errors = await runTypeCheck(project);
+		if (errors.length > 0) {
+			console.error(`\n❌ Type checking failed after move - ${errors.length} error(s):`);
+			for (const error of errors.slice(0, 10)) {
+				console.error(`   ${error}`);
+			}
+			if (errors.length > 10) {
+				console.error(`   ... and ${errors.length - 10} more`);
+			}
+			console.error(
+				"\n⚠️  Move completed but introduced type errors. Please review.",
+			);
+			process.exit(1);
+		}
+		console.log("\n✅ Type checking passed - no errors introduced");
+	}
+
 	printResult(result, dryRun, verbose);
 
 	if (!result.success) {
 		process.exit(1);
 	}
+}
+
+async function runTypeCheck(project: ProjectConfig): Promise<string[]> {
+	const { spawnSync } = await import("node:child_process");
+	const result = spawnSync(
+		"tsc",
+		["--noEmit", "-p", project.tsconfigPath, "--pretty", "false"],
+		{
+			cwd: project.rootDir,
+			encoding: "utf-8",
+			shell: false,
+		},
+	);
+
+	if (result.status === 0) return [];
+
+	const output = (result.stdout + result.stderr).trim();
+	if (!output) return [];
+
+	return output
+		.split("\n")
+		.filter((line) => line.includes(": error TS"))
+		.map((line) => line.trim());
 }
 
 export async function moveModule(
