@@ -11,7 +11,7 @@ import {
 	resolveTsConfig,
 } from "../core/project.ts";
 import { calculateNewSpecifier, normalizePath } from "../core/resolver.ts";
-import { scanModuleReferences } from "../core/scanner.ts";
+import { scanExports, scanModuleReferences } from "../core/scanner.ts";
 import {
 	addExportToDestinationBarrel,
 	findDestinationBarrel,
@@ -292,6 +292,12 @@ export async function moveModule(
 	const sourceAst = program.getSourceFile(sourcePath);
 	let fileMoved = false;
 
+	// Scan exports from the source file for cross-package move handling
+	const movedFileExports = sourceAst ? scanExports(sourceAst) : [];
+	if (verbose && movedFileExports.length > 0) {
+		console.log(`Moved file exports: ${movedFileExports.map((e) => e.name).join(", ")}`);
+	}
+
 	if (sourceAst) {
 		const internalRefs = scanModuleReferences(sourceAst, project);
 		if (internalRefs.length > 0) {
@@ -354,6 +360,7 @@ export async function moveModule(
 				targetPath,
 				project,
 				workspace,
+				movedFileExports,
 			);
 
 			if (updates.length > 0) {

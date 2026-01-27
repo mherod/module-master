@@ -1,5 +1,7 @@
 import ts from "typescript";
 import type {
+	ExportInfo,
+	ImportBinding,
 	ModuleReference,
 	ProjectConfig,
 	UpdatedReference,
@@ -11,8 +13,19 @@ import {
 	findPackageForPath,
 	isCrossPackageMove,
 	normalizePath,
+	resolveModulePath,
 } from "./resolver.ts";
 import type { WorkspaceInfo } from "./workspace.ts";
+
+/**
+ * Options for cross-package move handling
+ */
+export interface CrossPackageMoveContext {
+	/** Exports from the file being moved */
+	movedFileExports: ExportInfo[];
+	/** Whether this is a barrel-based reference */
+	isBarrelReference: boolean;
+}
 
 interface TextChange {
 	start: number;
@@ -26,6 +39,9 @@ interface TextChange {
  * For cross-package moves with workspace info, this will prefer using
  * package imports (e.g., `import { foo } from '@pkg/dest'`) when the
  * destination package can be identified.
+ *
+ * When imports go through a barrel and only some bindings come from the moved file,
+ * this will split the import into two: one for moved exports, one for remaining exports.
  */
 export function updateFileReferences(
 	sourceFile: ts.SourceFile,
@@ -34,17 +50,128 @@ export function updateFileReferences(
 	newPath: string,
 	project: ProjectConfig,
 	workspace?: WorkspaceInfo,
+	movedFileExports?: ExportInfo[],
 ): { newContent: string; updates: UpdatedReference[] } {
 	const changes: TextChange[] = [];
 	const updates: UpdatedReference[] = [];
+	const importSplits: ImportSplitChange[] = [];
 
 	// Check if this is a cross-package move
 	const crossPackage = workspace
 		? isCrossPackageMove(oldPath, newPath, workspace)
 		: false;
 
+	// Get the set of export names from the moved file for binding matching
+	const movedExportNames = new Set(
+		movedFileExports?.map((e) => e.name) ?? [],
+	);
+
 	for (const ref of references) {
-		// For cross-package moves, prefer the package import
+		// Check if this is an indirect reference through a barrel
+		// (reference specifier doesn't directly point to the moved file)
+		const isBarrelReference =
+			crossPackage &&
+			movedFileExports &&
+			movedFileExports.length > 0 &&
+			ref.bindings &&
+			ref.bindings.length > 0 &&
+			normalizePath(ref.resolvedPath) === normalizePath(oldPath);
+
+		// For barrel references with mixed bindings, we need to split the import
+		if (isBarrelReference && ref.bindings) {
+			const movedBindings: ImportBinding[] = [];
+			const remainingBindings: ImportBinding[] = [];
+
+			for (const binding of ref.bindings) {
+				// Check if this binding comes from the moved file
+				if (movedExportNames.has(binding.name)) {
+					movedBindings.push(binding);
+				} else {
+					remainingBindings.push(binding);
+				}
+			}
+
+			// If we have mixed bindings, split the import
+			if (movedBindings.length > 0 && remainingBindings.length > 0) {
+				const newSpecifier = workspace
+					? findCrossPackageImport(newPath, workspace) ?? ref.specifier
+					: ref.specifier;
+
+				const splitChange = createImportSplit(
+					sourceFile,
+					ref,
+					movedBindings,
+					remainingBindings,
+					newSpecifier,
+				);
+
+				if (splitChange) {
+					importSplits.push(splitChange);
+					updates.push({
+						file: ref.sourceFile,
+						line: ref.line,
+						oldSpecifier: ref.specifier,
+						newSpecifier: `${ref.specifier} + ${newSpecifier}`,
+					});
+				}
+				continue;
+			}
+
+			// All bindings are moved, update the whole import
+			if (movedBindings.length > 0 && remainingBindings.length === 0) {
+				const newSpecifier = workspace
+					? findCrossPackageImport(newPath, workspace) ?? ref.specifier
+					: ref.specifier;
+
+				if (newSpecifier !== ref.specifier) {
+					const change = findSpecifierLocation(sourceFile, ref);
+					if (change) {
+						changes.push({
+							start: change.start,
+							end: change.end,
+							newText: newSpecifier,
+						});
+
+						updates.push({
+							file: ref.sourceFile,
+							line: ref.line,
+							oldSpecifier: ref.specifier,
+							newSpecifier,
+						});
+					}
+				}
+				continue;
+			}
+
+			// No bindings are moved (shouldn't happen, but skip)
+			if (movedBindings.length === 0) {
+				continue;
+			}
+		}
+
+		// For cross-package moves, export-all and export-from should be REMOVED
+		// (not changed to package import, which would pull in everything)
+		const isExportReference =
+			ref.type === "export-all" ||
+			ref.type === "export-from" ||
+			ref.type === "export-all-as";
+
+		if (crossPackage && isExportReference) {
+			// Remove the entire export declaration
+			const removal = findExportDeclarationRange(sourceFile, ref);
+			if (removal) {
+				importSplits.push(removal); // Reuse importSplits for removals
+				updates.push({
+					file: ref.sourceFile,
+					line: ref.line,
+					oldSpecifier: ref.specifier,
+					newSpecifier: "(removed - exported from destination package)",
+				});
+			}
+			continue;
+		}
+
+		// Standard case: update specifier directly
 		let newSpecifier: string;
 		if (crossPackage && workspace) {
 			const pkgImport = findCrossPackageImport(newPath, workspace);
@@ -84,11 +211,29 @@ export function updateFileReferences(
 		}
 	}
 
-	// Apply changes in reverse order to maintain positions
-	changes.sort((a, b) => b.start - a.start);
+	// Apply import splits first (they replace entire import statements)
+	// Sort by position descending to maintain positions
+	importSplits.sort((a, b) => b.start - a.start);
 
 	let newContent = sourceFile.text;
+	for (const split of importSplits) {
+		newContent =
+			newContent.slice(0, split.start) +
+			split.newText +
+			newContent.slice(split.end);
+	}
+
+	// Apply specifier changes in reverse order to maintain positions
+	// Adjust positions if import splits were applied
+	changes.sort((a, b) => b.start - a.start);
+
 	for (const change of changes) {
+		// Skip changes that overlap with import splits (already handled)
+		const overlapsWithSplit = importSplits.some(
+			(split) => change.start >= split.start && change.end <= split.end,
+		);
+		if (overlapsWithSplit) continue;
+
 		newContent =
 			newContent.slice(0, change.start) +
 			change.newText +
@@ -96,6 +241,121 @@ export function updateFileReferences(
 	}
 
 	return { newContent, updates };
+}
+
+interface ImportSplitChange {
+	start: number;
+	end: number;
+	newText: string;
+}
+
+/**
+ * Create an import split change that replaces a single import with two imports
+ */
+function createImportSplit(
+	sourceFile: ts.SourceFile,
+	ref: ModuleReference,
+	movedBindings: ImportBinding[],
+	remainingBindings: ImportBinding[],
+	newSpecifier: string,
+): ImportSplitChange | null {
+	// Find the import declaration node position
+	let nodePosition: { start: number; end: number } | null = null;
+
+	function visit(node: ts.Node) {
+		if (nodePosition) return;
+
+		if (
+			ts.isImportDeclaration(node) &&
+			ts.isStringLiteral(node.moduleSpecifier) &&
+			node.moduleSpecifier.text === ref.specifier
+		) {
+			const start = node.getStart(sourceFile);
+			const { line } = sourceFile.getLineAndCharacterOfPosition(start);
+			if (line + 1 === ref.line) {
+				nodePosition = { start, end: node.getEnd() };
+			}
+		}
+
+		ts.forEachChild(node, visit);
+	}
+
+	visit(sourceFile);
+
+	if (!nodePosition) return null;
+
+	// Generate the two new import statements
+	const movedBindingStr = movedBindings
+		.map((b) => (b.alias ? `${b.name} as ${b.alias}` : b.name))
+		.join(", ");
+	const remainingBindingStr = remainingBindings
+		.map((b) => (b.alias ? `${b.name} as ${b.alias}` : b.name))
+		.join(", ");
+
+	// Determine if type-only
+	const movedTypeOnly = movedBindings.every((b) => b.isType);
+	const remainingTypeOnly = remainingBindings.every((b) => b.isType);
+
+	const movedImport = movedTypeOnly
+		? `import type { ${movedBindingStr} } from "${newSpecifier}";`
+		: `import { ${movedBindingStr} } from "${newSpecifier}";`;
+
+	const remainingImport = remainingTypeOnly
+		? `import type { ${remainingBindingStr} } from "${ref.specifier}";`
+		: `import { ${remainingBindingStr} } from "${ref.specifier}";`;
+
+	// Get the full import statement range including any leading whitespace on the line
+	const { start, end } = nodePosition;
+
+	// Preserve indentation
+	const lineStart = sourceFile.getLineAndCharacterOfPosition(start);
+	const indent = sourceFile.text.slice(
+		start - lineStart.character,
+		start,
+	);
+
+	return {
+		start,
+		end,
+		newText: `${movedImport}\n${indent}${remainingImport}`,
+	};
+}
+
+/**
+ * Find the range of an export declaration to remove it entirely
+ */
+function findExportDeclarationRange(
+	sourceFile: ts.SourceFile,
+	ref: ModuleReference,
+): ImportSplitChange | null {
+	let result: ImportSplitChange | null = null;
+
+	function visit(node: ts.Node) {
+		if (result) return;
+
+		if (
+			ts.isExportDeclaration(node) &&
+			node.moduleSpecifier &&
+			ts.isStringLiteral(node.moduleSpecifier) &&
+			node.moduleSpecifier.text === ref.specifier
+		) {
+			const start = node.getStart(sourceFile);
+			const { line } = sourceFile.getLineAndCharacterOfPosition(start);
+			if (line + 1 === ref.line) {
+				let end = node.getEnd();
+				// Include trailing newline if present
+				if (sourceFile.text[end] === "\n") {
+					end++;
+				}
+				result = { start, end, newText: "" };
+			}
+		}
+
+		ts.forEachChild(node, visit);
+	}
+
+	visit(sourceFile);
+	return result;
 }
 
 /**
@@ -174,9 +434,11 @@ function findSpecifierLocation(
 /**
  * Update barrel file re-exports after a module has moved
  *
- * For cross-package moves with workspace info, this will update the barrel
- * to re-export from the destination package (e.g., `export { foo } from '@pkg/dest'`)
- * rather than using a relative path.
+ * For cross-package moves, this removes the re-export from the source barrel
+ * since the destination package's barrel will export the moved file.
+ * Consumers should import directly from the new package.
+ *
+ * For same-package moves, this updates the path in the re-export.
  */
 export function updateBarrelExports(
 	sourceFile: ts.SourceFile,
@@ -186,6 +448,7 @@ export function updateBarrelExports(
 	workspace?: WorkspaceInfo,
 ): { newContent: string; updates: UpdatedReference[] } {
 	const changes: TextChange[] = [];
+	const removals: { start: number; end: number }[] = [];
 	const updates: UpdatedReference[] = [];
 
 	// Check if this is a cross-package move
@@ -201,26 +464,53 @@ export function updateBarrelExports(
 		) {
 			const specifier = node.moduleSpecifier.text;
 
-			// For cross-package moves, prefer the package import
-			let newSpecifier: string;
-			if (crossPackage && workspace) {
-				const pkgImport = findCrossPackageImport(newPath, workspace);
-				newSpecifier = pkgImport ?? calculateNewSpecifier(
-					specifier,
-					sourceFile.fileName,
-					oldPath,
-					newPath,
-					project,
-				);
-			} else {
-				newSpecifier = calculateNewSpecifier(
-					specifier,
-					sourceFile.fileName,
-					oldPath,
-					newPath,
-					project,
-				);
+			// Resolve the specifier to see if it points to the moved file
+			const resolvedPath = resolveModulePath(
+				specifier,
+				sourceFile.fileName,
+				project,
+			);
+
+			// Only process if this export points to the file being moved
+			if (!resolvedPath || normalizePath(resolvedPath) !== normalizePath(oldPath)) {
+				ts.forEachChild(node, visit);
+				return;
 			}
+
+			// For cross-package moves, remove the re-export entirely
+			// The destination barrel will export it, consumers import from there
+			if (crossPackage) {
+				const { line } = sourceFile.getLineAndCharacterOfPosition(
+					node.getStart(sourceFile),
+				);
+
+				// Find the full line including newline to remove cleanly
+				const start = node.getStart(sourceFile);
+				let end = node.getEnd();
+				// Include trailing newline if present
+				if (sourceFile.text[end] === "\n") {
+					end++;
+				}
+
+				removals.push({ start, end });
+
+				updates.push({
+					file: sourceFile.fileName,
+					line: line + 1,
+					oldSpecifier: specifier,
+					newSpecifier: "(removed - exported from destination package)",
+				});
+				return;
+			}
+
+			// For same-package moves, update the path
+			const newSpecifier = calculateNewSpecifier(
+				specifier,
+				sourceFile.fileName,
+				oldPath,
+				newPath,
+				project,
+			);
 
 			if (newSpecifier !== specifier) {
 				const { line } = sourceFile.getLineAndCharacterOfPosition(
@@ -246,15 +536,26 @@ export function updateBarrelExports(
 
 	visit(sourceFile);
 
-	// Apply changes in reverse order
-	changes.sort((a, b) => b.start - a.start);
-
+	// Apply removals first (in reverse order)
+	removals.sort((a, b) => b.start - a.start);
 	let newContent = sourceFile.text;
-	for (const change of changes) {
+	for (const removal of removals) {
 		newContent =
-			newContent.slice(0, change.start) +
-			change.newText +
-			newContent.slice(change.end);
+			newContent.slice(0, removal.start) +
+			newContent.slice(removal.end);
+	}
+
+	// Then apply specifier changes (adjust positions if removals happened)
+	// Note: if we removed lines, the positions are now invalid
+	// So we only apply changes if there were no removals
+	if (removals.length === 0) {
+		changes.sort((a, b) => b.start - a.start);
+		for (const change of changes) {
+			newContent =
+				newContent.slice(0, change.start) +
+				change.newText +
+				newContent.slice(change.end);
+		}
 	}
 
 	return { newContent, updates };

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bun src/cli.ts find:*)",
+      "Bash(bun src/cli.ts:*)",
+      "Bash(bun run typecheck:*)",
+      "Bash(bun test:*)",
+      "Skill(update-memory)",
+      "Skill(commit)"
+    ]
+  }
+}

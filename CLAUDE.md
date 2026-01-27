@@ -226,6 +226,39 @@ For cross-package moves, `findCrossPackageImport()` resolves the optimal import 
 
 DON'T: Use relative paths like `../../../packages/foo/src/bar` for cross-package imports. Always prefer package imports.
 
+### Barrel Re-export Handling for Cross-Package Moves
+
+When moving files across packages, source barrel re-exports (`export * from "./moved-file"`) must be **removed entirely**, not changed to `export * from "@scope/package"`. Changing to a package import would pull in ALL exports from that package, causing duplicate export conflicts.
+
+The `updateBarrelExports()` function in `updater.ts` handles this:
+- Resolves each export declaration's specifier to check if it points to the moved file
+- For cross-package moves: removes the re-export line entirely
+- For same-package moves: updates the path normally
+
+Similarly, `updateFileReferences()` detects `export-all`, `export-from`, and `export-all-as` reference types and removes them for cross-package moves instead of updating the specifier.
+
+DON'T: Change `export * from "./moved-file"` to `export * from "@scope/package"` for cross-package moves. This causes TS2308 errors like "Module has already exported a member named X".
+
+### Import Splitting for Mixed Barrel Imports
+
+When files import multiple things from a barrel (`import { a, b } from "@/lib/utils"`) and only some bindings come from the moved file, split the import into two statements:
+
+```typescript
+// Before: import { formatDate, makeAuthorUrl } from "@/lib/utils"
+// After (if formatDate moved to @plugg/shared-utils):
+import { formatDate } from "@plugg/shared-utils";
+import { makeAuthorUrl } from "@/lib/utils";
+```
+
+The `updateFileReferences()` function:
+1. Scans the moved file's exports using `scanExports()`
+2. Compares each import's bindings against the moved exports
+3. If mixed bindings: creates `ImportSplitChange` to replace single import with two
+4. If all bindings are moved: updates specifier normally
+5. If no bindings are moved: skips the reference
+
+DON'T: Update entire import specifiers to new package when only some bindings come from the moved file. This causes TS2305 errors like "Module has no exported member X".
+
 ### Move Command File Handling
 
 The move command must handle all code paths for file copying:
