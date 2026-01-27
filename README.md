@@ -1,6 +1,24 @@
 # module-master
 
-Precise TypeScript/JavaScript module refactoring CLI. Move files, rename exports, and update all import references across your codebase.
+**The surgical refactoring tool for TypeScript monorepos.** Move files between packages, rename exports, and watch every import update automatically — with zero breaking changes.
+
+Built on the TypeScript Compiler API for AST-level precision. Understands your barrel files, respects your path aliases, and handles the gnarly edge cases that break other tools.
+
+## Why module-master?
+
+Refactoring in monorepos is painful. Move a utility from your app to a shared package and you'll spend the next hour:
+- Hunting down every import that needs updating
+- Figuring out which barrel files need new exports
+- Rebuilding packages in the right order
+- Fixing the type errors you inevitably missed
+
+**module-master does all of this in one command:**
+
+```bash
+bun src/cli.ts move apps/web/src/utils/formatDate.ts packages/shared/src/formatDate.ts
+```
+
+That's it. Every import updated. Barrel files handled. Packages rebuilt. Type-checked and verified.
 
 ## Install
 
@@ -8,58 +26,51 @@ Precise TypeScript/JavaScript module refactoring CLI. Move files, rename exports
 bun install
 ```
 
-## Usage
+## Quick Start
 
 ```bash
-# Analyze a module's imports, exports, and references
-bun src/cli.ts analyze src/utils/helpers.ts
-
 # Move a file and update all imports
 bun src/cli.ts move src/old/file.ts src/new/file.ts
 
-# Rename an export and update all imports
-bun src/cli.ts rename src/components/Button.tsx Button PrimaryButton
-
-# Discover tsconfig structure in a project
-bun src/cli.ts discover .
-
-# Discover workspace packages in a monorepo
-bun src/cli.ts workspace /path/to/monorepo
-
-# Find files and exports by name
-bun src/cli.ts find Button -p /path/to/project
-
-# Normalize import paths using aliases
-bun src/cli.ts alias src/components --prefer=alias
-
 # Preview changes without modifying files
 bun src/cli.ts move src/old.ts src/new.ts --dry-run
+
+# Move between packages in a monorepo
+bun src/cli.ts move apps/web/src/utils/helper.ts packages/shared/src/helper.ts
 ```
 
-### Working with External Projects
+## Cross-Package Refactoring
 
-Use `-p` to specify a project directory when analyzing files outside the current project:
+The killer feature. Move files between packages in your monorepo and module-master handles everything:
 
 ```bash
-bun src/cli.ts analyze /path/to/file.ts -p /path/to/project
-bun src/cli.ts discover /path/to/monorepo --verbose
+bun src/cli.ts move apps/main-web/lib/utils/date-formatter.ts packages/shared-utils/src/date-formatter.ts --verbose
 ```
+
+### What happens automatically:
+
+1. **Workspace discovery** — Detects pnpm, yarn, or npm workspaces
+2. **Smart import updates** — Changes imports to use package names (`@scope/shared`) instead of brittle relative paths
+3. **Barrel file management** — Adds export to destination package's index.ts, removes from source
+4. **Import splitting** — When a file imports multiple things from a barrel and only some are moving, splits the import correctly:
+
+```typescript
+// Before: importing from a barrel that re-exports the moved file
+import { formatDate, makeAuthorUrl } from "@/lib/utils";
+
+// After: automatically split into two imports
+import { formatDate } from "@plugg/shared-utils";
+import { makeAuthorUrl } from "@/lib/utils";
+```
+
+5. **Package rebuilds** — Runs build scripts on affected packages so dist/ stays in sync
+6. **Type verification** — Runs `tsc --noEmit` before and after to catch any issues
+
+### No more duplicate export errors
+
+Other tools naively change `export * from "./moved-file"` to `export * from "@scope/package"`, which pulls in everything and causes conflicts. module-master removes the re-export entirely — the destination package exports it now.
 
 ## Commands
-
-### `analyze <file>`
-
-Analyze a module's imports, exports, and references throughout the codebase.
-
-```bash
-bun src/cli.ts analyze src/components/Button.tsx --verbose
-```
-
-Output includes:
-- All exports from the file
-- All imports used by the file
-- All files that reference this module
-- Barrel files that re-export this module
 
 ### `move <source> <target>`
 
@@ -69,28 +80,13 @@ Move a file and update all import references across the codebase.
 bun src/cli.ts move src/utils/old.ts src/helpers/new.ts --dry-run
 ```
 
-Features:
-- Updates all import statements referencing the moved file
-- Preserves path aliases when possible
-- Updates barrel file re-exports
-- Handles dynamic imports and require() calls
-- Updates internal imports within the moved file
-- Type checking verification enabled by default (use `--no-verify` to skip)
-
-#### Cross-Package Moves (Monorepos)
-
-Move files between packages in a monorepo with automatic handling:
-
-```bash
-bun src/cli.ts move apps/web/src/utils/helper.ts packages/shared/src/helper.ts --verbose
-```
-
-Cross-package features:
-- Automatically discovers workspace packages (pnpm, yarn, npm workspaces)
-- Updates imports to use package name (e.g., `@scope/shared`) instead of relative paths
-- Adds export to destination package's barrel file (index.ts)
-- Auto-rebuilds affected packages so dist/ contains the moved file
-- Runs type checking after builds complete
+**Handles:**
+- All import statements referencing the moved file
+- Path aliases from tsconfig.json
+- Barrel file re-exports (`export * from`)
+- Dynamic imports and `require()` calls
+- Internal imports within the moved file
+- Jest/Vitest mock calls
 
 ### `rename <file> <oldName> <newName>`
 
@@ -100,52 +96,28 @@ Rename an exported symbol and update all imports.
 bun src/cli.ts rename src/components/Button.tsx Button PrimaryButton --dry-run
 ```
 
-Features:
 - Renames the export in the source file
 - Updates all named imports across the codebase
 - Updates barrel file re-exports
 - Preserves import aliases (`import { Old as X }` → `import { New as X }`)
 
-### `discover <directory>`
+### `analyze <file>`
 
-Discover all tsconfig.json files in a project and understand its structure.
-
-```bash
-bun src/cli.ts discover /path/to/monorepo --verbose
-```
-
-Output includes:
-- All tsconfig.json files found
-- Include/exclude patterns for each config
-- Project references (for solution-style configs)
-- File ownership map (which config controls each file)
-- Path aliases defined in each config
-
-### `workspace <directory>`
-
-Discover monorepo workspace packages and their structure.
+Understand a module's place in your codebase.
 
 ```bash
-bun src/cli.ts workspace /path/to/monorepo
-bun src/cli.ts workspace /path/to/monorepo --json
-bun src/cli.ts workspace /path/to/monorepo --verbose
+bun src/cli.ts analyze src/components/Button.tsx --verbose
 ```
 
-Supports:
-- pnpm workspaces (pnpm-workspace.yaml)
-- Yarn/npm workspaces (package.json workspaces field)
-
-Output includes:
-- All packages with their paths
-- Package entrypoints (main, module, types)
-- Export maps from package.json
-- Barrel files (index.ts with exports)
-- Build scripts and other npm scripts
-- Internal dependencies between packages
+Shows:
+- All exports from the file
+- All imports used by the file
+- All files that reference this module
+- Barrel files that re-export this module
 
 ### `find <query>`
 
-Search for files and exports by name across the project.
+Search for files and exports by name.
 
 ```bash
 bun src/cli.ts find User -p /path/to/project
@@ -153,12 +125,9 @@ bun src/cli.ts find Button --type export
 bun src/cli.ts find helpers --type file
 ```
 
-Features:
 - Case-insensitive partial matching
-- Searches both filenames and export names
-- Filter by type: `--type file|export|all` (default: all)
-- Discovery-based: uses tsconfig ownership to find all files
-- Smart sorting: exact matches appear first
+- Searches filenames and export names simultaneously
+- Smart sorting: exact matches first
 
 ### `alias <target>`
 
@@ -170,27 +139,39 @@ bun src/cli.ts alias src --prefer=relative
 bun src/cli.ts alias . --prefer=shortest
 ```
 
-Features:
-- Three strategies: `alias` (use tsconfig paths), `relative` (use ./... paths), `shortest` (pick shorter option)
-- Batch processing: works on single files or entire directories
-- Automatic external package filtering (skips node_modules)
-- Type checking verification enabled by default
-- Use `--no-verify` to skip verification for faster execution
+### `discover <directory>`
+
+Map all tsconfig.json files in a project.
+
+```bash
+bun src/cli.ts discover /path/to/monorepo --verbose
+```
+
+Shows tsconfig inheritance, project references, file ownership, and path aliases.
+
+### `workspace <directory>`
+
+Discover monorepo workspace packages and their structure.
+
+```bash
+bun src/cli.ts workspace /path/to/monorepo --json
+```
+
+Supports pnpm, yarn, and npm workspaces. Shows packages, entrypoints, barrel files, and internal dependencies.
 
 ## Features
 
-- **Precise AST-based refactoring** using TypeScript Compiler API
-- **Type checking verification** runs `tsc --noEmit` before and after changes to catch breaking changes
-- **All import types supported**: named, default, namespace, dynamic, require, require.resolve
-- **Test mock support**: jest.mock(), vi.mock(), vitest.mock()
-- **Path alias preservation** from tsconfig.json
-- **Barrel file updates** for re-exports
-- **Smart tsconfig discovery** for monorepos and complex project structures
-- **Solution-style config support** with project references
-- **Dry-run mode** to preview changes before applying
-- **Monorepo workspace support** for pnpm, yarn, and npm workspaces
-- **Cross-package refactoring** moves files between packages with automatic import updates
-- **Auto-rebuild packages** after cross-package moves to update dist/ files
+- **AST-level precision** — Uses TypeScript Compiler API, not regex
+- **Type-safe refactoring** — Runs `tsc --noEmit` before and after changes
+- **Full import coverage** — Named, default, namespace, dynamic, require, require.resolve
+- **Test mock support** — jest.mock(), vi.mock(), vitest.mock()
+- **Path alias preservation** — Respects your tsconfig paths
+- **Barrel file intelligence** — Knows which index.ts files are actual barrels (have exports)
+- **Monorepo-native** — First-class support for pnpm, yarn, and npm workspaces
+- **Cross-package moves** — The hard problem, solved
+- **Import splitting** — Handles mixed imports from barrels correctly
+- **Auto-rebuild** — Keeps dist/ in sync after cross-package moves
+- **Dry-run mode** — Preview everything before committing
 
 ## Options
 
@@ -209,11 +190,14 @@ Features:
 ## How It Works
 
 1. **Load project** — Parse tsconfig.json, extract compiler options and path aliases
-2. **Discover configs** — Find all tsconfig files, build file ownership map
-3. **Build graph** — Scan all project files, create import/importedBy maps
-4. **Find references** — Query graph for files importing target module
-5. **Calculate changes** — Determine new import specifiers based on operation
+2. **Discover workspace** — Find all packages, barrel files, and tsconfigs
+3. **Build dependency graph** — Scan all files, create import/importedBy maps with barrel tracking
+4. **Find references** — Query graph for files importing target module (direct and through barrels)
+5. **Calculate changes** — Determine new specifiers, split imports if needed, identify removals
 6. **Apply updates** — Modify source text at precise AST node positions
+7. **Update barrels** — Add exports to destination, remove from source
+8. **Rebuild packages** — Run build scripts on affected packages
+9. **Verify types** — Run tsc to ensure no breaking changes
 
 ## Development
 
@@ -223,3 +207,7 @@ bun run lint         # Lint and format with Biome
 bun run typecheck    # Type check with tsc
 bun run build        # Compile to standalone binary
 ```
+
+## License
+
+MIT
