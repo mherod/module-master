@@ -51,18 +51,20 @@ The codebase uses the TypeScript Compiler API (`typescript` package) for parsing
 - **project.ts** - Loads tsconfig.json, extracts path aliases, creates TS programs
 - **tsconfig-discovery.ts** - Smart discovery of all tsconfig files, handles monorepos and project references
 - **scanner.ts** - AST traversal to extract all imports/exports from a source file
-- **resolver.ts** - Module path resolution, alias matching, relative path calculation
+- **resolver.ts** - Module path resolution, alias matching, relative path calculation, cross-package import resolution
 - **graph.ts** - Builds dependency graph (imports/importedBy maps) for the entire project
-- **updater.ts** - Applies text changes to update import specifiers in files
+- **updater.ts** - Applies text changes to update import specifiers in files, adds exports to destination barrels
 - **verify.ts** - Type checking verification using `tsc --noEmit` before/after changes
+- **workspace.ts** - Discovers pnpm/yarn/npm workspace packages, barrel files, and tsconfig paths
 
 ### Commands (`src/commands/`)
 
 - **find.ts** - Search for files and exports by name across the project
 - **analyze.ts** - Deep analysis of a module's imports, exports, and references
 - **discover.ts** - Map all tsconfig files and their ownership
+- **workspace.ts** - Discover monorepo workspace packages and their structure
 - **alias.ts** - Normalize import paths using aliases, relative paths, or shortest option
-- **move.ts** - Move files and update all references
+- **move.ts** - Move files and update all references (supports cross-package moves)
 - **rename.ts** - Rename exports and update all imports
 
 ### Data Flow
@@ -148,3 +150,84 @@ The `verify.ts` module provides safety for refactoring operations:
 - **Enabled by default**: Use `--no-verify` to skip for faster execution (risky)
 
 Verification spawns `tsc` as a subprocess using `spawnSync` and parses error output. Errors are matched as lines containing `: error TS`. The tool tracks which errors existed before, which are new, and which were fixed.
+
+## Workspace Discovery
+
+The `workspace` command (`src/commands/workspace.ts`) discovers monorepo structure:
+
+```bash
+bun src/cli.ts workspace <directory>          # Discover workspace packages
+bun src/cli.ts workspace <directory> --json   # JSON output for tooling
+bun src/cli.ts workspace <directory> --verbose # Show detailed export maps
+```
+
+The `discoverWorkspace()` function in `src/core/workspace.ts` finds:
+- **pnpm-workspace.yaml** - Parses packages array for workspace patterns
+- **package.json workspaces** - Supports yarn/npm workspaces field (array or {packages: []})
+- **Per-package metadata**: name, main/module/types entrypoints, exports map, dependencies
+- **Barrel files**: index.ts/index.js files that contain at least one export statement
+- **tsconfig paths**: tsconfig.json for each package
+
+### Barrel File Detection
+
+Barrel files must meet two criteria:
+1. Named `index.ts`, `index.tsx`, or `index.js`
+2. Contain at least one export statement (checked via regex: `/\bexport\s+(\*|{|default|const|let|var|function|class|type|interface|enum)\b/`)
+
+DON'T: Assume any index.ts is a barrel file. Files without exports are not barrels.
+
+### Directory Existence Checks
+
+When checking if a directory exists (e.g., detecting `src/` directories), `Bun.file().exists()` returns false for directories. Use `node:fs/promises` `stat()` as fallback:
+
+```typescript
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    const file = Bun.file(filePath);
+    if (await file.exists()) return true;
+    const { stat } = await import("node:fs/promises");
+    await stat(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+```
+
+## Cross-Package Refactoring
+
+The move command supports cross-package refactoring in monorepos:
+
+```bash
+bun src/cli.ts move apps/web/src/utils/foo.ts packages/shared/src/foo.ts --dry-run
+```
+
+### How It Works
+
+1. **Workspace discovery**: Automatically discovers workspace packages at move start
+2. **Package detection**: Identifies source and destination packages using `findPackageForPath()`
+3. **Import updates**: Uses package name (e.g., `@scope/package`) instead of relative paths for cross-package moves
+4. **Destination barrel update**: Adds `export * from "./foo"` to the destination package's index.ts
+
+### Barrel Export Insertion
+
+When moving to a new package, `addExportToDestinationBarrel()`:
+- Calculates relative path from barrel to moved file
+- Generates `export * from "./relative-path"` statement
+- Inserts after the last existing export (or at end if no exports)
+- Skips if export already exists
+
+### Import Path Resolution
+
+For cross-package moves, `findCrossPackageImport()` resolves the optimal import path:
+- If file is in package's `src/` directory and being added to barrel → use package name only (e.g., `@scope/pkg`)
+- If package.json exports field matches the subpath → use that export path
+- Fallback: package name + relative subpath
+
+DON'T: Use relative paths like `../../../packages/foo/src/bar` for cross-package imports. Always prefer package imports.
+
+### DependencyGraph Barrel Tracking
+
+The `DependencyGraph` interface includes `barrelReExports: Map<string, string[]>` to track which files each barrel actually re-exports via `export ... from` statements. This distinguishes actual re-exports from regular imports within barrel files.
+
+DON'T: Use `graph.imports` to find barrel re-exports. Files that a barrel imports for internal use are not re-exports. Use `graph.barrelReExports` instead.
