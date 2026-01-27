@@ -24,8 +24,10 @@ import {
 } from "../core/verify.ts";
 import {
 	discoverWorkspace,
+	findBuildScript,
 	type WorkspaceInfo,
 } from "../core/workspace.ts";
+import { findPackageForPath, isCrossPackageMove } from "../core/resolver.ts";
 import type {
 	MoveError,
 	MoveResult,
@@ -90,6 +92,14 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 		workspace ?? undefined,
 	);
 
+	// For cross-package moves, run build scripts to update dist/
+	if (!dryRun && result.success && workspace) {
+		const isCrossPackage = isCrossPackageMove(absoluteSource, absoluteTarget, workspace);
+		if (isCrossPackage) {
+			await runPackageBuilds(absoluteSource, absoluteTarget, workspace, verbose);
+		}
+	}
+
 	if (!dryRun && verify && result.success) {
 		// Run type checking to verify the move didn't break anything
 		const errors = await runTypeCheck(project);
@@ -137,6 +147,77 @@ async function runTypeCheck(project: ProjectConfig): Promise<string[]> {
 		.split("\n")
 		.filter((line) => line.includes(": error TS"))
 		.map((line) => line.trim());
+}
+
+async function runPackageBuilds(
+	sourcePath: string,
+	targetPath: string,
+	workspace: WorkspaceInfo,
+	verbose: boolean,
+): Promise<void> {
+	const { spawnSync } = await import("node:child_process");
+
+	// Find source and destination packages
+	const sourcePackage = findPackageForPath(sourcePath, workspace);
+	const targetPackage = findPackageForPath(targetPath, workspace);
+
+	const packagesToRebuild: Array<{ name: string; path: string; script: string }> = [];
+
+	// Destination package needs to be built first (new file needs to be compiled)
+	if (targetPackage) {
+		const pkg = workspace.packages.find((p) => p.name === targetPackage.packageName);
+		if (pkg) {
+			const buildScript = findBuildScript(pkg);
+			if (buildScript) {
+				packagesToRebuild.push({
+					name: pkg.name,
+					path: pkg.path,
+					script: buildScript,
+				});
+			}
+		}
+	}
+
+	// Source package may need rebuild if barrel files changed
+	if (sourcePackage && sourcePackage.packageName !== targetPackage?.packageName) {
+		const pkg = workspace.packages.find((p) => p.name === sourcePackage.packageName);
+		if (pkg) {
+			const buildScript = findBuildScript(pkg);
+			if (buildScript) {
+				packagesToRebuild.push({
+					name: pkg.name,
+					path: pkg.path,
+					script: buildScript,
+				});
+			}
+		}
+	}
+
+	if (packagesToRebuild.length === 0) {
+		return;
+	}
+
+	console.log("\n📦 Rebuilding affected packages...");
+
+	for (const pkg of packagesToRebuild) {
+		console.log(`   Building ${pkg.name}...`);
+
+		const result = spawnSync("pnpm", ["run", pkg.script], {
+			cwd: pkg.path,
+			encoding: "utf-8",
+			shell: false,
+			stdio: verbose ? "inherit" : "pipe",
+		});
+
+		if (result.status !== 0) {
+			console.error(`   ❌ Build failed for ${pkg.name}`);
+			if (!verbose && result.stderr) {
+				console.error(`   ${result.stderr.slice(0, 200)}`);
+			}
+		} else {
+			console.log(`   ✅ ${pkg.name} built successfully`);
+		}
+	}
 }
 
 export async function moveModule(

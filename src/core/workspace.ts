@@ -24,6 +24,8 @@ export interface WorkspacePackage {
 	barrelFiles?: string[];
 	/** Path to tsconfig.json for this package */
 	tsconfigPath?: string;
+	/** npm scripts from package.json */
+	scripts?: Record<string, string>;
 	/** Dependencies */
 	dependencies?: Record<string, string>;
 	/** Peer dependencies */
@@ -257,9 +259,27 @@ async function parsePackage(
 		srcDir,
 		barrelFiles: barrelFiles.length > 0 ? barrelFiles : undefined,
 		tsconfigPath,
+		scripts: pkg.scripts as Record<string, string> | undefined,
 		dependencies: pkg.dependencies as Record<string, string> | undefined,
 		peerDependencies: pkg.peerDependencies as Record<string, string> | undefined,
 	};
+}
+
+/**
+ * Find the build script for a package (checks common build script names)
+ */
+export function findBuildScript(pkg: WorkspacePackage): string | null {
+	if (!pkg.scripts) return null;
+
+	// Check for common build script names in order of preference
+	const buildScriptNames = ["build", "compile", "bundle", "dist"];
+	for (const name of buildScriptNames) {
+		if (pkg.scripts[name]) {
+			return name;
+		}
+	}
+
+	return null;
 }
 
 /**
