@@ -97,17 +97,19 @@ Use cases:
 
 ### `alias` - Normalize relative imports vs. path aliases
 
-Rewrite import/export specifiers to either prefer `tsconfig` aliases or strict relative paths, ensuring the same module target and optionally updating nested re-exports.
+Rewrite import/export specifiers to either prefer `tsconfig` aliases, strict relative paths, or the shortest valid path.
 
 ```bash
 module-master alias src --prefer=alias
 module-master alias src --prefer=relative
+module-master alias src --prefer=shortest
 module-master alias src/components/Button.tsx --prefer=alias --dry-run
 ```
 
 Use cases:
 - Standardizing import flavor (alias vs. relative) after upheavals like folder moves
 - Eliminating brittle `../../../` chains by routing through defined aliases
+- Optimizing imports for brevity by selecting the shortest valid path
 - Making it explicit when a file must only touch public API layers
 
 ---
