@@ -1,3 +1,4 @@
+import path from "node:path";
 import ts from "typescript";
 import type { ProjectConfig } from "../types.ts";
 
@@ -11,6 +12,25 @@ export function findTsConfig(startDir: string): string | null {
 		"tsconfig.json",
 	);
 	return configPath ?? null;
+}
+
+/**
+ * Resolve the tsconfig path from a project argument or a starting directory
+ */
+export function resolveTsConfig(
+	projectArg: string | undefined,
+	startDir: string,
+): string | null {
+	if (projectArg) {
+		const resolved = path.resolve(projectArg);
+		// Check if it's a file (ends in .json)
+		if (resolved.endsWith(".json")) {
+			return resolved;
+		}
+		// Otherwise treat as directory
+		return findTsConfig(resolved);
+	}
+	return findTsConfig(startDir);
 }
 
 /**

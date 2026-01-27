@@ -4,7 +4,11 @@ import {
 	findAllReferences,
 	findBarrelReExports,
 } from "../core/graph.ts";
-import { createProgram, findTsConfig, loadProject } from "../core/project.ts";
+import {
+	createProgram,
+	loadProject,
+	resolveTsConfig,
+} from "../core/project.ts";
 import {
 	scanBarrelExports,
 	scanExports,
@@ -15,15 +19,19 @@ import type { AnalysisResult, ProjectConfig } from "../types.ts";
 export interface AnalyzeOptions {
 	file: string;
 	verbose?: boolean;
+	project?: string;
 }
 
 export async function analyzeCommand(options: AnalyzeOptions): Promise<void> {
-	const { file, verbose } = options;
+	const { file, verbose, project: projectArg } = options;
 
 	const absolutePath = path.resolve(file);
 
 	// Find and load project config
-	const tsconfigPath = findTsConfig(path.dirname(absolutePath));
+	const tsconfigPath = resolveTsConfig(
+		projectArg,
+		path.dirname(absolutePath),
+	);
 	if (!tsconfigPath) {
 		console.error("Could not find tsconfig.json");
 		process.exit(1);

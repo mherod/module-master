@@ -13,6 +13,7 @@ const { values, positionals } = parseArgs({
 		version: { type: "boolean", short: "v" },
 		verbose: { type: "boolean" },
 		"dry-run": { type: "boolean", short: "n" },
+		project: { type: "string", short: "p" },
 	},
 	allowPositionals: true,
 });
@@ -35,6 +36,7 @@ Options:
   -h, --help      Show this help message
   -v, --version   Show version
   -n, --dry-run   Preview changes without modifying files
+  -p, --project   Path to project directory or tsconfig.json
   --verbose       Enable verbose output
 
 Examples:
@@ -163,6 +165,7 @@ async function main() {
 				target,
 				dryRun: values["dry-run"],
 				verbose: values.verbose,
+				project: values.project,
 			});
 			break;
 		}
@@ -182,6 +185,7 @@ async function main() {
 				newName,
 				dryRun: values["dry-run"],
 				verbose: values.verbose,
+				project: values.project,
 			});
 			break;
 		}
@@ -196,6 +200,7 @@ async function main() {
 			await analyzeCommand({
 				file,
 				verbose: values.verbose,
+				project: values.project,
 			});
 			break;
 		}

@@ -5,7 +5,11 @@ import {
 	findAllReferences,
 	findBarrelReExports,
 } from "../core/graph.ts";
-import { createProgram, findTsConfig, loadProject } from "../core/project.ts";
+import {
+	createProgram,
+	loadProject,
+	resolveTsConfig,
+} from "../core/project.ts";
 import { calculateNewSpecifier, normalizePath } from "../core/resolver.ts";
 import { scanModuleReferences } from "../core/scanner.ts";
 import { updateBarrelExports, updateFileReferences } from "../core/updater.ts";
@@ -21,16 +25,26 @@ export interface MoveOptions {
 	target: string;
 	dryRun?: boolean;
 	verbose?: boolean;
+	project?: string;
 }
 
 export async function moveCommand(options: MoveOptions): Promise<void> {
-	const { source, target, dryRun = false, verbose = false } = options;
+	const {
+		source,
+		target,
+		dryRun = false,
+		verbose = false,
+		project: projectArg,
+	} = options;
 
 	const absoluteSource = path.resolve(source);
 	const absoluteTarget = path.resolve(target);
 
 	// Find and load project config
-	const tsconfigPath = findTsConfig(path.dirname(absoluteSource));
+	const tsconfigPath = resolveTsConfig(
+		projectArg,
+		path.dirname(absoluteSource),
+	);
 	if (!tsconfigPath) {
 		console.error("Could not find tsconfig.json");
 		process.exit(1);

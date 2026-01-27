@@ -1,7 +1,11 @@
 import path from "node:path";
 import ts from "typescript";
 import { buildDependencyGraph, findAllReferences } from "../core/graph.ts";
-import { createProgram, findTsConfig, loadProject } from "../core/project.ts";
+import {
+	createProgram,
+	loadProject,
+	resolveTsConfig,
+} from "../core/project.ts";
 import { normalizePath } from "../core/resolver.ts";
 import type {
 	ModuleReference,
@@ -15,6 +19,7 @@ export interface RenameOptions {
 	newName: string;
 	dryRun?: boolean;
 	verbose?: boolean;
+	project?: string;
 }
 
 export interface RenameResult {
@@ -25,11 +30,21 @@ export interface RenameResult {
 }
 
 export async function renameCommand(options: RenameOptions): Promise<void> {
-	const { file, oldName, newName, dryRun = false, verbose = false } = options;
+	const {
+		file,
+		oldName,
+		newName,
+		dryRun = false,
+		verbose = false,
+		project: projectArg,
+	} = options;
 
 	const absolutePath = path.resolve(file);
 
-	const tsconfigPath = findTsConfig(path.dirname(absolutePath));
+	const tsconfigPath = resolveTsConfig(
+		projectArg,
+		path.dirname(absolutePath),
+	);
 	if (!tsconfigPath) {
 		console.error("Could not find tsconfig.json");
 		process.exit(1);
