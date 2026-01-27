@@ -23,6 +23,9 @@ bun src/cli.ts rename src/components/Button.tsx Button PrimaryButton
 # Discover tsconfig structure in a project
 bun src/cli.ts discover .
 
+# Discover workspace packages in a monorepo
+bun src/cli.ts workspace /path/to/monorepo
+
 # Find files and exports by name
 bun src/cli.ts find Button -p /path/to/project
 
@@ -74,6 +77,21 @@ Features:
 - Updates internal imports within the moved file
 - Type checking verification enabled by default (use `--no-verify` to skip)
 
+#### Cross-Package Moves (Monorepos)
+
+Move files between packages in a monorepo with automatic handling:
+
+```bash
+bun src/cli.ts move apps/web/src/utils/helper.ts packages/shared/src/helper.ts --verbose
+```
+
+Cross-package features:
+- Automatically discovers workspace packages (pnpm, yarn, npm workspaces)
+- Updates imports to use package name (e.g., `@scope/shared`) instead of relative paths
+- Adds export to destination package's barrel file (index.ts)
+- Auto-rebuilds affected packages so dist/ contains the moved file
+- Runs type checking after builds complete
+
 ### `rename <file> <oldName> <newName>`
 
 Rename an exported symbol and update all imports.
@@ -102,6 +120,28 @@ Output includes:
 - Project references (for solution-style configs)
 - File ownership map (which config controls each file)
 - Path aliases defined in each config
+
+### `workspace <directory>`
+
+Discover monorepo workspace packages and their structure.
+
+```bash
+bun src/cli.ts workspace /path/to/monorepo
+bun src/cli.ts workspace /path/to/monorepo --json
+bun src/cli.ts workspace /path/to/monorepo --verbose
+```
+
+Supports:
+- pnpm workspaces (pnpm-workspace.yaml)
+- Yarn/npm workspaces (package.json workspaces field)
+
+Output includes:
+- All packages with their paths
+- Package entrypoints (main, module, types)
+- Export maps from package.json
+- Barrel files (index.ts with exports)
+- Build scripts and other npm scripts
+- Internal dependencies between packages
 
 ### `find <query>`
 
@@ -148,6 +188,9 @@ Features:
 - **Smart tsconfig discovery** for monorepos and complex project structures
 - **Solution-style config support** with project references
 - **Dry-run mode** to preview changes before applying
+- **Monorepo workspace support** for pnpm, yarn, and npm workspaces
+- **Cross-package refactoring** moves files between packages with automatic import updates
+- **Auto-rebuild packages** after cross-package moves to update dist/ files
 
 ## Options
 
@@ -159,8 +202,9 @@ Features:
 | `--project` | `-p` | Path to project directory or tsconfig.json |
 | `--verbose` | | Enable detailed output |
 | `--no-verify` | | Skip type checking verification (not recommended) |
-| `--type` | | Filter find results by type: `file`, `export`, or `all` |
+| `--type` | `-t` | Filter find results by type: `file`, `export`, or `all` |
 | `--prefer` | | Alias strategy: `alias`, `relative`, or `shortest` |
+| `--json` | | Output in JSON format (workspace command) |
 
 ## How It Works
 
