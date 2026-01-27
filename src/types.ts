@@ -65,6 +65,8 @@ export interface ImportBinding {
 export interface BarrelExport {
 	/** The barrel file (index.ts) path */
 	barrelPath: string;
+	/** The resolved absolute path of the module being re-exported */
+	resolvedPath: string;
 	/** What this barrel re-exports from the target */
 	exports: BarrelExportEntry[];
 }

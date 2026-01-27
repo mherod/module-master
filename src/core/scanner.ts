@@ -490,9 +490,10 @@ export function scanBarrelExports(
 
 	ts.forEachChild(sourceFile, visit);
 
-	for (const [, entries] of entriesBySource) {
+	for (const [resolvedPath, entries] of entriesBySource) {
 		barrels.push({
 			barrelPath: sourceFile.fileName,
+			resolvedPath,
 			exports: entries,
 		});
 	}

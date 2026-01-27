@@ -8,6 +8,7 @@ import { discoverCommand } from "./commands/discover.ts";
 import { findCommand } from "./commands/find.ts";
 import { moveCommand } from "./commands/move.ts";
 import { renameCommand } from "./commands/rename.ts";
+import { workspaceCommand } from "./commands/workspace.ts";
 
 const { values, positionals } = parseArgs({
 	args: Bun.argv.slice(2),
@@ -20,6 +21,7 @@ const { values, positionals } = parseArgs({
 		type: { type: "string", short: "t" },
 		prefer: { type: "string" },
 		"no-verify": { type: "boolean" },
+		json: { type: "boolean" },
 	},
 	allowPositionals: true,
 });
@@ -37,6 +39,7 @@ Commands:
   find <query> -p <project>           Find files and exports by name
   analyze <file>                      Analyze a module's imports, exports, and references
   discover <directory>                Discover tsconfig files and project structure
+  workspace <directory>               Discover pnpm/yarn/npm workspace packages
   alias <target> --prefer=<strategy>  Normalize imports to use aliases, relative paths, or shortest
   move <source> <target>              Move a module and update all references
   rename <file> <oldName> <newName>   Rename an export and update all imports
@@ -310,6 +313,21 @@ async function main() {
 			await discoverCommand({
 				directory,
 				verbose: values.verbose,
+			});
+			break;
+		}
+
+		case "workspace": {
+			const [directory] = args;
+			if (!directory) {
+				console.error("Error: workspace requires a <directory> argument");
+				console.error(`Run '${name} workspace --help' for usage`);
+				process.exit(1);
+			}
+			await workspaceCommand({
+				directory,
+				verbose: values.verbose,
+				json: values.json,
 			});
 			break;
 		}

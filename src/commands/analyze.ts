@@ -66,6 +66,7 @@ export function analyze(
 			? barrelExports
 			: barrelReExportFiles.map((barrelPath) => ({
 					barrelPath,
+					resolvedPath: filePath,
 					exports: [],
 				}));
 

@@ -10,6 +10,8 @@ export interface DependencyGraph {
 	importedBy: Map<string, ModuleReference[]>;
 	/** Set of barrel files (index.ts that re-export) */
 	barrelFiles: Set<string>;
+	/** Map from barrel file to the files it actually re-exports (export ... from) */
+	barrelReExports: Map<string, string[]>;
 }
 
 /**
@@ -22,6 +24,7 @@ export function buildDependencyGraph(project: ProjectConfig): DependencyGraph {
 	const imports = new Map<string, ModuleReference[]>();
 	const importedBy = new Map<string, ModuleReference[]>();
 	const barrelFiles = new Set<string>();
+	const barrelReExports = new Map<string, string[]>();
 
 	for (const file of files) {
 		const sourceFile = program.getSourceFile(file);
@@ -31,10 +34,13 @@ export function buildDependencyGraph(project: ProjectConfig): DependencyGraph {
 		const refs = scanModuleReferences(sourceFile, project);
 		imports.set(normalizedFile, refs);
 
-		// Check if this is a barrel file
+		// Check if this is a barrel file and track what it re-exports
 		const barrels = scanBarrelExports(sourceFile, project);
 		if (barrels.length > 0) {
 			barrelFiles.add(normalizedFile);
+			// Store the actual files this barrel re-exports
+			const reExportedFiles = barrels.map((b) => normalizePath(b.resolvedPath));
+			barrelReExports.set(normalizedFile, reExportedFiles);
 		}
 
 		// Populate reverse mapping
@@ -46,7 +52,7 @@ export function buildDependencyGraph(project: ProjectConfig): DependencyGraph {
 		}
 	}
 
-	return { imports, importedBy, barrelFiles };
+	return { imports, importedBy, barrelFiles, barrelReExports };
 }
 
 /**
@@ -60,14 +66,14 @@ export function findAllReferences(
 	const normalizedPath = normalizePath(filePath);
 	const directRefs = graph.importedBy.get(normalizedPath) ?? [];
 
-	// Also find references through barrel files
+	// Also find references through barrel files that actually re-export this file
 	const barrelRefs: ModuleReference[] = [];
 
 	for (const barrelPath of graph.barrelFiles) {
-		const barrelImports = graph.imports.get(barrelPath) ?? [];
-		const reExportsTarget = barrelImports.some(
-			(ref) => normalizePath(ref.resolvedPath) === normalizedPath,
-		);
+		// Use barrelReExports to check if this barrel actually re-exports the target
+		// (not just imports it for internal use)
+		const reExportedFiles = graph.barrelReExports.get(barrelPath) ?? [];
+		const reExportsTarget = reExportedFiles.includes(normalizedPath);
 
 		if (reExportsTarget) {
 			// This barrel re-exports our target file
@@ -117,12 +123,9 @@ export function findBarrelReExports(
 	const barrels: string[] = [];
 
 	for (const barrelPath of graph.barrelFiles) {
-		const barrelImports = graph.imports.get(barrelPath) ?? [];
-		const reExportsTarget = barrelImports.some(
-			(ref) => normalizePath(ref.resolvedPath) === normalizedPath,
-		);
-
-		if (reExportsTarget) {
+		// Use barrelReExports to check actual re-exports, not just imports
+		const reExportedFiles = graph.barrelReExports.get(barrelPath) ?? [];
+		if (reExportedFiles.includes(normalizedPath)) {
 			barrels.push(barrelPath);
 		}
 	}
