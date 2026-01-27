@@ -2,6 +2,7 @@
 
 import { parseArgs } from "node:util";
 import { name, version } from "../package.json";
+import { aliasCommand } from "./commands/alias.ts";
 import { analyzeCommand } from "./commands/analyze.ts";
 import { discoverCommand } from "./commands/discover.ts";
 import { findCommand } from "./commands/find.ts";
@@ -17,6 +18,7 @@ const { values, positionals } = parseArgs({
 		"dry-run": { type: "boolean", short: "n" },
 		project: { type: "string", short: "p" },
 		type: { type: "string", short: "t" },
+		prefer: { type: "string" },
 	},
 	allowPositionals: true,
 });
@@ -34,20 +36,23 @@ Commands:
   find <query> -p <project>           Find files and exports by name
   analyze <file>                      Analyze a module's imports, exports, and references
   discover <directory>                Discover tsconfig files and project structure
+  alias <target> --prefer=<strategy>  Normalize imports to use aliases, relative paths, or shortest
   move <source> <target>              Move a module and update all references
   rename <file> <oldName> <newName>   Rename an export and update all imports
 
 Options:
-  -h, --help      Show this help message
-  -v, --version   Show version
-  -n, --dry-run   Preview changes without modifying files
-  -p, --project   Path to project directory or tsconfig.json
-  -t, --type      Filter type for find command (file, export, all)
-  --verbose       Enable verbose output
+  -h, --help        Show this help message
+  -v, --version     Show version
+  -n, --dry-run     Preview changes without modifying files
+  -p, --project     Path to project directory or tsconfig.json
+  -t, --type        Filter type for find command (file, export, all)
+  --prefer          Strategy for alias command (alias, relative, shortest)
+  --verbose         Enable verbose output
 
 Examples:
   ${name} find Entity -p /path/to/project
   ${name} analyze src/utils/helpers.ts
+  ${name} alias src --prefer=alias --dry-run
   ${name} move src/old/file.ts src/new/file.ts --dry-run
   ${name} rename src/components/Button.tsx Button PrimaryButton
 `);
@@ -184,6 +189,32 @@ Examples:
   ${name} find config -p . --type file --verbose
 `);
 			break;
+		case "alias":
+			console.log(`
+Usage: ${name} alias <target> --prefer=<strategy> [options]
+
+Normalize import specifiers to use path aliases, relative paths, or the shortest option.
+
+Arguments:
+  target    File or directory to process
+
+Options:
+  --prefer        Strategy: alias, relative, or shortest (required)
+  -p, --project   Path to project directory or tsconfig.json
+  -n, --dry-run   Preview changes without modifying files
+  --verbose       Show detailed changes
+
+Strategies:
+  alias      Convert to tsconfig path aliases where possible
+  relative   Convert to relative paths (./... or ../...)
+  shortest   Pick whichever is shorter
+
+Examples:
+  ${name} alias src --prefer=alias
+  ${name} alias src/utils --prefer=relative --dry-run
+  ${name} alias src/components/Button.tsx --prefer=shortest
+`);
+			break;
 		default:
 			showHelp();
 	}
@@ -296,6 +327,35 @@ async function main() {
 				project: values.project,
 				type: findType,
 				verbose: values.verbose,
+			});
+			break;
+		}
+
+		case "alias": {
+			const [target] = args;
+			if (!target) {
+				console.error("Error: alias requires a <target> argument");
+				console.error(`Run '${name} alias --help' for usage`);
+				process.exit(1);
+			}
+			if (!values.prefer) {
+				console.error("Error: alias requires --prefer option");
+				console.error(`Run '${name} alias --help' for usage`);
+				process.exit(1);
+			}
+			const prefer = values.prefer as "alias" | "relative" | "shortest";
+			if (!["alias", "relative", "shortest"].includes(prefer)) {
+				console.error(
+					"Error: --prefer must be 'alias', 'relative', or 'shortest'",
+				);
+				process.exit(1);
+			}
+			await aliasCommand({
+				target,
+				prefer,
+				dryRun: values["dry-run"],
+				verbose: values.verbose,
+				project: values.project,
 			});
 			break;
 		}
