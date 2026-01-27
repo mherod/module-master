@@ -12,11 +12,20 @@ import {
 } from "../core/project.ts";
 import { calculateNewSpecifier, normalizePath } from "../core/resolver.ts";
 import { scanModuleReferences } from "../core/scanner.ts";
-import { updateBarrelExports, updateFileReferences } from "../core/updater.ts";
+import {
+	addExportToDestinationBarrel,
+	findDestinationBarrel,
+	updateBarrelExports,
+	updateFileReferences,
+} from "../core/updater.ts";
 import {
 	printVerificationResults,
 	verifyTypeChecking,
 } from "../core/verify.ts";
+import {
+	discoverWorkspace,
+	type WorkspaceInfo,
+} from "../core/workspace.ts";
 import type {
 	MoveError,
 	MoveResult,
@@ -58,6 +67,12 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 
 	const project = loadProject(tsconfigPath, absoluteSource);
 
+	// Discover workspace for cross-package move support
+	const workspace = await discoverWorkspace(project.rootDir);
+	if (verbose && workspace) {
+		console.log(`Found workspace: ${workspace.type} with ${workspace.packages.length} packages`);
+	}
+
 	console.log(`\n${dryRun ? "🔍 Dry run:" : "🚀"} Moving module...`);
 	console.log(`   From: ${absoluteSource}`);
 	console.log(`   To:   ${absoluteTarget}`);
@@ -72,6 +87,7 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 		project,
 		dryRun,
 		verbose,
+		workspace ?? undefined,
 	);
 
 	if (!dryRun && verify && result.success) {
@@ -129,6 +145,7 @@ export async function moveModule(
 	project: ProjectConfig,
 	dryRun: boolean,
 	verbose: boolean,
+	workspace?: WorkspaceInfo,
 ): Promise<MoveResult> {
 	const errors: MoveError[] = [];
 	const updatedReferences: UpdatedReference[] = [];
@@ -249,6 +266,7 @@ export async function moveModule(
 				sourcePath,
 				targetPath,
 				project,
+				workspace,
 			);
 
 			if (updates.length > 0) {
@@ -287,6 +305,7 @@ export async function moveModule(
 				sourcePath,
 				targetPath,
 				project,
+				workspace,
 			);
 
 			if (updates.length > 0) {
@@ -301,6 +320,40 @@ export async function moveModule(
 				message: error instanceof Error ? error.message : String(error),
 				recoverable: true,
 			});
+		}
+	}
+
+	// For cross-package moves, add export to destination barrel
+	if (workspace) {
+		const destBarrelPath = findDestinationBarrel(targetPath, workspace);
+		if (destBarrelPath) {
+			try {
+				const destBarrelFile = Bun.file(destBarrelPath);
+				if (await destBarrelFile.exists()) {
+					const barrelContent = await destBarrelFile.text();
+					const { newContent, update } = addExportToDestinationBarrel(
+						barrelContent,
+						targetPath,
+						destBarrelPath,
+					);
+
+					if (newContent !== barrelContent) {
+						updatedReferences.push(update);
+						if (!dryRun) {
+							await Bun.write(destBarrelPath, newContent);
+						}
+						if (verbose) {
+							console.log(`Added export to destination barrel: ${destBarrelPath}`);
+						}
+					}
+				}
+			} catch (error) {
+				errors.push({
+					file: destBarrelPath,
+					message: `Could not update destination barrel: ${error instanceof Error ? error.message : String(error)}`,
+					recoverable: true,
+				});
+			}
 		}
 	}
 

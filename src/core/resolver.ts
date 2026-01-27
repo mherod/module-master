@@ -1,6 +1,7 @@
 import path from "node:path";
 import ts from "typescript";
 import type { ProjectConfig } from "../types.ts";
+import type { WorkspaceInfo } from "./workspace.ts";
 
 /**
  * Resolve a module specifier to an absolute file path
@@ -256,4 +257,124 @@ export function isBareImport(specifier: string): boolean {
  */
 export function normalizePath(filePath: string): string {
 	return path.normalize(filePath).replace(/\\/g, "/");
+}
+
+/**
+ * Find which package a file belongs to in a workspace
+ */
+export function findPackageForPath(
+	filePath: string,
+	workspace: WorkspaceInfo,
+): { packageName: string; packagePath: string } | null {
+	const normalizedPath = normalizePath(filePath);
+
+	for (const pkg of workspace.packages) {
+		const normalizedPkgPath = normalizePath(pkg.path);
+		if (normalizedPath.startsWith(normalizedPkgPath + "/")) {
+			return { packageName: pkg.name, packagePath: pkg.path };
+		}
+	}
+
+	return null;
+}
+
+/**
+ * Check if two paths are in different workspace packages
+ */
+export function isCrossPackageMove(
+	sourcePath: string,
+	targetPath: string,
+	workspace: WorkspaceInfo,
+): boolean {
+	const sourcePackage = findPackageForPath(sourcePath, workspace);
+	const targetPackage = findPackageForPath(targetPath, workspace);
+
+	if (!sourcePackage || !targetPackage) {
+		return false;
+	}
+
+	return sourcePackage.packageName !== targetPackage.packageName;
+}
+
+/**
+ * For cross-package moves, determine the best import specifier from the destination package.
+ *
+ * When addingToBarrel is true, assumes the file will be exported from the package's
+ * main barrel (index.ts), so imports should use just the package name.
+ */
+export function findCrossPackageImport(
+	targetPath: string,
+	workspace: WorkspaceInfo,
+	addingToBarrel = true,
+): string | null {
+	const normalizedTarget = normalizePath(targetPath);
+	const targetPackage = findPackageForPath(targetPath, workspace);
+
+	if (!targetPackage) {
+		return null;
+	}
+
+	const pkg = workspace.packages.find((p) => p.name === targetPackage.packageName);
+	if (!pkg) {
+		return null;
+	}
+
+	// If we're adding to the barrel, just use the package name
+	// The export will be added to the barrel, so consumers can import from the package
+	if (addingToBarrel && pkg.srcDir) {
+		const relativePath = path.relative(pkg.path, normalizedTarget);
+		const subpath = relativePath.replace(/\.[tj]sx?$/, "");
+
+		// If it's in the src directory, it will be exported from the barrel
+		if (subpath.startsWith(`${pkg.srcDir}/`)) {
+			// Just use the package name - the barrel will export it
+			return pkg.name;
+		}
+	}
+
+	// Get relative path within the package
+	const relativePath = path.relative(pkg.path, normalizedTarget);
+	const subpath = relativePath.replace(/\.[tj]sx?$/, ""); // Remove extension
+
+	// Check if this file matches a package.json export
+	if (pkg.exports && typeof pkg.exports === "object") {
+		for (const [exportKey, exportValue] of Object.entries(pkg.exports)) {
+			// Normalize export key
+			const normalizedKey = exportKey.replace(/^\.\//, "").replace(/^\.$/, "");
+
+			// Check if subpath matches an export (accounting for src/ -> dist/ mapping)
+			const srcSubpath = subpath.replace(/^src\//, "");
+			if (normalizedKey === srcSubpath || normalizedKey === srcSubpath + "/index") {
+				return exportKey === "." ? pkg.name : `${pkg.name}/${normalizedKey}`;
+			}
+
+			// Handle wildcard exports
+			if (exportKey.includes("*")) {
+				// Check if the export value maps src to dist
+				const valueStr = typeof exportValue === "string" ? exportValue : null;
+				if (valueStr) {
+					// e.g., "./*": "./dist/*.js" and we have "src/foo" -> try "foo"
+					const srcSubpathNoExt = srcSubpath.replace(/\/index$/, "");
+					const pattern = exportKey.replace("*", "(.+)").replace(/^\.\//, "");
+					if (srcSubpathNoExt.match(new RegExp(`^${pattern}$`))) {
+						return `${pkg.name}/${srcSubpathNoExt}`;
+					}
+				}
+			}
+		}
+	}
+
+	// Check if the package has a src directory that maps to main export
+	if (pkg.srcDir && subpath.startsWith(`${pkg.srcDir}/`)) {
+		const srcRelative = subpath.slice(pkg.srcDir.length + 1);
+		// If it's the index file, use package name directly
+		if (srcRelative === "index" || srcRelative === "") {
+			return pkg.name;
+		}
+		// For non-index files, use package name (assumes barrel export)
+		return pkg.name;
+	}
+
+	// Default: just use package name + subpath
+	return subpath ? `${pkg.name}/${subpath}` : pkg.name;
 }

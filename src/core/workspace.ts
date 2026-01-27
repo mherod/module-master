@@ -20,6 +20,10 @@ export interface WorkspacePackage {
 	exports?: PackageExports;
 	/** Source directory if detectable */
 	srcDir?: string;
+	/** Barrel files (index.ts) found in the package */
+	barrelFiles?: string[];
+	/** Path to tsconfig.json for this package */
+	tsconfigPath?: string;
 	/** Dependencies */
 	dependencies?: Record<string, string>;
 	/** Peer dependencies */
@@ -214,6 +218,33 @@ async function parsePackage(
 		}
 	}
 
+	// Find barrel files (index.ts/index.tsx)
+	const barrelFiles: string[] = [];
+	for (const barrelName of ["index.ts", "index.tsx"]) {
+		// Check root
+		const rootBarrel = path.join(pkgDir, barrelName);
+		if (await fileExists(rootBarrel)) {
+			barrelFiles.push(rootBarrel);
+		}
+		// Check src directory
+		if (srcDir) {
+			const srcBarrel = path.join(pkgDir, srcDir, barrelName);
+			if (await fileExists(srcBarrel)) {
+				barrelFiles.push(srcBarrel);
+			}
+		}
+	}
+
+	// Find tsconfig.json
+	let tsconfigPath: string | undefined;
+	for (const tsconfigName of ["tsconfig.json", "tsconfig.build.json"]) {
+		const candidatePath = path.join(pkgDir, tsconfigName);
+		if (await fileExists(candidatePath)) {
+			tsconfigPath = candidatePath;
+			break;
+		}
+	}
+
 	return {
 		name: pkg.name as string,
 		path: pkgDir,
@@ -224,6 +255,8 @@ async function parsePackage(
 		types: (pkg.types ?? pkg.typings) as string | undefined,
 		exports: pkg.exports as PackageExports | undefined,
 		srcDir,
+		barrelFiles: barrelFiles.length > 0 ? barrelFiles : undefined,
+		tsconfigPath,
 		dependencies: pkg.dependencies as Record<string, string> | undefined,
 		peerDependencies: pkg.peerDependencies as Record<string, string> | undefined,
 	};
@@ -244,11 +277,19 @@ async function readPackageJson(
 }
 
 /**
- * Check if a file exists
+ * Check if a file or directory exists
  */
 async function fileExists(filePath: string): Promise<boolean> {
 	try {
-		return await Bun.file(filePath).exists();
+		const file = Bun.file(filePath);
+		// Bun.file().exists() works for files
+		if (await file.exists()) {
+			return true;
+		}
+		// For directories, we need to use stat
+		const { stat } = await import("node:fs/promises");
+		await stat(filePath);
+		return true;
 	} catch {
 		return false;
 	}
