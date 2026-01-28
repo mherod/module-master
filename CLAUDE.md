@@ -63,6 +63,8 @@ The codebase uses the TypeScript Compiler API (`typescript` package) for parsing
 - **updater.ts** - Applies text changes to update import specifiers in files, adds exports to destination barrels
 - **verify.ts** - Type checking verification using `tsc --noEmit` before/after changes
 - **workspace.ts** - Discovers pnpm/yarn/npm workspace packages, barrel files, and tsconfig paths
+- **text-changes.ts** - Shared utilities for applying text edits: `TextChange` interface, `applyTextChanges()`, `deduplicateChanges()`
+- **constants.ts** - Shared constants and patterns: `TSC_ERROR_PATTERN`, `EXPORT_STATEMENT_PATTERN`, `removeExtension()`
 
 ### Commands (`src/commands/`)
 
@@ -100,6 +102,13 @@ When calling `node.getStart()` on AST nodes, always pass the sourceFile paramete
 
 DON'T: `node.getStart()` — fails at runtime
 DO: `node.getStart(sourceFile)` — works correctly
+
+When obtaining line/character positions, the pattern is:
+```typescript
+const { line, character } = sourceFile.getLineAndCharacterOfPosition(
+    node.getStart(sourceFile)  // Always pass sourceFile
+);
+```
 
 ## tsconfig Discovery
 
@@ -281,3 +290,38 @@ Use a `fileMoved` flag pattern to ensure the file copy always happens regardless
 The `DependencyGraph` interface includes `barrelReExports: Map<string, string[]>` to track which files each barrel actually re-exports via `export ... from` statements. This distinguishes actual re-exports from regular imports within barrel files.
 
 DON'T: Use `graph.imports` to find barrel re-exports. Files that a barrel imports for internal use are not re-exports. Use `graph.barrelReExports` instead.
+
+## Shared Utilities
+
+### Text Changes (`src/core/text-changes.ts`)
+
+Use the shared `TextChange` interface and `applyTextChanges()` for source code modifications:
+
+```typescript
+import { type TextChange, applyTextChanges, deduplicateChanges } from "./text-changes.ts";
+
+const changes: TextChange[] = [
+    { start: 10, end: 20, newText: "replacement" }
+];
+const uniqueChanges = deduplicateChanges(changes);
+const newContent = applyTextChanges(sourceFile.text, uniqueChanges);
+```
+
+DON'T: Implement text change application logic inline. Use `applyTextChanges()` from the shared module.
+
+### Constants (`src/core/constants.ts`)
+
+Use shared constants instead of inline patterns:
+
+- `TSC_ERROR_PATTERN` - String `": error TS"` for detecting TypeScript errors
+- `EXPORT_STATEMENT_PATTERN` - Regex for detecting export statements in barrel files
+- `removeExtension()` - Strips `.ts`, `.tsx`, `.js`, `.jsx` extensions from paths
+- `TS_JS_EXTENSION_PATTERN` - Regex `/\.[tj]sx?$/` for matching TS/JS extensions
+
+DON'T: Use inline regex like `/\.[tj]sx?$/` or `": error TS"` strings. Import from `constants.ts`.
+
+## Async Function Guidelines
+
+Command handlers in `src/commands/` should only be `async` if they contain `await` expressions. The `analyzeCommand()` and `discoverCommand()` functions are synchronous—no `async` keyword needed.
+
+DON'T: Mark functions as `async` without using `await`. This creates misleading API contracts and unnecessary Promise wrapping.
