@@ -22,7 +22,7 @@ export interface AnalyzeOptions {
 	project?: string;
 }
 
-export async function analyzeCommand(options: AnalyzeOptions): Promise<void> {
+export function analyzeCommand(options: AnalyzeOptions): void {
 	const { file, verbose, project: projectArg } = options;
 
 	const absolutePath = path.resolve(file);
@@ -57,7 +57,7 @@ export function analyze(
 
 	// Build graph to find reverse references
 	const graph = buildDependencyGraph(project);
-	const referencedBy = findAllReferences(filePath, graph, project);
+	const referencedBy = findAllReferences(filePath, graph);
 	const barrelReExportFiles = findBarrelReExports(filePath, graph);
 
 	// Enhance barrel exports info

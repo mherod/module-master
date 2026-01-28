@@ -1,5 +1,6 @@
 import path from "node:path";
 import { Glob } from "bun";
+import { EXPORT_STATEMENT_PATTERN, removeExtension } from "./constants.ts";
 
 export interface WorkspacePackage {
 	/** Package name from package.json */
@@ -340,9 +341,7 @@ async function isBarrelFile(filePath: string): Promise<boolean> {
 		}
 		const content = await file.text();
 		// Check for export statements (export *, export {, export default, export const/function/class)
-		return /\bexport\s+(\*|{|default|const|let|var|function|class|type|interface|enum)\b/.test(
-			content
-		);
+		return EXPORT_STATEMENT_PATTERN.test(content);
 	} catch {
 		return false;
 	}
@@ -360,7 +359,7 @@ export function resolvePackageImport(
 	for (const pkg of workspace.packages) {
 		if (normalizedTarget.startsWith(pkg.path + path.sep)) {
 			const relativePath = path.relative(pkg.path, normalizedTarget);
-			const subpath = relativePath.replace(/\.[tj]sx?$/, ""); // Remove extension
+			const subpath = removeExtension(relativePath);
 
 			// Check if this matches an export in the package
 			const exportPath = findMatchingExport(pkg, subpath);

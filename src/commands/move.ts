@@ -1,5 +1,6 @@
 import path from "node:path";
 import ts from "typescript";
+import { TSC_ERROR_PATTERN } from "../core/constants.ts";
 import {
 	buildDependencyGraph,
 	findAllReferences,
@@ -17,6 +18,7 @@ import {
 	normalizePath,
 } from "../core/resolver.ts";
 import { scanExports, scanModuleReferences } from "../core/scanner.ts";
+import { applyTextChanges } from "../core/text-changes.ts";
 import {
 	addExportToDestinationBarrel,
 	findDestinationBarrel,
@@ -162,7 +164,7 @@ async function runTypeCheck(project: ProjectConfig): Promise<string[]> {
 
 	return output
 		.split("\n")
-		.filter((line) => line.includes(": error TS"))
+		.filter((line) => line.includes(TSC_ERROR_PATTERN))
 		.map((line) => line.trim());
 }
 
@@ -300,7 +302,7 @@ export async function moveModule(
 	const graph = buildDependencyGraph(project);
 
 	// Find all files that reference the source file
-	const references = findAllReferences(sourcePath, graph, project);
+	const references = findAllReferences(sourcePath, graph);
 	if (verbose) {
 		console.log(`Found ${references.length} references to update`);
 	}
@@ -540,16 +542,8 @@ function updateInternalImports(
 		}
 	}
 
-	// Apply changes in reverse order
-	changes.sort((a, b) => b.start - a.start);
-
-	let newContent = sourceFile.text;
-	for (const change of changes) {
-		newContent =
-			newContent.slice(0, change.start) +
-			change.newText +
-			newContent.slice(change.end);
-	}
+	// Apply changes using shared utility
+	const newContent = applyTextChanges(sourceFile.text, changes);
 
 	return { newContent, updates };
 }
@@ -588,11 +582,11 @@ function findSpecifierInSource(
 
 		if (moduleSpecifier && moduleSpecifier.text === specifier) {
 			const { line: nodeLine } = sourceFile.getLineAndCharacterOfPosition(
-				node.getStart()
+				node.getStart(sourceFile)
 			);
 			if (nodeLine + 1 === line) {
 				result = {
-					start: moduleSpecifier.getStart() + 1,
+					start: moduleSpecifier.getStart(sourceFile) + 1,
 					end: moduleSpecifier.getEnd() - 1,
 				};
 			}

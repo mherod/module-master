@@ -7,6 +7,11 @@ import {
 	resolveTsConfig,
 } from "../core/project.ts";
 import { normalizePath } from "../core/resolver.ts";
+import {
+	applyTextChanges,
+	deduplicateChanges,
+	type TextChange,
+} from "../core/text-changes.ts";
 import type {
 	ModuleReference,
 	ProjectConfig,
@@ -293,12 +298,6 @@ function hasExportModifier(node: ts.Node): boolean {
 	);
 }
 
-interface TextChange {
-	start: number;
-	end: number;
-	newText: string;
-}
-
 function renameInSourceFile(
 	sourceFile: ts.SourceFile,
 	oldName: string,
@@ -413,16 +412,8 @@ function renameInSourceFile(
 	// Deduplicate changes by position
 	const uniqueChanges = deduplicateChanges(changes);
 
-	// Apply changes in reverse order
-	uniqueChanges.sort((a, b) => b.start - a.start);
-
-	let newContent = sourceFile.text;
-	for (const change of uniqueChanges) {
-		newContent =
-			newContent.slice(0, change.start) +
-			change.newText +
-			newContent.slice(change.end);
-	}
+	// Apply changes using shared utility
+	const newContent = applyTextChanges(sourceFile.text, uniqueChanges);
 
 	return { newContent, changes: uniqueChanges, updates };
 }
@@ -450,18 +441,6 @@ function getNameNode(node: ts.Node): ts.Identifier | null {
 		return node.name;
 	}
 	return null;
-}
-
-function deduplicateChanges(changes: TextChange[]): TextChange[] {
-	const seen = new Set<string>();
-	return changes.filter((change) => {
-		const key = `${change.start}-${change.end}`;
-		if (seen.has(key)) {
-			return false;
-		}
-		seen.add(key);
-		return true;
-	});
 }
 
 function updateImportReferences(
@@ -570,16 +549,8 @@ function updateImportReferences(
 
 	visit(sourceFile);
 
-	// Apply changes in reverse order
-	changes.sort((a, b) => b.start - a.start);
-
-	let newContent = sourceFile.text;
-	for (const change of changes) {
-		newContent =
-			newContent.slice(0, change.start) +
-			change.newText +
-			newContent.slice(change.end);
-	}
+	// Apply changes using shared utility
+	const newContent = applyTextChanges(sourceFile.text, changes);
 
 	return { newContent, updates };
 }

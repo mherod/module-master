@@ -103,7 +103,7 @@ export function findAliasForPath(
 			if (normalizedTarget.startsWith(absolutePattern)) {
 				const remainder = normalizedTarget
 					.slice(absolutePattern.length)
-					.replace(/\.[tj]sx?$/, ""); // Remove extension
+					.replace(/\.[tj]sx?$/, "");
 
 				// For wildcard aliases, use them if there's a remainder
 				// For exact aliases, only use if there's NO remainder (exact match)
@@ -196,7 +196,7 @@ function updateAliasedSpecifier(
 				// New target is in the same alias scope - update the remainder
 				const newRemainder = normalizedNewTarget
 					.slice(absolutePattern.length)
-					.replace(/\.[tj]sx?$/, ""); // Remove extension
+					.replace(/\.[tj]sx?$/, "");
 
 				const aliasPrefix = aliasMatch.alias.endsWith("/*")
 					? aliasMatch.alias.slice(0, -1)
@@ -344,7 +344,7 @@ export function findCrossPackageImport(
 
 	// Get relative path within the package
 	const relativePath = path.relative(pkg.path, normalizedTarget);
-	const subpath = relativePath.replace(/\.[tj]sx?$/, ""); // Remove extension
+	const subpath = relativePath.replace(/\.[tj]sx?$/, "");
 
 	// Check if this file matches a package.json export
 	if (pkg.exports && typeof pkg.exports === "object") {

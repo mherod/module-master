@@ -63,8 +63,7 @@ export function buildDependencyGraph(project: ProjectConfig): DependencyGraph {
  */
 export function findAllReferences(
 	filePath: string,
-	graph: DependencyGraph,
-	_project?: ProjectConfig
+	graph: DependencyGraph
 ): ModuleReference[] {
 	const normalizedPath = normalizePath(filePath);
 

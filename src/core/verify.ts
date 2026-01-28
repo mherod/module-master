@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import type { ProjectConfig } from "../types.ts";
+import { TSC_ERROR_PATTERN } from "./constants.ts";
 
 export interface VerificationResult {
 	success: boolean;
@@ -84,7 +85,7 @@ function runTypeCheck(project: ProjectConfig): string[] {
 	const errors: string[] = [];
 	for (const line of lines) {
 		// TypeScript error format: path/to/file.ts(line,col): error TS####: message
-		if (line.includes(": error TS")) {
+		if (line.includes(TSC_ERROR_PATTERN)) {
 			errors.push(line);
 		}
 	}

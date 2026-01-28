@@ -2,6 +2,18 @@ import path from "node:path";
 import ts from "typescript";
 import type { ProjectConfig, ProjectReference } from "../types.ts";
 
+/** Directories to skip during tsconfig discovery */
+const SKIP_DIRECTORIES = new Set([
+	"node_modules",
+	"dist",
+	"build",
+	".git",
+	".next",
+	".turbo",
+	"coverage",
+	".cache",
+]);
+
 export interface TsConfigInfo {
 	/** Absolute path to the tsconfig.json file */
 	path: string;
@@ -134,17 +146,7 @@ function findAllTsConfigs(dir: string): string[] {
 }
 
 function shouldSkipDirectory(name: string): boolean {
-	const skip = new Set([
-		"node_modules",
-		"dist",
-		"build",
-		".git",
-		".next",
-		".turbo",
-		"coverage",
-		".cache",
-	]);
-	return skip.has(name);
+	return SKIP_DIRECTORIES.has(name);
 }
 
 /**

@@ -15,6 +15,10 @@ import {
 	normalizePath,
 	resolveModulePath,
 } from "./resolver.ts";
+import type { TextChange } from "./text-changes.ts";
+
+// Note: We use TextChange type from shared module but implement specialized
+// application logic here due to complex import split and removal handling
 import type { WorkspaceInfo } from "./workspace.ts";
 
 /**
@@ -25,12 +29,6 @@ export interface CrossPackageMoveContext {
 	movedFileExports: ExportInfo[];
 	/** Whether this is a barrel-based reference */
 	isBarrelReference: boolean;
-}
-
-interface TextChange {
-	start: number;
-	end: number;
-	newText: string;
 }
 
 /**
