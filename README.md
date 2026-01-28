@@ -166,7 +166,7 @@ Supports pnpm, yarn, and npm workspaces. Shows packages, entrypoints, barrel fil
 - **Full import coverage** — Named, default, namespace, dynamic, require, require.resolve
 - **Test mock support** — jest.mock(), vi.mock(), vitest.mock()
 - **Path alias preservation** — Respects your tsconfig paths
-- **Barrel file intelligence** — Knows which index.ts files are actual barrels (have exports)
+- **Barrel file intelligence** — recursively resolves re-export chains to find deep dependencies
 - **Monorepo-native** — First-class support for pnpm, yarn, and npm workspaces
 - **Cross-package moves** — The hard problem, solved
 - **Import splitting** — Handles mixed imports from barrels correctly
@@ -191,7 +191,7 @@ Supports pnpm, yarn, and npm workspaces. Shows packages, entrypoints, barrel fil
 
 1. **Load project** — Parse tsconfig.json, extract compiler options and path aliases
 2. **Discover workspace** — Find all packages, barrel files, and tsconfigs
-3. **Build dependency graph** — Scan all files, create import/importedBy maps with barrel tracking
+3. **Build dependency graph** — Scan all files, create import/importedBy maps with recursive barrel resolution
 4. **Find references** — Query graph for files importing target module (direct and through barrels)
 5. **Calculate changes** — Determine new specifiers, split imports if needed, identify removals
 6. **Apply updates** — Modify source text at precise AST node positions
