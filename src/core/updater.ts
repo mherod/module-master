@@ -1,3 +1,4 @@
+import path from "node:path";
 import ts from "typescript";
 import type {
 	ExportInfo,
@@ -6,7 +7,6 @@ import type {
 	ProjectConfig,
 	UpdatedReference,
 } from "../types.ts";
-import path from "node:path";
 import {
 	calculateNewSpecifier,
 	findCrossPackageImport,
@@ -50,7 +50,7 @@ export function updateFileReferences(
 	newPath: string,
 	project: ProjectConfig,
 	workspace?: WorkspaceInfo,
-	movedFileExports?: ExportInfo[],
+	movedFileExports?: ExportInfo[]
 ): { newContent: string; updates: UpdatedReference[] } {
 	const changes: TextChange[] = [];
 	const updates: UpdatedReference[] = [];
@@ -62,9 +62,7 @@ export function updateFileReferences(
 		: false;
 
 	// Get the set of export names from the moved file for binding matching
-	const movedExportNames = new Set(
-		movedFileExports?.map((e) => e.name) ?? [],
-	);
+	const movedExportNames = new Set(movedFileExports?.map((e) => e.name) ?? []);
 
 	for (const ref of references) {
 		// Check if this is an indirect reference through a barrel
@@ -94,7 +92,7 @@ export function updateFileReferences(
 			// If we have mixed bindings, split the import
 			if (movedBindings.length > 0 && remainingBindings.length > 0) {
 				const newSpecifier = workspace
-					? findCrossPackageImport(newPath, workspace) ?? ref.specifier
+					? (findCrossPackageImport(newPath, workspace) ?? ref.specifier)
 					: ref.specifier;
 
 				const splitChange = createImportSplit(
@@ -102,7 +100,7 @@ export function updateFileReferences(
 					ref,
 					movedBindings,
 					remainingBindings,
-					newSpecifier,
+					newSpecifier
 				);
 
 				if (splitChange) {
@@ -120,7 +118,7 @@ export function updateFileReferences(
 			// All bindings are moved, update the whole import
 			if (movedBindings.length > 0 && remainingBindings.length === 0) {
 				const newSpecifier = workspace
-					? findCrossPackageImport(newPath, workspace) ?? ref.specifier
+					? (findCrossPackageImport(newPath, workspace) ?? ref.specifier)
 					: ref.specifier;
 
 				if (newSpecifier !== ref.specifier) {
@@ -175,20 +173,22 @@ export function updateFileReferences(
 		let newSpecifier: string;
 		if (crossPackage && workspace) {
 			const pkgImport = findCrossPackageImport(newPath, workspace);
-			newSpecifier = pkgImport ?? calculateNewSpecifier(
-				ref.specifier,
-				ref.sourceFile,
-				oldPath,
-				newPath,
-				project,
-			);
+			newSpecifier =
+				pkgImport ??
+				calculateNewSpecifier(
+					ref.specifier,
+					ref.sourceFile,
+					oldPath,
+					newPath,
+					project
+				);
 		} else {
 			newSpecifier = calculateNewSpecifier(
 				ref.specifier,
 				ref.sourceFile,
 				oldPath,
 				newPath,
-				project,
+				project
 			);
 		}
 
@@ -230,9 +230,11 @@ export function updateFileReferences(
 	for (const change of changes) {
 		// Skip changes that overlap with import splits (already handled)
 		const overlapsWithSplit = importSplits.some(
-			(split) => change.start >= split.start && change.end <= split.end,
+			(split) => change.start >= split.start && change.end <= split.end
 		);
-		if (overlapsWithSplit) continue;
+		if (overlapsWithSplit) {
+			continue;
+		}
 
 		newContent =
 			newContent.slice(0, change.start) +
@@ -257,13 +259,15 @@ function createImportSplit(
 	ref: ModuleReference,
 	movedBindings: ImportBinding[],
 	remainingBindings: ImportBinding[],
-	newSpecifier: string,
+	newSpecifier: string
 ): ImportSplitChange | null {
 	// Find the import declaration node position
 	let nodePosition: { start: number; end: number } | null = null;
 
 	function visit(node: ts.Node) {
-		if (nodePosition) return;
+		if (nodePosition) {
+			return;
+		}
 
 		if (
 			ts.isImportDeclaration(node) &&
@@ -282,7 +286,9 @@ function createImportSplit(
 
 	visit(sourceFile);
 
-	if (!nodePosition) return null;
+	if (!nodePosition) {
+		return null;
+	}
 
 	// Generate the two new import statements
 	const movedBindingStr = movedBindings
@@ -309,10 +315,7 @@ function createImportSplit(
 
 	// Preserve indentation
 	const lineStart = sourceFile.getLineAndCharacterOfPosition(start);
-	const indent = sourceFile.text.slice(
-		start - lineStart.character,
-		start,
-	);
+	const indent = sourceFile.text.slice(start - lineStart.character, start);
 
 	return {
 		start,
@@ -326,12 +329,14 @@ function createImportSplit(
  */
 function findExportDeclarationRange(
 	sourceFile: ts.SourceFile,
-	ref: ModuleReference,
+	ref: ModuleReference
 ): ImportSplitChange | null {
 	let result: ImportSplitChange | null = null;
 
 	function visit(node: ts.Node) {
-		if (result) return;
+		if (result) {
+			return;
+		}
 
 		if (
 			ts.isExportDeclaration(node) &&
@@ -363,29 +368,30 @@ function findExportDeclarationRange(
  */
 function findSpecifierLocation(
 	sourceFile: ts.SourceFile,
-	ref: ModuleReference,
+	ref: ModuleReference
 ): { start: number; end: number } | null {
 	let result: { start: number; end: number } | null = null;
 
 	function visit(node: ts.Node) {
-		if (result) return;
+		if (result) {
+			return;
+		}
 
 		// Check import declarations
 		if (
 			ts.isImportDeclaration(node) &&
-			ts.isStringLiteral(node.moduleSpecifier)
+			ts.isStringLiteral(node.moduleSpecifier) &&
+			node.moduleSpecifier.text === ref.specifier
 		) {
-			if (node.moduleSpecifier.text === ref.specifier) {
-				const { line } = sourceFile.getLineAndCharacterOfPosition(
-					node.getStart(sourceFile),
-				);
-				if (line + 1 === ref.line) {
-					// +1 to skip opening quote, -1 to skip closing quote
-					result = {
-						start: node.moduleSpecifier.getStart(sourceFile) + 1,
-						end: node.moduleSpecifier.getEnd() - 1,
-					};
-				}
+			const { line } = sourceFile.getLineAndCharacterOfPosition(
+				node.getStart(sourceFile)
+			);
+			if (line + 1 === ref.line) {
+				// +1 to skip opening quote, -1 to skip closing quote
+				result = {
+					start: node.moduleSpecifier.getStart(sourceFile) + 1,
+					end: node.moduleSpecifier.getEnd() - 1,
+				};
 			}
 		}
 
@@ -393,18 +399,17 @@ function findSpecifierLocation(
 		if (
 			ts.isExportDeclaration(node) &&
 			node.moduleSpecifier &&
-			ts.isStringLiteral(node.moduleSpecifier)
+			ts.isStringLiteral(node.moduleSpecifier) &&
+			node.moduleSpecifier.text === ref.specifier
 		) {
-			if (node.moduleSpecifier.text === ref.specifier) {
-				const { line } = sourceFile.getLineAndCharacterOfPosition(
-					node.getStart(sourceFile),
-				);
-				if (line + 1 === ref.line) {
-					result = {
-						start: node.moduleSpecifier.getStart(sourceFile) + 1,
-						end: node.moduleSpecifier.getEnd() - 1,
-					};
-				}
+			const { line } = sourceFile.getLineAndCharacterOfPosition(
+				node.getStart(sourceFile)
+			);
+			if (line + 1 === ref.line) {
+				result = {
+					start: node.moduleSpecifier.getStart(sourceFile) + 1,
+					end: node.moduleSpecifier.getEnd() - 1,
+				};
 			}
 		}
 
@@ -413,7 +418,7 @@ function findSpecifierLocation(
 			const arg = node.arguments[0];
 			if (arg && ts.isStringLiteral(arg) && arg.text === ref.specifier) {
 				const { line } = sourceFile.getLineAndCharacterOfPosition(
-					node.getStart(sourceFile),
+					node.getStart(sourceFile)
 				);
 				if (line + 1 === ref.line) {
 					result = {
@@ -445,7 +450,7 @@ export function updateBarrelExports(
 	oldPath: string,
 	newPath: string,
 	project: ProjectConfig,
-	workspace?: WorkspaceInfo,
+	workspace?: WorkspaceInfo
 ): { newContent: string; updates: UpdatedReference[] } {
 	const changes: TextChange[] = [];
 	const removals: { start: number; end: number }[] = [];
@@ -468,11 +473,14 @@ export function updateBarrelExports(
 			const resolvedPath = resolveModulePath(
 				specifier,
 				sourceFile.fileName,
-				project,
+				project
 			);
 
 			// Only process if this export points to the file being moved
-			if (!resolvedPath || normalizePath(resolvedPath) !== normalizePath(oldPath)) {
+			if (
+				!resolvedPath ||
+				normalizePath(resolvedPath) !== normalizePath(oldPath)
+			) {
 				ts.forEachChild(node, visit);
 				return;
 			}
@@ -481,7 +489,7 @@ export function updateBarrelExports(
 			// The destination barrel will export it, consumers import from there
 			if (crossPackage) {
 				const { line } = sourceFile.getLineAndCharacterOfPosition(
-					node.getStart(sourceFile),
+					node.getStart(sourceFile)
 				);
 
 				// Find the full line including newline to remove cleanly
@@ -509,12 +517,12 @@ export function updateBarrelExports(
 				sourceFile.fileName,
 				oldPath,
 				newPath,
-				project,
+				project
 			);
 
 			if (newSpecifier !== specifier) {
 				const { line } = sourceFile.getLineAndCharacterOfPosition(
-					node.getStart(sourceFile),
+					node.getStart(sourceFile)
 				);
 				changes.push({
 					start: node.moduleSpecifier.getStart(sourceFile) + 1,
@@ -541,8 +549,7 @@ export function updateBarrelExports(
 	let newContent = sourceFile.text;
 	for (const removal of removals) {
 		newContent =
-			newContent.slice(0, removal.start) +
-			newContent.slice(removal.end);
+			newContent.slice(0, removal.start) + newContent.slice(removal.end);
 	}
 
 	// Then apply specifier changes (adjust positions if removals happened)
@@ -566,14 +573,16 @@ export function updateBarrelExports(
  */
 export function findDestinationBarrel(
 	targetPath: string,
-	workspace: WorkspaceInfo,
+	workspace: WorkspaceInfo
 ): string | null {
 	const targetPackage = findPackageForPath(targetPath, workspace);
 	if (!targetPackage) {
 		return null;
 	}
 
-	const pkg = workspace.packages.find((p) => p.name === targetPackage.packageName);
+	const pkg = workspace.packages.find(
+		(p) => p.name === targetPackage.packageName
+	);
 	if (!pkg) {
 		return null;
 	}
@@ -592,7 +601,7 @@ export function findDestinationBarrel(
 export function generateBarrelExport(
 	barrelContent: string,
 	targetPath: string,
-	barrelPath: string,
+	barrelPath: string
 ): { exportStatement: string; insertPosition: number } {
 	// Calculate relative path from barrel to target
 	const barrelDir = path.dirname(barrelPath);
@@ -639,12 +648,12 @@ export function generateBarrelExport(
 export function addExportToDestinationBarrel(
 	barrelContent: string,
 	targetPath: string,
-	barrelPath: string,
+	barrelPath: string
 ): { newContent: string; update: UpdatedReference } {
 	const { exportStatement, insertPosition } = generateBarrelExport(
 		barrelContent,
 		targetPath,
-		barrelPath,
+		barrelPath
 	);
 
 	// Check if this export already exists
@@ -668,7 +677,9 @@ export function addExportToDestinationBarrel(
 		barrelContent.slice(insertPosition);
 
 	// Count lines to find where we inserted
-	const linesBeforeInsert = barrelContent.slice(0, insertPosition).split("\n").length;
+	const linesBeforeInsert = barrelContent
+		.slice(0, insertPosition)
+		.split("\n").length;
 
 	return {
 		newContent,

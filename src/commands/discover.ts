@@ -1,8 +1,8 @@
 import path from "node:path";
 import {
+	discoverProject,
 	type ProjectDiscovery,
 	type TsConfigInfo,
-	discoverProject,
 } from "../core/tsconfig-discovery.ts";
 
 export interface DiscoverOptions {
@@ -24,7 +24,7 @@ export async function discoverCommand(options: DiscoverOptions): Promise<void> {
 function printDiscovery(
 	discovery: ProjectDiscovery,
 	baseDir: string,
-	verbose?: boolean,
+	verbose?: boolean
 ): void {
 	const { configs, fileOwnership, rootConfig } = discovery;
 
@@ -91,7 +91,7 @@ function printDiscovery(
 function printConfigInfo(
 	config: TsConfigInfo,
 	baseDir: string,
-	verbose?: boolean,
+	verbose?: boolean
 ): void {
 	const relativePath = path.relative(baseDir, config.path);
 

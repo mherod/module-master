@@ -28,7 +28,9 @@ export function buildDependencyGraph(project: ProjectConfig): DependencyGraph {
 
 	for (const file of files) {
 		const sourceFile = program.getSourceFile(file);
-		if (!sourceFile) continue;
+		if (!sourceFile) {
+			continue;
+		}
 
 		const normalizedFile = normalizePath(file);
 		const refs = scanModuleReferences(sourceFile, project);
@@ -62,7 +64,7 @@ export function buildDependencyGraph(project: ProjectConfig): DependencyGraph {
 export function findAllReferences(
 	filePath: string,
 	graph: DependencyGraph,
-	_project?: ProjectConfig,
+	_project?: ProjectConfig
 ): ModuleReference[] {
 	const normalizedPath = normalizePath(filePath);
 
@@ -76,12 +78,14 @@ export function findAllReferences(
 	while (changed) {
 		changed = false;
 		for (const [barrelPath, reExports] of graph.barrelReExports) {
-			if (visitedBarrels.has(barrelPath)) continue;
+			if (visitedBarrels.has(barrelPath)) {
+				continue;
+			}
 
 			// Does this barrel re-export anything we're already tracking?
 			// (e.g. re-exports target directly, or re-exports a barrel that re-exports target)
 			const reExportsTarget = reExports.some((exportedFile) =>
-				reExportingFiles.has(exportedFile),
+				reExportingFiles.has(exportedFile)
 			);
 
 			if (reExportsTarget) {
@@ -102,7 +106,9 @@ export function findAllReferences(
 		for (const ref of consumers) {
 			// Create unique key for deduping (file + specifier + line)
 			const key = `${ref.sourceFile}:${ref.specifier}:${ref.line}`;
-			if (seenRefs.has(key)) continue;
+			if (seenRefs.has(key)) {
+				continue;
+			}
 			seenRefs.add(key);
 
 			// If referring to a barrel, update resolvedPath to point to original target
@@ -127,7 +133,7 @@ export function findAllReferences(
  */
 export function getImports(
 	filePath: string,
-	graph: DependencyGraph,
+	graph: DependencyGraph
 ): ModuleReference[] {
 	return graph.imports.get(normalizePath(filePath)) ?? [];
 }
@@ -137,7 +143,7 @@ export function getImports(
  */
 export function isBarrelFile(
 	filePath: string,
-	graph: DependencyGraph,
+	graph: DependencyGraph
 ): boolean {
 	return graph.barrelFiles.has(normalizePath(filePath));
 }
@@ -147,7 +153,7 @@ export function isBarrelFile(
  */
 export function findBarrelReExports(
 	filePath: string,
-	graph: DependencyGraph,
+	graph: DependencyGraph
 ): string[] {
 	const normalizedPath = normalizePath(filePath);
 	const barrels: string[] = [];

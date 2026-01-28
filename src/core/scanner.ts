@@ -5,9 +5,9 @@ import type {
 	ExportInfo,
 	ImportBinding,
 	ModuleReference,
+	ProjectConfig,
 	ReferenceType,
 } from "../types.ts";
-import type { ProjectConfig } from "../types.ts";
 import { resolveModulePath } from "./resolver.ts";
 
 /**
@@ -15,7 +15,7 @@ import { resolveModulePath } from "./resolver.ts";
  */
 export function scanModuleReferences(
 	sourceFile: ts.SourceFile,
-	project: ProjectConfig,
+	project: ProjectConfig
 ): ModuleReference[] {
 	const references: ModuleReference[] = [];
 
@@ -37,7 +37,7 @@ export function scanModuleReferences(
 function extractReference(
 	node: ts.Node,
 	sourceFile: ts.SourceFile,
-	project: ProjectConfig,
+	project: ProjectConfig
 ): ModuleReference | null {
 	// import ... from '...'
 	if (ts.isImportDeclaration(node)) {
@@ -95,7 +95,7 @@ function extractReference(
 function extractImportDeclaration(
 	node: ts.ImportDeclaration,
 	sourceFile: ts.SourceFile,
-	project: ProjectConfig,
+	project: ProjectConfig
 ): ModuleReference | null {
 	if (!ts.isStringLiteral(node.moduleSpecifier)) {
 		return null;
@@ -105,7 +105,7 @@ function extractImportDeclaration(
 	const resolvedPath = resolveModulePath(
 		specifier,
 		sourceFile.fileName,
-		project,
+		project
 	);
 
 	if (!resolvedPath) {
@@ -113,7 +113,7 @@ function extractImportDeclaration(
 	}
 
 	const { line, character } = sourceFile.getLineAndCharacterOfPosition(
-		node.getStart(sourceFile),
+		node.getStart(sourceFile)
 	);
 	const isTypeOnly = node.importClause?.isTypeOnly ?? false;
 
@@ -165,9 +165,9 @@ function extractImportDeclaration(
 function extractExportDeclaration(
 	node: ts.ExportDeclaration,
 	sourceFile: ts.SourceFile,
-	project: ProjectConfig,
+	project: ProjectConfig
 ): ModuleReference | null {
-	if (!node.moduleSpecifier || !ts.isStringLiteral(node.moduleSpecifier)) {
+	if (!(node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier))) {
 		return null;
 	}
 
@@ -175,7 +175,7 @@ function extractExportDeclaration(
 	const resolvedPath = resolveModulePath(
 		specifier,
 		sourceFile.fileName,
-		project,
+		project
 	);
 
 	if (!resolvedPath) {
@@ -183,7 +183,7 @@ function extractExportDeclaration(
 	}
 
 	const { line, character } = sourceFile.getLineAndCharacterOfPosition(
-		node.getStart(sourceFile),
+		node.getStart(sourceFile)
 	);
 	const isTypeOnly = node.isTypeOnly;
 
@@ -224,10 +224,10 @@ function extractExportDeclaration(
 function extractDynamicImport(
 	node: ts.CallExpression,
 	sourceFile: ts.SourceFile,
-	project: ProjectConfig,
+	project: ProjectConfig
 ): ModuleReference | null {
 	const arg = node.arguments[0];
-	if (!arg || !ts.isStringLiteral(arg)) {
+	if (!(arg && ts.isStringLiteral(arg))) {
 		return null; // Dynamic specifier, can't statically analyze
 	}
 
@@ -235,7 +235,7 @@ function extractDynamicImport(
 	const resolvedPath = resolveModulePath(
 		specifier,
 		sourceFile.fileName,
-		project,
+		project
 	);
 
 	if (!resolvedPath) {
@@ -243,7 +243,7 @@ function extractDynamicImport(
 	}
 
 	const { line, character } = sourceFile.getLineAndCharacterOfPosition(
-		node.getStart(sourceFile),
+		node.getStart(sourceFile)
 	);
 
 	return {
@@ -261,10 +261,10 @@ function extractRequire(
 	node: ts.CallExpression,
 	sourceFile: ts.SourceFile,
 	project: ProjectConfig,
-	type: "require" | "require-resolve" | "jest-mock",
+	type: "require" | "require-resolve" | "jest-mock"
 ): ModuleReference | null {
 	const arg = node.arguments[0];
-	if (!arg || !ts.isStringLiteral(arg)) {
+	if (!(arg && ts.isStringLiteral(arg))) {
 		return null;
 	}
 
@@ -272,7 +272,7 @@ function extractRequire(
 	const resolvedPath = resolveModulePath(
 		specifier,
 		sourceFile.fileName,
-		project,
+		project
 	);
 
 	if (!resolvedPath) {
@@ -280,7 +280,7 @@ function extractRequire(
 	}
 
 	const { line, character } = sourceFile.getLineAndCharacterOfPosition(
-		node.getStart(sourceFile),
+		node.getStart(sourceFile)
 	);
 
 	return {
@@ -306,7 +306,7 @@ export function scanExports(sourceFile: ts.SourceFile): ExportInfo[] {
 			for (const decl of node.declarationList.declarations) {
 				if (ts.isIdentifier(decl.name)) {
 					const { line } = sourceFile.getLineAndCharacterOfPosition(
-						node.getStart(sourceFile),
+						node.getStart(sourceFile)
 					);
 					exports.push({
 						name: decl.name.text,
@@ -325,7 +325,7 @@ export function scanExports(sourceFile: ts.SourceFile): ExportInfo[] {
 			node.name
 		) {
 			const { line } = sourceFile.getLineAndCharacterOfPosition(
-				node.getStart(sourceFile),
+				node.getStart(sourceFile)
 			);
 			const isDefault =
 				node.modifiers?.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword) ??
@@ -341,7 +341,7 @@ export function scanExports(sourceFile: ts.SourceFile): ExportInfo[] {
 		// export class X {}
 		if (ts.isClassDeclaration(node) && hasExportModifier(node) && node.name) {
 			const { line } = sourceFile.getLineAndCharacterOfPosition(
-				node.getStart(sourceFile),
+				node.getStart(sourceFile)
 			);
 			const isDefault =
 				node.modifiers?.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword) ??
@@ -357,7 +357,7 @@ export function scanExports(sourceFile: ts.SourceFile): ExportInfo[] {
 		// export type X = ...
 		if (ts.isTypeAliasDeclaration(node) && hasExportModifier(node)) {
 			const { line } = sourceFile.getLineAndCharacterOfPosition(
-				node.getStart(sourceFile),
+				node.getStart(sourceFile)
 			);
 			exports.push({
 				name: node.name.text,
@@ -370,7 +370,7 @@ export function scanExports(sourceFile: ts.SourceFile): ExportInfo[] {
 		// export interface X {}
 		if (ts.isInterfaceDeclaration(node) && hasExportModifier(node)) {
 			const { line } = sourceFile.getLineAndCharacterOfPosition(
-				node.getStart(sourceFile),
+				node.getStart(sourceFile)
 			);
 			exports.push({
 				name: node.name.text,
@@ -383,7 +383,7 @@ export function scanExports(sourceFile: ts.SourceFile): ExportInfo[] {
 		// export enum X {}
 		if (ts.isEnumDeclaration(node) && hasExportModifier(node)) {
 			const { line } = sourceFile.getLineAndCharacterOfPosition(
-				node.getStart(sourceFile),
+				node.getStart(sourceFile)
 			);
 			exports.push({
 				name: node.name.text,
@@ -396,7 +396,7 @@ export function scanExports(sourceFile: ts.SourceFile): ExportInfo[] {
 		// export default ...
 		if (ts.isExportAssignment(node) && !node.isExportEquals) {
 			const { line } = sourceFile.getLineAndCharacterOfPosition(
-				node.getStart(sourceFile),
+				node.getStart(sourceFile)
 			);
 			exports.push({
 				name: "default",
@@ -410,20 +410,19 @@ export function scanExports(sourceFile: ts.SourceFile): ExportInfo[] {
 		if (
 			ts.isExportDeclaration(node) &&
 			!node.moduleSpecifier &&
-			node.exportClause
+			node.exportClause &&
+			ts.isNamedExports(node.exportClause)
 		) {
-			if (ts.isNamedExports(node.exportClause)) {
-				for (const element of node.exportClause.elements) {
-					const { line } = sourceFile.getLineAndCharacterOfPosition(
-						element.getStart(sourceFile),
-					);
-					exports.push({
-						name: element.name.text,
-						type: "named",
-						isType: element.isTypeOnly || node.isTypeOnly,
-						line: line + 1,
-					});
-				}
+			for (const element of node.exportClause.elements) {
+				const { line } = sourceFile.getLineAndCharacterOfPosition(
+					element.getStart(sourceFile)
+				);
+				exports.push({
+					name: element.name.text,
+					type: "named",
+					isType: element.isTypeOnly || node.isTypeOnly,
+					line: line + 1,
+				});
 			}
 		}
 
@@ -439,7 +438,7 @@ export function scanExports(sourceFile: ts.SourceFile): ExportInfo[] {
  */
 export function scanBarrelExports(
 	sourceFile: ts.SourceFile,
-	project: ProjectConfig,
+	project: ProjectConfig
 ): BarrelExport[] {
 	const barrels: BarrelExport[] = [];
 	const entriesBySource = new Map<string, BarrelExportEntry[]>();
@@ -454,7 +453,7 @@ export function scanBarrelExports(
 			const resolvedPath = resolveModulePath(
 				specifier,
 				sourceFile.fileName,
-				project,
+				project
 			);
 
 			if (!resolvedPath) {

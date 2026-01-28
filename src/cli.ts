@@ -252,7 +252,7 @@ async function main() {
 	switch (command) {
 		case "move": {
 			const [source, target] = args;
-			if (!source || !target) {
+			if (!(source && target)) {
 				console.error("Error: move requires <source> and <target> arguments");
 				console.error(`Run '${name} move --help' for usage`);
 				process.exit(1);
@@ -270,9 +270,9 @@ async function main() {
 
 		case "rename": {
 			const [file, oldName, newName] = args;
-			if (!file || !oldName || !newName) {
+			if (!(file && oldName && newName)) {
 				console.error(
-					"Error: rename requires <file>, <oldName>, and <newName> arguments",
+					"Error: rename requires <file>, <oldName>, and <newName> arguments"
 				);
 				console.error(`Run '${name} rename --help' for usage`);
 				process.exit(1);
@@ -373,7 +373,7 @@ async function main() {
 			const prefer = values.prefer as "alias" | "relative" | "shortest";
 			if (!["alias", "relative", "shortest"].includes(prefer)) {
 				console.error(
-					"Error: --prefer must be 'alias', 'relative', or 'shortest'",
+					"Error: --prefer must be 'alias', 'relative', or 'shortest'"
 				);
 				process.exit(1);
 			}

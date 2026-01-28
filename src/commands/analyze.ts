@@ -42,7 +42,7 @@ export async function analyzeCommand(options: AnalyzeOptions): Promise<void> {
 
 export function analyze(
 	filePath: string,
-	project: ProjectConfig,
+	project: ProjectConfig
 ): AnalysisResult {
 	const program = createProgram(project, [filePath]);
 	const sourceFile = program.getSourceFile(filePath);
@@ -94,7 +94,7 @@ function printAnalysis(result: AnalysisResult, verbose?: boolean): void {
 			const typeMarker = exp.isType ? " (type)" : "";
 			const defaultMarker = exp.type === "default" ? " [default]" : "";
 			console.log(
-				`   • ${exp.name}${typeMarker}${defaultMarker} (line ${exp.line})`,
+				`   • ${exp.name}${typeMarker}${defaultMarker} (line ${exp.line})`
 			);
 		}
 	}
@@ -157,7 +157,7 @@ function printAnalysis(result: AnalysisResult, verbose?: boolean): void {
 				for (const exp of barrel.exports) {
 					const alias = exp.alias ? ` as ${exp.alias}` : "";
 					console.log(
-						`     ${exp.type}: ${exp.name ?? "*"}${alias} from "${exp.from}"`,
+						`     ${exp.type}: ${exp.name ?? "*"}${alias} from "${exp.from}"`
 					);
 				}
 			}

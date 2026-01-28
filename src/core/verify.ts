@@ -16,7 +16,7 @@ export interface VerificationResult {
 export async function verifyTypeChecking(
 	project: ProjectConfig,
 	beforeSnapshot: () => void,
-	applyChanges: () => void,
+	applyChanges: () => void
 ): Promise<VerificationResult> {
 	// Run type check before changes
 	const errorsBefore = runTypeCheck(project);
@@ -60,7 +60,7 @@ function runTypeCheck(project: ProjectConfig): string[] {
 			cwd,
 			encoding: "utf-8",
 			shell: false,
-		},
+		}
 	);
 
 	if (result.status === 0) {
@@ -70,7 +70,9 @@ function runTypeCheck(project: ProjectConfig): string[] {
 
 	// Parse errors from stdout/stderr
 	const output = (result.stdout + result.stderr).trim();
-	if (!output) return [];
+	if (!output) {
+		return [];
+	}
 
 	// Split by lines and filter out empty lines
 	const lines = output
@@ -116,7 +118,7 @@ export function printVerificationResults(result: VerificationResult): void {
 		}
 	} else {
 		console.error(
-			`\n❌ Type checking failed - ${result.newErrors.length} new error(s) introduced:`,
+			`\n❌ Type checking failed - ${result.newErrors.length} new error(s) introduced:`
 		);
 		for (const error of result.newErrors.slice(0, 10)) {
 			console.error(`   ${error}`);
@@ -127,6 +129,6 @@ export function printVerificationResults(result: VerificationResult): void {
 	}
 
 	console.log(
-		`\nType errors: ${result.errorsAfter.length} total (${result.errorsBefore.length} before, ${result.newErrors.length} new, ${result.fixedErrors.length} fixed)`,
+		`\nType errors: ${result.errorsAfter.length} total (${result.errorsBefore.length} before, ${result.newErrors.length} new, ${result.fixedErrors.length} fixed)`
 	);
 }

@@ -14,7 +14,7 @@ export function findTsConfig(startDir: string): string | null {
 	const configPath = ts.findConfigFile(
 		startDir,
 		ts.sys.fileExists,
-		"tsconfig.json",
+		"tsconfig.json"
 	);
 	return configPath ?? null;
 }
@@ -24,7 +24,7 @@ export function findTsConfig(startDir: string): string | null {
  */
 export function resolveTsConfig(
 	projectArg: string | undefined,
-	startDir: string,
+	startDir: string
 ): string | null {
 	if (projectArg) {
 		const resolved = path.resolve(projectArg);
@@ -44,7 +44,7 @@ export function resolveTsConfig(
  */
 export function loadProject(
 	tsconfigPath: string,
-	targetFile?: string,
+	targetFile?: string
 ): ProjectConfig {
 	// If we have a target file, use smart discovery to find the owning config
 	if (targetFile) {
@@ -69,7 +69,7 @@ export function loadProjectDirect(tsconfigPath: string): ProjectConfig {
 
 	if (configFile.error) {
 		throw new Error(
-			`Failed to read tsconfig: ${ts.flattenDiagnosticMessageText(configFile.error.messageText, "\n")}`,
+			`Failed to read tsconfig: ${ts.flattenDiagnosticMessageText(configFile.error.messageText, "\n")}`
 		);
 	}
 
@@ -93,12 +93,12 @@ export function loadProjectDirect(tsconfigPath: string): ProjectConfig {
 	const parsed = ts.parseJsonConfigFileContent(
 		configFile.config,
 		ts.sys,
-		rootDir,
+		rootDir
 	);
 
 	if (parsed.errors.length > 0) {
 		const messages = parsed.errors
-			.filter((e) => e.code !== 18003) // Ignore "No inputs were found" error
+			.filter((e) => e.code !== 18_003) // Ignore "No inputs were found" error
 			.map((e) => ts.flattenDiagnosticMessageText(e.messageText, "\n"))
 			.join("\n");
 		if (messages.length > 0) {
@@ -118,7 +118,7 @@ export function loadProjectDirect(tsconfigPath: string): ProjectConfig {
 					path: path.resolve(rootDir, ref.path),
 					prepend: ref.prepend,
 					circular: ref.circular,
-				}),
+				})
 			)
 		: undefined;
 
@@ -138,7 +138,7 @@ export function loadProjectDirect(tsconfigPath: string): ProjectConfig {
  * Extract path aliases from compiler options
  */
 function extractPathAliases(
-	options: ts.CompilerOptions,
+	options: ts.CompilerOptions
 ): Map<string, string[]> {
 	const aliases = new Map<string, string[]>();
 
@@ -156,7 +156,7 @@ function extractPathAliases(
  */
 export function createProgram(
 	project: ProjectConfig,
-	files?: string[],
+	files?: string[]
 ): ts.Program {
 	const host = ts.createCompilerHost(project.compilerOptions);
 	const filesToCompile = files ?? project.files;

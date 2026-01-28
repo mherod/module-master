@@ -9,13 +9,13 @@ import type { WorkspaceInfo } from "./workspace.ts";
 export function resolveModulePath(
 	specifier: string,
 	fromFile: string,
-	project: ProjectConfig,
+	project: ProjectConfig
 ): string | null {
 	const result = ts.resolveModuleName(
 		specifier,
 		fromFile,
 		project.compilerOptions,
-		ts.sys,
+		ts.sys
 	);
 
 	if (result.resolvedModule) {
@@ -33,7 +33,7 @@ export function calculateNewSpecifier(
 	fromFile: string,
 	oldTargetPath: string,
 	newTargetPath: string,
-	project: ProjectConfig,
+	project: ProjectConfig
 ): string {
 	// If it's a path alias, check if we should preserve it or update it
 	const aliasMatch = matchPathAlias(oldSpecifier, project);
@@ -44,7 +44,7 @@ export function calculateNewSpecifier(
 			oldTargetPath,
 			newTargetPath,
 			fromFile,
-			project,
+			project
 		);
 		// If updateAliasedSpecifier couldn't map to the same alias,
 		// try to find a different alias that covers the new target
@@ -75,14 +75,18 @@ export function calculateNewSpecifier(
  */
 export function findAliasForPath(
 	targetPath: string,
-	project: ProjectConfig,
+	project: ProjectConfig
 ): string | null {
 	const baseUrl = project.compilerOptions.baseUrl ?? project.rootDir;
 	const normalizedTarget = normalizePath(targetPath);
 
 	// Try each path alias to see if it covers the target
 	// Prioritize wildcard aliases over exact matches for paths with subpaths
-	const candidates: Array<{ alias: string; result: string; isWildcard: boolean }> = [];
+	const candidates: Array<{
+		alias: string;
+		result: string;
+		isWildcard: boolean;
+	}> = [];
 
 	for (const [alias, paths] of project.pathAliases) {
 		const isWildcard = alias.endsWith("/*");
@@ -92,7 +96,9 @@ export function findAliasForPath(
 				? pathPattern.slice(0, -1)
 				: pathPattern;
 
-			const absolutePattern = normalizePath(path.resolve(baseUrl, resolvedPattern));
+			const absolutePattern = normalizePath(
+				path.resolve(baseUrl, resolvedPattern)
+			);
 
 			if (normalizedTarget.startsWith(absolutePattern)) {
 				const remainder = normalizedTarget
@@ -108,7 +114,7 @@ export function findAliasForPath(
 						result: aliasPrefix + remainder,
 						isWildcard: true,
 					});
-				} else if (!isWildcard && !remainder) {
+				} else if (!(isWildcard || remainder)) {
 					// Exact match - target is exactly at the alias root
 					candidates.push({
 						alias,
@@ -139,7 +145,7 @@ export function findAliasForPath(
  */
 export function matchPathAlias(
 	specifier: string,
-	project: ProjectConfig,
+	project: ProjectConfig
 ): { alias: string; paths: string[]; remainder: string } | null {
 	for (const [alias, paths] of project.pathAliases) {
 		// Handle exact matches and wildcard patterns
@@ -169,7 +175,7 @@ function updateAliasedSpecifier(
 	oldTargetPath: string,
 	newTargetPath: string,
 	fromFile: string,
-	project: ProjectConfig,
+	project: ProjectConfig
 ): string {
 	const baseUrl = project.compilerOptions.baseUrl ?? project.rootDir;
 	const normalizedNewTarget = normalizePath(newTargetPath);
@@ -180,7 +186,9 @@ function updateAliasedSpecifier(
 			? pathPattern.slice(0, -1)
 			: pathPattern;
 
-		const absolutePattern = normalizePath(path.resolve(baseUrl, resolvedPattern));
+		const absolutePattern = normalizePath(
+			path.resolve(baseUrl, resolvedPattern)
+		);
 
 		if (oldTargetPath.startsWith(absolutePattern)) {
 			// Check if the NEW target is ALSO within this alias scope
@@ -217,7 +225,7 @@ function updateAliasedSpecifier(
  */
 export function calculateRelativeSpecifier(
 	fromFile: string,
-	toFile: string,
+	toFile: string
 ): string {
 	const fromDir = path.dirname(fromFile);
 	let relativePath = path.relative(fromDir, toFile);
@@ -249,7 +257,7 @@ export function isRelativeImport(specifier: string): boolean {
  * Check if a specifier is a bare/package import
  */
 export function isBareImport(specifier: string): boolean {
-	return !isRelativeImport(specifier) && !path.isAbsolute(specifier);
+	return !(isRelativeImport(specifier) || path.isAbsolute(specifier));
 }
 
 /**
@@ -264,13 +272,13 @@ export function normalizePath(filePath: string): string {
  */
 export function findPackageForPath(
 	filePath: string,
-	workspace: WorkspaceInfo,
+	workspace: WorkspaceInfo
 ): { packageName: string; packagePath: string } | null {
 	const normalizedPath = normalizePath(filePath);
 
 	for (const pkg of workspace.packages) {
 		const normalizedPkgPath = normalizePath(pkg.path);
-		if (normalizedPath.startsWith(normalizedPkgPath + "/")) {
+		if (normalizedPath.startsWith(`${normalizedPkgPath}/`)) {
 			return { packageName: pkg.name, packagePath: pkg.path };
 		}
 	}
@@ -284,12 +292,12 @@ export function findPackageForPath(
 export function isCrossPackageMove(
 	sourcePath: string,
 	targetPath: string,
-	workspace: WorkspaceInfo,
+	workspace: WorkspaceInfo
 ): boolean {
 	const sourcePackage = findPackageForPath(sourcePath, workspace);
 	const targetPackage = findPackageForPath(targetPath, workspace);
 
-	if (!sourcePackage || !targetPackage) {
+	if (!(sourcePackage && targetPackage)) {
 		return false;
 	}
 
@@ -305,7 +313,7 @@ export function isCrossPackageMove(
 export function findCrossPackageImport(
 	targetPath: string,
 	workspace: WorkspaceInfo,
-	addingToBarrel = true,
+	addingToBarrel = true
 ): string | null {
 	const normalizedTarget = normalizePath(targetPath);
 	const targetPackage = findPackageForPath(targetPath, workspace);
@@ -314,7 +322,9 @@ export function findCrossPackageImport(
 		return null;
 	}
 
-	const pkg = workspace.packages.find((p) => p.name === targetPackage.packageName);
+	const pkg = workspace.packages.find(
+		(p) => p.name === targetPackage.packageName
+	);
 	if (!pkg) {
 		return null;
 	}
@@ -344,7 +354,10 @@ export function findCrossPackageImport(
 
 			// Check if subpath matches an export (accounting for src/ -> dist/ mapping)
 			const srcSubpath = subpath.replace(/^src\//, "");
-			if (normalizedKey === srcSubpath || normalizedKey === srcSubpath + "/index") {
+			if (
+				normalizedKey === srcSubpath ||
+				normalizedKey === `${srcSubpath}/index`
+			) {
 				return exportKey === "." ? pkg.name : `${pkg.name}/${normalizedKey}`;
 			}
 

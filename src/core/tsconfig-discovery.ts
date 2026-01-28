@@ -82,7 +82,7 @@ export function discoverProject(projectDir: string): ProjectDiscovery {
  */
 export function findOwningConfig(
 	filePath: string,
-	discovery: ProjectDiscovery,
+	discovery: ProjectDiscovery
 ): TsConfigInfo | undefined {
 	const absolutePath = path.resolve(filePath);
 	return discovery.fileOwnership.get(absolutePath);
@@ -97,7 +97,9 @@ function findAllTsConfigs(dir: string): string[] {
 
 	while (queue.length > 0) {
 		const current = queue.shift();
-		if (!current) continue;
+		if (!current) {
+			continue;
+		}
 
 		// Check for tsconfig.json in current directory
 		const tsconfigPath = path.join(current, "tsconfig.json");
@@ -121,7 +123,9 @@ function findAllTsConfigs(dir: string): string[] {
 		// Recurse into subdirectories (skip node_modules, dist, etc.)
 		const entries = ts.sys.getDirectories(current);
 		for (const entry of entries) {
-			if (shouldSkipDirectory(entry)) continue;
+			if (shouldSkipDirectory(entry)) {
+				continue;
+			}
 			queue.push(path.join(current, entry));
 		}
 	}
@@ -148,19 +152,23 @@ function shouldSkipDirectory(name: string): boolean {
  */
 function parseTsConfig(tsconfigPath: string): TsConfigInfo | null {
 	const configFile = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
-	if (configFile.error) return null;
+	if (configFile.error) {
+		return null;
+	}
 
 	const rootDir = path.dirname(tsconfigPath);
 
 	const parsed = ts.parseJsonConfigFileContent(
 		configFile.config,
 		ts.sys,
-		rootDir,
+		rootDir
 	);
 
 	// Ignore "No inputs were found" errors
-	const realErrors = parsed.errors.filter((e) => e.code !== 18003);
-	if (realErrors.length > 0) return null;
+	const realErrors = parsed.errors.filter((e) => e.code !== 18_003);
+	if (realErrors.length > 0) {
+		return null;
+	}
 
 	const include: string[] = configFile.config.include ?? [];
 	const exclude: string[] = configFile.config.exclude ?? [];

@@ -59,7 +59,7 @@ export async function renameCommand(options: RenameOptions): Promise<void> {
 		newName,
 		project,
 		dryRun,
-		verbose,
+		verbose
 	);
 
 	printResult(result, dryRun, verbose);
@@ -75,7 +75,7 @@ export async function renameSymbol(
 	newName: string,
 	project: ProjectConfig,
 	dryRun: boolean,
-	verbose: boolean,
+	verbose: boolean
 ): Promise<RenameResult> {
 	const errors: { file: string; message: string }[] = [];
 	const updatedReferences: UpdatedReference[] = [];
@@ -92,12 +92,16 @@ export async function renameSymbol(
 	}
 
 	// Build dependency graph
-	if (verbose) console.log("Building dependency graph...");
+	if (verbose) {
+		console.log("Building dependency graph...");
+	}
 	const graph = buildDependencyGraph(project);
 
 	// Find all files that import from this file
 	const references = findAllReferences(filePath, graph);
-	if (verbose) console.log(`Found ${references.length} references to check`);
+	if (verbose) {
+		console.log(`Found ${references.length} references to check`);
+	}
 
 	// Create program for parsing
 	const program = createProgram(project);
@@ -128,7 +132,7 @@ export async function renameSymbol(
 	const sourceResult = renameInSourceFile(sourceAst, oldName, newName);
 	if (sourceResult.changes.length > 0) {
 		updatedReferences.push(
-			...sourceResult.updates.map((u) => ({ ...u, file: filePath })),
+			...sourceResult.updates.map((u) => ({ ...u, file: filePath }))
 		);
 		if (!dryRun) {
 			await Bun.write(filePath, sourceResult.newContent);
@@ -138,7 +142,9 @@ export async function renameSymbol(
 	// Group references by file
 	const refsByFile = new Map<string, ModuleReference[]>();
 	for (const ref of references) {
-		if (normalizePath(ref.sourceFile) === normalizePath(filePath)) continue;
+		if (normalizePath(ref.sourceFile) === normalizePath(filePath)) {
+			continue;
+		}
 		const existing = refsByFile.get(ref.sourceFile) ?? [];
 		existing.push(ref);
 		refsByFile.set(ref.sourceFile, existing);
@@ -158,11 +164,11 @@ export async function renameSymbol(
 				filePath,
 				oldName,
 				newName,
-				project,
+				project
 			);
 			if (result.updates.length > 0) {
 				updatedReferences.push(
-					...result.updates.map((u) => ({ ...u, file: importingFile })),
+					...result.updates.map((u) => ({ ...u, file: importingFile }))
 				);
 				if (!dryRun) {
 					await Bun.write(importingFile, result.newContent);
@@ -192,19 +198,21 @@ interface ExportLocation {
 
 function findExport(
 	sourceFile: ts.SourceFile,
-	name: string,
+	name: string
 ): ExportLocation | null {
 	let result: ExportLocation | null = null;
 
 	function visit(node: ts.Node) {
-		if (result) return;
+		if (result) {
+			return;
+		}
 
 		// export class/function/const Name
 		if (hasExportModifier(node)) {
 			const declName = getDeclarationName(node);
 			if (declName === name) {
 				const { line } = sourceFile.getLineAndCharacterOfPosition(
-					node.getStart(sourceFile),
+					node.getStart(sourceFile)
 				);
 				result = { type: "declaration", node, line: line + 1 };
 				return;
@@ -215,18 +223,17 @@ function findExport(
 		if (
 			ts.isExportDeclaration(node) &&
 			!node.moduleSpecifier &&
-			node.exportClause
+			node.exportClause &&
+			ts.isNamedExports(node.exportClause)
 		) {
-			if (ts.isNamedExports(node.exportClause)) {
-				for (const element of node.exportClause.elements) {
-					// Check the exported name (element.name), not the local name (element.propertyName)
-					if (element.name.text === name) {
-						const { line } = sourceFile.getLineAndCharacterOfPosition(
-							node.getStart(sourceFile),
-						);
-						result = { type: "named-export", node: element, line: line + 1 };
-						return;
-					}
+			for (const element of node.exportClause.elements) {
+				// Check the exported name (element.name), not the local name (element.propertyName)
+				if (element.name.text === name) {
+					const { line } = sourceFile.getLineAndCharacterOfPosition(
+						node.getStart(sourceFile)
+					);
+					result = { type: "named-export", node: element, line: line + 1 };
+					return;
 				}
 			}
 		}
@@ -238,7 +245,7 @@ function findExport(
 			name === "default"
 		) {
 			const { line } = sourceFile.getLineAndCharacterOfPosition(
-				node.getStart(sourceFile),
+				node.getStart(sourceFile)
 			);
 			result = { type: "default", node, line: line + 1 };
 			return;
@@ -295,7 +302,7 @@ interface TextChange {
 function renameInSourceFile(
 	sourceFile: ts.SourceFile,
 	oldName: string,
-	newName: string,
+	newName: string
 ): {
 	newContent: string;
 	changes: TextChange[];
@@ -310,7 +317,7 @@ function renameInSourceFile(
 			const nameNode = getNameNode(node);
 			if (nameNode && nameNode.text === oldName) {
 				const { line } = sourceFile.getLineAndCharacterOfPosition(
-					node.getStart(sourceFile),
+					node.getStart(sourceFile)
 				);
 				changes.push({
 					start: nameNode.getStart(sourceFile),
@@ -329,30 +336,29 @@ function renameInSourceFile(
 		if (
 			ts.isExportDeclaration(node) &&
 			!node.moduleSpecifier &&
-			node.exportClause
+			node.exportClause &&
+			ts.isNamedExports(node.exportClause)
 		) {
-			if (ts.isNamedExports(node.exportClause)) {
-				for (const element of node.exportClause.elements) {
-					// If there's a propertyName, that's the local name, and name is the exported name
-					// export { localName as exportedName }
-					// If no propertyName, name is both local and exported
-					const exportedName = element.name.text;
+			for (const element of node.exportClause.elements) {
+				// If there's a propertyName, that's the local name, and name is the exported name
+				// export { localName as exportedName }
+				// If no propertyName, name is both local and exported
+				const exportedName = element.name.text;
 
-					if (exportedName === oldName) {
-						const { line } = sourceFile.getLineAndCharacterOfPosition(
-							element.getStart(sourceFile),
-						);
-						changes.push({
-							start: element.name.getStart(sourceFile),
-							end: element.name.getEnd(),
-							newText: newName,
-						});
-						updates.push({
-							line: line + 1,
-							oldSpecifier: oldName,
-							newSpecifier: newName,
-						});
-					}
+				if (exportedName === oldName) {
+					const { line } = sourceFile.getLineAndCharacterOfPosition(
+						element.getStart(sourceFile)
+					);
+					changes.push({
+						start: element.name.getStart(sourceFile),
+						end: element.name.getEnd(),
+						newText: newName,
+					});
+					updates.push({
+						line: line + 1,
+						oldSpecifier: oldName,
+						newSpecifier: newName,
+					});
 				}
 			}
 		}
@@ -385,7 +391,7 @@ function renameInSourceFile(
 			}
 
 			const { line } = sourceFile.getLineAndCharacterOfPosition(
-				node.getStart(sourceFile),
+				node.getStart(sourceFile)
 			);
 			changes.push({
 				start: node.getStart(sourceFile),
@@ -450,7 +456,9 @@ function deduplicateChanges(changes: TextChange[]): TextChange[] {
 	const seen = new Set<string>();
 	return changes.filter((change) => {
 		const key = `${change.start}-${change.end}`;
-		if (seen.has(key)) return false;
+		if (seen.has(key)) {
+			return false;
+		}
 		seen.add(key);
 		return true;
 	});
@@ -461,7 +469,7 @@ function updateImportReferences(
 	_targetFilePath: string,
 	oldName: string,
 	newName: string,
-	_project: ProjectConfig,
+	_project: ProjectConfig
 ): { newContent: string; updates: Omit<UpdatedReference, "file">[] } {
 	const changes: TextChange[] = [];
 	const updates: Omit<UpdatedReference, "file">[] = [];
@@ -486,7 +494,7 @@ function updateImportReferences(
 
 					if (importedName === oldName) {
 						const { line } = sourceFile.getLineAndCharacterOfPosition(
-							element.getStart(sourceFile),
+							element.getStart(sourceFile)
 						);
 
 						if (element.propertyName) {
@@ -529,7 +537,7 @@ function updateImportReferences(
 
 				if (importedName === oldName) {
 					const { line } = sourceFile.getLineAndCharacterOfPosition(
-						element.getStart(sourceFile),
+						element.getStart(sourceFile)
 					);
 
 					if (element.propertyName) {
@@ -579,7 +587,7 @@ function updateImportReferences(
 function printResult(
 	result: RenameResult,
 	dryRun: boolean,
-	verbose: boolean,
+	verbose: boolean
 ): void {
 	if (result.success) {
 		console.log(`✅ ${dryRun ? "Would rename" : "Renamed"} successfully!\n`);
@@ -589,7 +597,7 @@ function printResult(
 
 	if (result.updatedReferences.length > 0) {
 		console.log(
-			`📝 ${dryRun ? "Would update" : "Updated"} ${result.updatedReferences.length} reference(s):`,
+			`📝 ${dryRun ? "Would update" : "Updated"} ${result.updatedReferences.length} reference(s):`
 		);
 
 		const byFile = new Map<string, UpdatedReference[]>();
@@ -605,7 +613,7 @@ function printResult(
 			if (verbose) {
 				for (const ref of refs) {
 					console.log(
-						`     L${ref.line}: "${ref.oldSpecifier}" → "${ref.newSpecifier}"`,
+						`     L${ref.line}: "${ref.oldSpecifier}" → "${ref.newSpecifier}"`
 					);
 				}
 			}

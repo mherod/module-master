@@ -64,7 +64,7 @@ export interface WorkspaceInfo {
  * Discover workspace configuration and all packages
  */
 export async function discoverWorkspace(
-	startDir: string,
+	startDir: string
 ): Promise<WorkspaceInfo | null> {
 	const absoluteDir = path.resolve(startDir);
 
@@ -80,7 +80,9 @@ export async function discoverWorkspace(
 	const packages = await findWorkspacePackages(root, patterns);
 
 	// Read root package.json
-	const rootPackageJson = await readPackageJson(path.join(root, "package.json"));
+	const rootPackageJson = await readPackageJson(
+		path.join(root, "package.json")
+	);
 
 	return {
 		root,
@@ -99,9 +101,11 @@ export async function discoverWorkspace(
 /**
  * Find the workspace root directory and config
  */
-async function findWorkspaceRoot(
-	startDir: string,
-): Promise<{ root: string; type: WorkspaceInfo["type"]; patterns: string[] } | null> {
+async function findWorkspaceRoot(startDir: string): Promise<{
+	root: string;
+	type: WorkspaceInfo["type"];
+	patterns: string[];
+} | null> {
 	let currentDir = startDir;
 
 	while (currentDir !== path.dirname(currentDir)) {
@@ -120,7 +124,7 @@ async function findWorkspaceRoot(
 				const workspaces = pkg.workspaces as string[] | { packages?: string[] };
 				const patterns = Array.isArray(workspaces)
 					? workspaces
-					: workspaces.packages ?? [];
+					: (workspaces.packages ?? []);
 				const type = (await fileExists(path.join(currentDir, "yarn.lock")))
 					? "yarn"
 					: "npm";
@@ -162,7 +166,7 @@ async function parsePnpmWorkspace(filePath: string): Promise<string[]> {
  */
 async function findWorkspacePackages(
 	root: string,
-	patterns: string[],
+	patterns: string[]
 ): Promise<WorkspacePackage[]> {
 	const packages: WorkspacePackage[] = [];
 	const seen = new Set<string>();
@@ -177,10 +181,14 @@ async function findWorkspacePackages(
 			const glob = new Glob(globPattern);
 			for await (const match of glob.scan({ cwd: root, absolute: true })) {
 				// Skip node_modules
-				if (match.includes("node_modules")) continue;
+				if (match.includes("node_modules")) {
+					continue;
+				}
 
 				const packageJsonPath = match;
-				if (seen.has(packageJsonPath)) continue;
+				if (seen.has(packageJsonPath)) {
+					continue;
+				}
 				seen.add(packageJsonPath);
 
 				const pkg = await parsePackage(packageJsonPath);
@@ -203,10 +211,12 @@ async function findWorkspacePackages(
  * Parse a package.json file into WorkspacePackage
  */
 async function parsePackage(
-	packageJsonPath: string,
+	packageJsonPath: string
 ): Promise<WorkspacePackage | null> {
 	const pkg = await readPackageJson(packageJsonPath);
-	if (!pkg?.name) return null;
+	if (!pkg?.name) {
+		return null;
+	}
 
 	const pkgDir = path.dirname(packageJsonPath);
 
@@ -261,7 +271,9 @@ async function parsePackage(
 		tsconfigPath,
 		scripts: pkg.scripts as Record<string, string> | undefined,
 		dependencies: pkg.dependencies as Record<string, string> | undefined,
-		peerDependencies: pkg.peerDependencies as Record<string, string> | undefined,
+		peerDependencies: pkg.peerDependencies as
+			| Record<string, string>
+			| undefined,
 	};
 }
 
@@ -269,7 +281,9 @@ async function parsePackage(
  * Find the build script for a package (checks common build script names)
  */
 export function findBuildScript(pkg: WorkspacePackage): string | null {
-	if (!pkg.scripts) return null;
+	if (!pkg.scripts) {
+		return null;
+	}
 
 	// Check for common build script names in order of preference
 	const buildScriptNames = ["build", "compile", "bundle", "dist"];
@@ -286,7 +300,7 @@ export function findBuildScript(pkg: WorkspacePackage): string | null {
  * Read and parse a package.json file
  */
 async function readPackageJson(
-	filePath: string,
+	filePath: string
 ): Promise<Record<string, unknown> | null> {
 	try {
 		const content = await Bun.file(filePath).text();
@@ -326,7 +340,9 @@ async function isBarrelFile(filePath: string): Promise<boolean> {
 		}
 		const content = await file.text();
 		// Check for export statements (export *, export {, export default, export const/function/class)
-		return /\bexport\s+(\*|{|default|const|let|var|function|class|type|interface|enum)\b/.test(content);
+		return /\bexport\s+(\*|{|default|const|let|var|function|class|type|interface|enum)\b/.test(
+			content
+		);
 	} catch {
 		return false;
 	}
@@ -337,7 +353,7 @@ async function isBarrelFile(filePath: string): Promise<boolean> {
  */
 export function resolvePackageImport(
 	targetPath: string,
-	workspace: WorkspaceInfo,
+	workspace: WorkspaceInfo
 ): { packageName: string; subpath: string; resolvedImport: string } | null {
 	const normalizedTarget = path.normalize(targetPath);
 
@@ -379,9 +395,11 @@ export function resolvePackageImport(
  */
 function findMatchingExport(
 	pkg: WorkspacePackage,
-	subpath: string,
+	subpath: string
 ): string | null {
-	if (!pkg.exports) return null;
+	if (!pkg.exports) {
+		return null;
+	}
 
 	// Handle string exports (simple case)
 	if (typeof pkg.exports === "string") {
@@ -392,11 +410,11 @@ function findMatchingExport(
 	}
 
 	// Handle exports map
-	for (const [exportKey, exportValue] of Object.entries(pkg.exports)) {
+	for (const [exportKey, _exportValue] of Object.entries(pkg.exports)) {
 		// Normalize export key (remove leading ./)
 		const normalizedKey = exportKey.replace(/^\.\//, "").replace(/^\.$/, "");
 
-		if (normalizedKey === subpath || normalizedKey === subpath + "/index") {
+		if (normalizedKey === subpath || normalizedKey === `${subpath}/index`) {
 			const resolvedPath =
 				exportKey === "." ? pkg.name : `${pkg.name}/${normalizedKey}`;
 			return resolvedPath;
@@ -447,7 +465,9 @@ export function printWorkspaceInfo(workspace: WorkspaceInfo): void {
 		if (pkg.exports && typeof pkg.exports === "object") {
 			const exportKeys = Object.keys(pkg.exports);
 			if (exportKeys.length > 0) {
-				console.log(`      Exports: ${exportKeys.slice(0, 5).join(", ")}${exportKeys.length > 5 ? ` (+${exportKeys.length - 5} more)` : ""}`);
+				console.log(
+					`      Exports: ${exportKeys.slice(0, 5).join(", ")}${exportKeys.length > 5 ? ` (+${exportKeys.length - 5} more)` : ""}`
+				);
 			}
 		}
 

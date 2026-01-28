@@ -50,7 +50,7 @@ function search(
 	query: string,
 	fileOwnership: Map<string, unknown>,
 	baseDir: string,
-	type: "file" | "export" | "all",
+	type: "file" | "export" | "all"
 ): FindResult {
 	const files: FileMatch[] = [];
 	const exports: ExportMatch[] = [];
@@ -80,7 +80,9 @@ function search(
 	if (type === "export" || type === "all") {
 		for (const filePath of allFiles) {
 			// Only scan TypeScript/JavaScript files
-			if (!/\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/.test(filePath)) continue;
+			if (!/\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/.test(filePath)) {
+				continue;
+			}
 
 			try {
 				const fileExports = getFileExports(filePath);
@@ -106,16 +108,24 @@ function search(
 			a.filename.toLowerCase().replace(/\.[^.]+$/, "") === queryLower;
 		const bExact =
 			b.filename.toLowerCase().replace(/\.[^.]+$/, "") === queryLower;
-		if (aExact && !bExact) return -1;
-		if (!aExact && bExact) return 1;
+		if (aExact && !bExact) {
+			return -1;
+		}
+		if (!aExact && bExact) {
+			return 1;
+		}
 		return a.relativePath.localeCompare(b.relativePath);
 	});
 
 	exports.sort((a, b) => {
 		const aExact = a.export.name.toLowerCase() === queryLower;
 		const bExact = b.export.name.toLowerCase() === queryLower;
-		if (aExact && !bExact) return -1;
-		if (!aExact && bExact) return 1;
+		if (aExact && !bExact) {
+			return -1;
+		}
+		if (!aExact && bExact) {
+			return 1;
+		}
 		return a.export.name.localeCompare(b.export.name);
 	});
 
@@ -124,13 +134,15 @@ function search(
 
 function getFileExports(filePath: string): ExportInfo[] {
 	const content = ts.sys.readFile(filePath);
-	if (!content) return [];
+	if (!content) {
+		return [];
+	}
 
 	const sourceFile = ts.createSourceFile(
 		filePath,
 		content,
 		ts.ScriptTarget.Latest,
-		true,
+		true
 	);
 
 	return scanExports(sourceFile);
@@ -139,7 +151,7 @@ function getFileExports(filePath: string): ExportInfo[] {
 function printResults(
 	result: FindResult,
 	baseDir: string,
-	verbose?: boolean,
+	verbose?: boolean
 ): void {
 	const { files, exports } = result;
 	const totalResults = files.length + exports.length;
@@ -176,7 +188,7 @@ function printResults(
 				const typeMarker = exp.export.isType ? " (type)" : "";
 				const defaultMarker = exp.export.type === "default" ? " [default]" : "";
 				console.log(
-					`      • ${exp.export.name}${typeMarker}${defaultMarker} (line ${exp.export.line})`,
+					`      • ${exp.export.name}${typeMarker}${defaultMarker} (line ${exp.export.line})`
 				);
 			}
 		}

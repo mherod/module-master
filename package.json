@@ -1,54 +1,69 @@
 {
-	"name": "module-master",
-	"version": "0.1.0",
-	"description": "Precise TypeScript/JavaScript module refactoring CLI. Move files, rename exports, and update all import references.",
-	"type": "module",
-	"bin": {
-		"module-master": "./src/cli.ts"
-	},
-	"files": ["src", "README.md", "LICENSE"],
-	"scripts": {
-		"dev": "bun run src/cli.ts",
-		"build": "bun build src/cli.ts --compile --outfile dist/module-master",
-		"test": "bun test",
-		"lint": "bunx @biomejs/biome check --write .",
-		"typecheck": "bunx tsc --noEmit",
-		"prepublishOnly": "bun run typecheck && bun run lint && bun test",
-		"git:unlock": "rm -f .git/index.lock"
-	},
-	"keywords": [
-		"typescript",
-		"javascript",
-		"refactoring",
-		"cli",
-		"move",
-		"rename",
-		"imports",
-		"exports",
-		"module",
-		"ast",
-		"codemod",
-		"tsconfig",
-		"monorepo"
-	],
-	"author": "Matthew Herod",
-	"license": "MIT",
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/mherod/module-master.git"
-	},
-	"homepage": "https://github.com/mherod/module-master#readme",
-	"bugs": {
-		"url": "https://github.com/mherod/module-master/issues"
-	},
-	"engines": {
-		"bun": ">=1.0.0"
-	},
-	"dependencies": {
-		"typescript": "^5.7.2"
-	},
-	"devDependencies": {
-		"@biomejs/biome": "^1.9.4",
-		"@types/bun": "latest"
-	}
+  "name": "module-master",
+  "version": "0.1.0",
+  "description": "Precise TypeScript/JavaScript module refactoring CLI. Move files, rename exports, and update all import references.",
+  "type": "module",
+  "bin": {
+    "module-master": "./src/cli.ts"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "bun run src/cli.ts",
+    "build": "bun build src/cli.ts --compile --outfile dist/module-master",
+    "test": "bun test",
+    "lint": "bunx @biomejs/biome check --write .",
+    "typecheck": "bunx tsc --noEmit",
+    "prepublishOnly": "bun run typecheck && bun run lint && bun test",
+    "git:unlock": "rm -f .git/index.lock",
+    "check": "ultracite check",
+    "fix": "ultracite fix",
+    "prepare": "husky"
+  },
+  "keywords": [
+    "typescript",
+    "javascript",
+    "refactoring",
+    "cli",
+    "move",
+    "rename",
+    "imports",
+    "exports",
+    "module",
+    "ast",
+    "codemod",
+    "tsconfig",
+    "monorepo"
+  ],
+  "author": "Matthew Herod",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mherod/module-master.git"
+  },
+  "homepage": "https://github.com/mherod/module-master#readme",
+  "bugs": {
+    "url": "https://github.com/mherod/module-master/issues"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "dependencies": {
+    "typescript": "^5.7.2"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.3.12",
+    "@types/bun": "latest",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
+    "ultracite": "7.1.1"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,json,jsonc,css,scss,md,mdx}": [
+      "bun x ultracite fix"
+    ]
+  }
 }

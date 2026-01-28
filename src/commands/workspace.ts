@@ -11,7 +11,9 @@ export interface WorkspaceOptions {
 	json?: boolean;
 }
 
-export async function workspaceCommand(options: WorkspaceOptions): Promise<void> {
+export async function workspaceCommand(
+	options: WorkspaceOptions
+): Promise<void> {
 	const { directory, verbose = false, json = false } = options;
 	const absoluteDir = path.resolve(directory);
 
@@ -60,7 +62,7 @@ function printDetailedPackageInfo(workspace: WorkspaceInfo): void {
 
 		if (pkg.dependencies && Object.keys(pkg.dependencies).length > 0) {
 			const internalDeps = Object.keys(pkg.dependencies).filter((dep) =>
-				workspace.packages.some((p) => p.name === dep),
+				workspace.packages.some((p) => p.name === dep)
 			);
 			if (internalDeps.length > 0) {
 				console.log(`\n   Internal dependencies: ${internalDeps.join(", ")}`);

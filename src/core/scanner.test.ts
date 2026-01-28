@@ -28,21 +28,21 @@ describe("scanModuleReferences", () => {
 		const sourceFile = ts.createSourceFile(
 			"test.ts",
 			sourceCode,
-			ts.ScriptTarget.Latest,
+			ts.ScriptTarget.Latest
 		);
 		const refs = scanModuleReferences(sourceFile, project);
 
 		expect(refs).toContainEqual(
-			expect.objectContaining({ specifier: "./mocked", type: "jest-mock" }),
+			expect.objectContaining({ specifier: "./mocked", type: "jest-mock" })
 		);
 		expect(refs).toContainEqual(
-			expect.objectContaining({ specifier: "./vi-mocked", type: "jest-mock" }),
+			expect.objectContaining({ specifier: "./vi-mocked", type: "jest-mock" })
 		);
 		expect(refs).toContainEqual(
 			expect.objectContaining({
 				specifier: "./vitest-mocked",
 				type: "jest-mock",
-			}),
+			})
 		);
 	});
 });

@@ -69,35 +69,35 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 
 	if (result.changes.length === 0) {
 		console.log(
-			"✨ No changes needed. All imports already follow the preferred style.\n",
+			"✨ No changes needed. All imports already follow the preferred style.\n"
 		);
 		return;
 	}
 
 	// Apply changes with optional verification
-	if (!dryRun) {
-		if (verify) {
-			const verifyResult = await verifyTypeChecking(
-				project,
-				() => {}, // No snapshot needed
-				() => applyChanges(result.changes),
+	if (dryRun) {
+		printResults(result, dryRun, verbose);
+	} else if (verify) {
+		const verifyResult = await verifyTypeChecking(
+			project,
+			() => {
+				// No snapshot needed
+			},
+			() => applyChanges(result.changes)
+		);
+
+		printResults(result, dryRun, verbose);
+		console.log();
+		printVerificationResults(verifyResult);
+
+		if (!verifyResult.success) {
+			console.error(
+				"\n⚠️  Type checking failed. Changes were applied but introduced errors."
 			);
-
-			printResults(result, dryRun, verbose);
-			console.log();
-			printVerificationResults(verifyResult);
-
-			if (!verifyResult.success) {
-				console.error(
-					"\n⚠️  Type checking failed. Changes were applied but introduced errors.",
-				);
-				process.exit(1);
-			}
-		} else {
-			applyChanges(result.changes);
-			printResults(result, dryRun, verbose);
+			process.exit(1);
 		}
 	} else {
+		applyChanges(result.changes);
 		printResults(result, dryRun, verbose);
 	}
 }
@@ -105,7 +105,7 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 async function normalizeImports(
 	target: string,
 	prefer: "alias" | "relative" | "shortest",
-	project: ProjectConfig,
+	project: ProjectConfig
 ): Promise<AliasResult> {
 	const changes: AliasChange[] = [];
 	const filesToProcess = getFilesToProcess(target, project);
@@ -127,7 +127,7 @@ async function normalizeImports(
 				file,
 				ref.resolvedPath,
 				prefer,
-				project,
+				project
 			);
 
 			if (newSpecifier && newSpecifier !== ref.specifier) {
@@ -160,7 +160,9 @@ function applyChanges(changes: AliasChange[]): void {
 
 	for (const [filePath, fileChanges] of byFile) {
 		let content = ts.sys.readFile(filePath);
-		if (!content) continue;
+		if (!content) {
+			continue;
+		}
 
 		// Sort changes by line number (descending) to avoid offset issues
 		const sorted = [...fileChanges].sort((a, b) => b.line - a.line);
@@ -171,7 +173,7 @@ function applyChanges(changes: AliasChange[]): void {
 			// This works for most cases, but could be improved with AST-based replacement
 			const oldImport = new RegExp(
 				`(['"\`])${escapeRegex(change.oldSpecifier)}\\1`,
-				"g",
+				"g"
 			);
 			content = content.replace(oldImport, `$1${change.newSpecifier}$1`);
 		}
@@ -185,17 +187,11 @@ function escapeRegex(str: string): string {
 }
 
 function getFilesToProcess(target: string, project: ProjectConfig): string[] {
-	const stat = ts.sys.fileExists(target)
-		? "file"
-		: ts.sys.directoryExists(target)
-			? "directory"
-			: null;
-
-	if (stat === "file") {
+	if (ts.sys.fileExists(target)) {
 		return [target];
 	}
 
-	if (stat === "directory") {
+	if (ts.sys.directoryExists(target)) {
 		return project.files.filter((f) => f.startsWith(target));
 	}
 
@@ -204,7 +200,7 @@ function getFilesToProcess(target: string, project: ProjectConfig): string[] {
 
 async function getFileReferences(
 	filePath: string,
-	project: ProjectConfig,
+	project: ProjectConfig
 ): Promise<ModuleReference[]> {
 	const program = createProgram(project, [filePath]);
 	const sourceFile = program.getSourceFile(filePath);
@@ -220,7 +216,7 @@ function calculatePreferredSpecifier(
 	fromFile: string,
 	toFile: string,
 	prefer: "alias" | "relative" | "shortest",
-	project: ProjectConfig,
+	project: ProjectConfig
 ): string | null {
 	const relativeSpecifier = calculateRelativeSpecifier(fromFile, toFile);
 	const aliasSpecifier = findMatchingAlias(toFile, project);
@@ -234,7 +230,9 @@ function calculatePreferredSpecifier(
 	}
 
 	if (prefer === "shortest") {
-		if (!aliasSpecifier) return relativeSpecifier;
+		if (!aliasSpecifier) {
+			return relativeSpecifier;
+		}
 		return relativeSpecifier.length <= aliasSpecifier.length
 			? relativeSpecifier
 			: aliasSpecifier;
@@ -260,14 +258,14 @@ function calculateRelativeSpecifier(fromFile: string, toFile: string): string {
 
 function findMatchingAlias(
 	targetPath: string,
-	project: ProjectConfig,
+	project: ProjectConfig
 ): string | null {
 	const normalizedTarget = normalizePath(targetPath);
 
 	// Remove extension for matching
 	const targetWithoutExt = normalizedTarget.replace(
 		/\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/,
-		"",
+		""
 	);
 
 	for (const [alias, paths] of project.pathAliases) {
@@ -279,7 +277,7 @@ function findMatchingAlias(
 			const resolvedAliasPath = path.resolve(
 				project.rootDir,
 				project.compilerOptions.baseUrl ?? ".",
-				aliasPath.replace(/\/\*$/, ""),
+				aliasPath.replace(/\/\*$/, "")
 			);
 
 			const normalizedAliasPath = normalizePath(resolvedAliasPath);
@@ -298,10 +296,10 @@ function findMatchingAlias(
 function printResults(
 	result: AliasResult,
 	dryRun: boolean,
-	verbose: boolean,
+	verbose: boolean
 ): void {
 	console.log(
-		`${dryRun ? "📋 Would update" : "✅ Updated"} ${result.importsUpdated} import(s) in ${result.filesProcessed} file(s)\n`,
+		`${dryRun ? "📋 Would update" : "✅ Updated"} ${result.importsUpdated} import(s) in ${result.filesProcessed} file(s)\n`
 	);
 
 	if (verbose || dryRun) {

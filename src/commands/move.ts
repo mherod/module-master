@@ -10,7 +10,12 @@ import {
 	loadProject,
 	resolveTsConfig,
 } from "../core/project.ts";
-import { calculateNewSpecifier, normalizePath } from "../core/resolver.ts";
+import {
+	calculateNewSpecifier,
+	findPackageForPath,
+	isCrossPackageMove,
+	normalizePath,
+} from "../core/resolver.ts";
 import { scanExports, scanModuleReferences } from "../core/scanner.ts";
 import {
 	addExportToDestinationBarrel,
@@ -19,15 +24,10 @@ import {
 	updateFileReferences,
 } from "../core/updater.ts";
 import {
-	printVerificationResults,
-	verifyTypeChecking,
-} from "../core/verify.ts";
-import {
 	discoverWorkspace,
 	findBuildScript,
 	type WorkspaceInfo,
 } from "../core/workspace.ts";
-import { findPackageForPath, isCrossPackageMove } from "../core/resolver.ts";
 import type {
 	MoveError,
 	MoveResult,
@@ -60,7 +60,7 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 	// Find and load project config
 	const tsconfigPath = resolveTsConfig(
 		projectArg,
-		path.dirname(absoluteSource),
+		path.dirname(absoluteSource)
 	);
 	if (!tsconfigPath) {
 		console.error("Could not find tsconfig.json");
@@ -72,7 +72,9 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 	// Discover workspace for cross-package move support
 	const workspace = await discoverWorkspace(project.rootDir);
 	if (verbose && workspace) {
-		console.log(`Found workspace: ${workspace.type} with ${workspace.packages.length} packages`);
+		console.log(
+			`Found workspace: ${workspace.type} with ${workspace.packages.length} packages`
+		);
 	}
 
 	console.log(`\n${dryRun ? "🔍 Dry run:" : "🚀"} Moving module...`);
@@ -89,14 +91,23 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 		project,
 		dryRun,
 		verbose,
-		workspace ?? undefined,
+		workspace ?? undefined
 	);
 
 	// For cross-package moves, run build scripts to update dist/
 	if (!dryRun && result.success && workspace) {
-		const isCrossPackage = isCrossPackageMove(absoluteSource, absoluteTarget, workspace);
+		const isCrossPackage = isCrossPackageMove(
+			absoluteSource,
+			absoluteTarget,
+			workspace
+		);
 		if (isCrossPackage) {
-			await runPackageBuilds(absoluteSource, absoluteTarget, workspace, verbose);
+			await runPackageBuilds(
+				absoluteSource,
+				absoluteTarget,
+				workspace,
+				verbose
+			);
 		}
 	}
 
@@ -104,7 +115,9 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 		// Run type checking to verify the move didn't break anything
 		const errors = await runTypeCheck(project);
 		if (errors.length > 0) {
-			console.error(`\n❌ Type checking failed after move - ${errors.length} error(s):`);
+			console.error(
+				`\n❌ Type checking failed after move - ${errors.length} error(s):`
+			);
 			for (const error of errors.slice(0, 10)) {
 				console.error(`   ${error}`);
 			}
@@ -112,7 +125,7 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 				console.error(`   ... and ${errors.length - 10} more`);
 			}
 			console.error(
-				"\n⚠️  Move completed but introduced type errors. Please review.",
+				"\n⚠️  Move completed but introduced type errors. Please review."
 			);
 			process.exit(1);
 		}
@@ -135,13 +148,17 @@ async function runTypeCheck(project: ProjectConfig): Promise<string[]> {
 			cwd: project.rootDir,
 			encoding: "utf-8",
 			shell: false,
-		},
+		}
 	);
 
-	if (result.status === 0) return [];
+	if (result.status === 0) {
+		return [];
+	}
 
 	const output = (result.stdout + result.stderr).trim();
-	if (!output) return [];
+	if (!output) {
+		return [];
+	}
 
 	return output
 		.split("\n")
@@ -153,7 +170,7 @@ async function runPackageBuilds(
 	sourcePath: string,
 	targetPath: string,
 	workspace: WorkspaceInfo,
-	verbose: boolean,
+	verbose: boolean
 ): Promise<void> {
 	const { spawnSync } = await import("node:child_process");
 
@@ -161,11 +178,17 @@ async function runPackageBuilds(
 	const sourcePackage = findPackageForPath(sourcePath, workspace);
 	const targetPackage = findPackageForPath(targetPath, workspace);
 
-	const packagesToRebuild: Array<{ name: string; path: string; script: string }> = [];
+	const packagesToRebuild: Array<{
+		name: string;
+		path: string;
+		script: string;
+	}> = [];
 
 	// Destination package needs to be built first (new file needs to be compiled)
 	if (targetPackage) {
-		const pkg = workspace.packages.find((p) => p.name === targetPackage.packageName);
+		const pkg = workspace.packages.find(
+			(p) => p.name === targetPackage.packageName
+		);
 		if (pkg) {
 			const buildScript = findBuildScript(pkg);
 			if (buildScript) {
@@ -179,8 +202,13 @@ async function runPackageBuilds(
 	}
 
 	// Source package may need rebuild if barrel files changed
-	if (sourcePackage && sourcePackage.packageName !== targetPackage?.packageName) {
-		const pkg = workspace.packages.find((p) => p.name === sourcePackage.packageName);
+	if (
+		sourcePackage &&
+		sourcePackage.packageName !== targetPackage?.packageName
+	) {
+		const pkg = workspace.packages.find(
+			(p) => p.name === sourcePackage.packageName
+		);
 		if (pkg) {
 			const buildScript = findBuildScript(pkg);
 			if (buildScript) {
@@ -226,7 +254,7 @@ export async function moveModule(
 	project: ProjectConfig,
 	dryRun: boolean,
 	verbose: boolean,
-	workspace?: WorkspaceInfo,
+	workspace?: WorkspaceInfo
 ): Promise<MoveResult> {
 	const errors: MoveError[] = [];
 	const updatedReferences: UpdatedReference[] = [];
@@ -266,12 +294,16 @@ export async function moveModule(
 	}
 
 	// Build dependency graph
-	if (verbose) console.log("Building dependency graph...");
+	if (verbose) {
+		console.log("Building dependency graph...");
+	}
 	const graph = buildDependencyGraph(project);
 
 	// Find all files that reference the source file
 	const references = findAllReferences(sourcePath, graph, project);
-	if (verbose) console.log(`Found ${references.length} references to update`);
+	if (verbose) {
+		console.log(`Found ${references.length} references to update`);
+	}
 
 	// Find barrel files that re-export the source
 	const barrelFiles = findBarrelReExports(sourcePath, graph);
@@ -295,7 +327,9 @@ export async function moveModule(
 	// Scan exports from the source file for cross-package move handling
 	const movedFileExports = sourceAst ? scanExports(sourceAst) : [];
 	if (verbose && movedFileExports.length > 0) {
-		console.log(`Moved file exports: ${movedFileExports.map((e) => e.name).join(", ")}`);
+		console.log(
+			`Moved file exports: ${movedFileExports.map((e) => e.name).join(", ")}`
+		);
 	}
 
 	if (sourceAst) {
@@ -307,7 +341,7 @@ export async function moveModule(
 				internalRefs,
 				sourcePath,
 				targetPath,
-				project,
+				project
 			);
 
 			if (updates.length > 0) {
@@ -329,7 +363,7 @@ export async function moveModule(
 	}
 
 	// If file wasn't moved yet (no internal refs or couldn't parse), copy as-is
-	if (!fileMoved && !dryRun) {
+	if (!(fileMoved || dryRun)) {
 		const content = await sourceFile.text();
 		await Bun.write(targetPath, content);
 		await Bun.file(sourcePath).delete();
@@ -360,7 +394,7 @@ export async function moveModule(
 				targetPath,
 				project,
 				workspace,
-				movedFileExports,
+				movedFileExports
 			);
 
 			if (updates.length > 0) {
@@ -381,7 +415,9 @@ export async function moveModule(
 	// Update barrel files
 	for (const barrelPath of barrelFiles) {
 		// Skip if already processed as a regular reference
-		if (refsByFile.has(barrelPath)) continue;
+		if (refsByFile.has(barrelPath)) {
+			continue;
+		}
 
 		try {
 			const barrelAst = program.getSourceFile(barrelPath);
@@ -399,7 +435,7 @@ export async function moveModule(
 				sourcePath,
 				targetPath,
 				project,
-				workspace,
+				workspace
 			);
 
 			if (updates.length > 0) {
@@ -428,7 +464,7 @@ export async function moveModule(
 					const { newContent, update } = addExportToDestinationBarrel(
 						barrelContent,
 						targetPath,
-						destBarrelPath,
+						destBarrelPath
 					);
 
 					if (newContent !== barrelContent) {
@@ -437,7 +473,9 @@ export async function moveModule(
 							await Bun.write(destBarrelPath, newContent);
 						}
 						if (verbose) {
-							console.log(`Added export to destination barrel: ${destBarrelPath}`);
+							console.log(
+								`Added export to destination barrel: ${destBarrelPath}`
+							);
 						}
 					}
 				}
@@ -464,7 +502,7 @@ function updateInternalImports(
 	refs: ReturnType<typeof scanModuleReferences>,
 	_oldPath: string,
 	newPath: string,
-	project: ProjectConfig,
+	project: ProjectConfig
 ): { newContent: string; updates: UpdatedReference[] } {
 	const changes: { start: number; end: number; newText: string }[] = [];
 	const updates: UpdatedReference[] = [];
@@ -476,14 +514,14 @@ function updateInternalImports(
 			newPath, // Calculate from new location
 			ref.resolvedPath,
 			ref.resolvedPath, // Target hasn't moved
-			project,
+			project
 		);
 
 		if (newSpecifier !== ref.specifier) {
 			const location = findSpecifierInSource(
 				sourceFile,
 				ref.specifier,
-				ref.line,
+				ref.line
 			);
 			if (location) {
 				changes.push({
@@ -519,12 +557,14 @@ function updateInternalImports(
 function findSpecifierInSource(
 	sourceFile: ts.SourceFile,
 	specifier: string,
-	line: number,
+	line: number
 ): { start: number; end: number } | null {
 	let result: { start: number; end: number } | null = null;
 
 	function visit(node: ts.Node) {
-		if (result) return;
+		if (result) {
+			return;
+		}
 
 		let moduleSpecifier: ts.StringLiteral | undefined;
 
@@ -548,7 +588,7 @@ function findSpecifierInSource(
 
 		if (moduleSpecifier && moduleSpecifier.text === specifier) {
 			const { line: nodeLine } = sourceFile.getLineAndCharacterOfPosition(
-				node.getStart(),
+				node.getStart()
 			);
 			if (nodeLine + 1 === line) {
 				result = {
@@ -568,7 +608,7 @@ function findSpecifierInSource(
 function printResult(
 	result: MoveResult,
 	dryRun: boolean,
-	verbose: boolean,
+	verbose: boolean
 ): void {
 	if (result.success) {
 		console.log(`✅ ${dryRun ? "Would move" : "Moved"} successfully!\n`);
@@ -578,7 +618,7 @@ function printResult(
 
 	if (result.updatedReferences.length > 0) {
 		console.log(
-			`📝 ${dryRun ? "Would update" : "Updated"} ${result.updatedReferences.length} reference(s):`,
+			`📝 ${dryRun ? "Would update" : "Updated"} ${result.updatedReferences.length} reference(s):`
 		);
 
 		const byFile = new Map<string, UpdatedReference[]>();
@@ -594,7 +634,7 @@ function printResult(
 			if (verbose) {
 				for (const ref of refs) {
 					console.log(
-						`     L${ref.line}: "${ref.oldSpecifier}" → "${ref.newSpecifier}"`,
+						`     L${ref.line}: "${ref.oldSpecifier}" → "${ref.newSpecifier}"`
 					);
 				}
 			}

@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { findAllReferences, type DependencyGraph } from "./graph";
 import type { ModuleReference } from "../types";
+import { type DependencyGraph, findAllReferences } from "./graph";
 
 describe("findAllReferences", () => {
 	// Mock graph helper
 	const createMockGraph = (
 		imports: Record<string, string[]>, // file -> imports
-		reExports: Record<string, string[]>, // barrel -> re-exported files
+		reExports: Record<string, string[]> // barrel -> re-exported files
 	): DependencyGraph => {
 		const importMap = new Map<string, ModuleReference[]>();
 		const importedBy = new Map<string, ModuleReference[]>();
@@ -31,7 +31,7 @@ describe("findAllReferences", () => {
 						line: 1,
 						column: 1,
 						isTypeOnly: false,
-					}) as ModuleReference,
+					}) as ModuleReference
 			);
 			importMap.set(file, refs);
 
@@ -55,7 +55,7 @@ describe("findAllReferences", () => {
 			{
 				"src/consumer.ts": ["src/target.ts"],
 			},
-			{},
+			{}
 		);
 
 		const refs = findAllReferences("src/target.ts", graph);
@@ -71,7 +71,7 @@ describe("findAllReferences", () => {
 			},
 			{
 				"src/barrel.ts": ["src/target.ts"],
-			},
+			}
 		);
 
 		const refs = findAllReferences("src/target.ts", graph);
@@ -80,11 +80,11 @@ describe("findAllReferences", () => {
 		// 2. Barrel -> Target (direct)
 		expect(refs).toHaveLength(2);
 
-		const consumerRef = refs.find(r => r.sourceFile === "src/consumer.ts");
+		const consumerRef = refs.find((r) => r.sourceFile === "src/consumer.ts");
 		expect(consumerRef).toBeDefined();
 		expect(consumerRef?.resolvedPath).toBe("src/target.ts");
 
-		const barrelRef = refs.find(r => r.sourceFile === "src/barrel.ts");
+		const barrelRef = refs.find((r) => r.sourceFile === "src/barrel.ts");
 		expect(barrelRef).toBeDefined();
 	});
 
@@ -98,7 +98,7 @@ describe("findAllReferences", () => {
 			{
 				"src/barrel2.ts": ["src/barrel1.ts"],
 				"src/barrel1.ts": ["src/target.ts"],
-			},
+			}
 		);
 
 		const refs = findAllReferences("src/target.ts", graph);
@@ -108,30 +108,30 @@ describe("findAllReferences", () => {
 		// 1. Consumer (imports Barrel2)
 		// 2. Barrel2 (imports Barrel1) -- technically an importer in the chain
 
-		expect(refs.some(r => r.sourceFile === "src/consumer.ts")).toBe(true);
+		expect(refs.some((r) => r.sourceFile === "src/consumer.ts")).toBe(true);
 
-		const consumerRef = refs.find(r => r.sourceFile === "src/consumer.ts");
+		const consumerRef = refs.find((r) => r.sourceFile === "src/consumer.ts");
 		expect(consumerRef?.resolvedPath).toBe("src/target.ts");
 	});
 
-    test("handles diamond dependencies (avoid duplicates)", () => {
-        // A -> Barrel1 -> Consumer
-        // A -> Barrel2 -> Consumer
-        const graph = createMockGraph(
-            {
-                "src/consumer.ts": ["src/barrel1.ts", "src/barrel2.ts"],
-                "src/barrel1.ts": ["src/target.ts"],
-                "src/barrel2.ts": ["src/target.ts"]
-            },
-            {
-                "src/barrel1.ts": ["src/target.ts"],
-                "src/barrel2.ts": ["src/target.ts"]
-            }
-        );
+	test("handles diamond dependencies (avoid duplicates)", () => {
+		// A -> Barrel1 -> Consumer
+		// A -> Barrel2 -> Consumer
+		const graph = createMockGraph(
+			{
+				"src/consumer.ts": ["src/barrel1.ts", "src/barrel2.ts"],
+				"src/barrel1.ts": ["src/target.ts"],
+				"src/barrel2.ts": ["src/target.ts"],
+			},
+			{
+				"src/barrel1.ts": ["src/target.ts"],
+				"src/barrel2.ts": ["src/target.ts"],
+			}
+		);
 
-        const refs = findAllReferences("src/target.ts", graph);
-        // Should find consumer twice (two different import statements)
-        const consumerRefs = refs.filter(r => r.sourceFile === "src/consumer.ts");
-        expect(consumerRefs).toHaveLength(2);
-    });
+		const refs = findAllReferences("src/target.ts", graph);
+		// Should find consumer twice (two different import statements)
+		const consumerRefs = refs.filter((r) => r.sourceFile === "src/consumer.ts");
+		expect(consumerRefs).toHaveLength(2);
+	});
 });
