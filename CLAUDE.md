@@ -22,6 +22,13 @@ Run a single test file:
 bun test src/cli.test.ts
 ```
 
+## Safe File Deletion
+
+When asked to delete files, prefer moving them to macOS Trash instead of permanently deleting them.
+
+DON'T: `rm -rf <path>`
+DO: `mv <path> ~/.Trash/`
+
 ## CLI Usage
 
 ```bash
