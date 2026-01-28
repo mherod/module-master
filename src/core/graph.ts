@@ -57,6 +57,7 @@ export function buildDependencyGraph(project: ProjectConfig): DependencyGraph {
 
 /**
  * Find all files that reference a given file (directly or through barrels)
+ * recursing up through chain of re-exports
  */
 export function findAllReferences(
 	filePath: string,
@@ -64,32 +65,61 @@ export function findAllReferences(
 	_project?: ProjectConfig,
 ): ModuleReference[] {
 	const normalizedPath = normalizePath(filePath);
-	const directRefs = graph.importedBy.get(normalizedPath) ?? [];
 
-	// Also find references through barrel files that actually re-export this file
-	const barrelRefs: ModuleReference[] = [];
+	// Track files that effectively represent the target module
+	// Starts with the module itself, adds barrels that re-export it
+	const reExportingFiles = new Set<string>([normalizedPath]);
+	const visitedBarrels = new Set<string>();
 
-	for (const barrelPath of graph.barrelFiles) {
-		// Use barrelReExports to check if this barrel actually re-exports the target
-		// (not just imports it for internal use)
-		const reExportedFiles = graph.barrelReExports.get(barrelPath) ?? [];
-		const reExportsTarget = reExportedFiles.includes(normalizedPath);
+	// Iteratively find all barrels that re-export our target or its re-exporters
+	let changed = true;
+	while (changed) {
+		changed = false;
+		for (const [barrelPath, reExports] of graph.barrelReExports) {
+			if (visitedBarrels.has(barrelPath)) continue;
 
-		if (reExportsTarget) {
-			// This barrel re-exports our target file
-			// Find everyone who imports from this barrel
-			const barrelConsumers = graph.importedBy.get(barrelPath) ?? [];
-			barrelRefs.push(
-				...barrelConsumers.map((ref) => ({
-					...ref,
-					// Mark that this is an indirect reference through a barrel
-					resolvedPath: normalizedPath,
-				})),
+			// Does this barrel re-export anything we're already tracking?
+			// (e.g. re-exports target directly, or re-exports a barrel that re-exports target)
+			const reExportsTarget = reExports.some((exportedFile) =>
+				reExportingFiles.has(exportedFile),
 			);
+
+			if (reExportsTarget) {
+				reExportingFiles.add(barrelPath);
+				visitedBarrels.add(barrelPath);
+				changed = true;
+			}
 		}
 	}
 
-	return [...directRefs, ...barrelRefs];
+	const allRefs: ModuleReference[] = [];
+	const seenRefs = new Set<string>(); // avoid duplicates
+
+	// Collect references to any file in the re-export chain
+	for (const exportedFile of reExportingFiles) {
+		const consumers = graph.importedBy.get(exportedFile) ?? [];
+
+		for (const ref of consumers) {
+			// Create unique key for deduping (file + specifier + line)
+			const key = `${ref.sourceFile}:${ref.specifier}:${ref.line}`;
+			if (seenRefs.has(key)) continue;
+			seenRefs.add(key);
+
+			// If referring to a barrel, update resolvedPath to point to original target
+			// so updater knows this effectively imports the target
+			if (exportedFile !== normalizedPath) {
+				allRefs.push({
+					...ref,
+					resolvedPath: normalizedPath,
+				});
+			} else {
+				// Direct reference
+				allRefs.push(ref);
+			}
+		}
+	}
+
+	return allRefs;
 }
 
 /**
