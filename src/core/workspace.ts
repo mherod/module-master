@@ -1,5 +1,6 @@
 import path from "node:path";
 import { Glob } from "bun";
+import { logger } from "../cli-logger.ts";
 import { EXPORT_STATEMENT_PATTERN, removeExtension } from "./constants.ts";
 
 export interface WorkspacePackage {
@@ -437,39 +438,39 @@ function findMatchingExport(
  * Print workspace info to console
  */
 export function printWorkspaceInfo(workspace: WorkspaceInfo): void {
-	console.log(`\n📦 Workspace: ${workspace.rootPackage?.name ?? "(unnamed)"}`);
-	console.log(`   Root: ${workspace.root}`);
-	console.log(`   Type: ${workspace.type}`);
-	console.log(`   Patterns: ${workspace.patterns.join(", ")}`);
-	console.log(`\n📚 Packages (${workspace.packages.length}):\n`);
+	logger.info(`\n📦 Workspace: ${workspace.rootPackage?.name ?? "(unnamed)"}`);
+	logger.info(`   Root: ${workspace.root}`);
+	logger.info(`   Type: ${workspace.type}`);
+	logger.info(`   Patterns: ${workspace.patterns.join(", ")}`);
+	logger.info(`\n📚 Packages (${workspace.packages.length}):\n`);
 
 	for (const pkg of workspace.packages) {
 		const relativePath = path.relative(workspace.root, pkg.path);
-		console.log(`   📁 ${pkg.name}`);
-		console.log(`      Path: ${relativePath}`);
+		logger.info(`   📁 ${pkg.name}`);
+		logger.info(`      Path: ${relativePath}`);
 
 		if (pkg.main) {
-			console.log(`      Main: ${pkg.main}`);
+			logger.info(`      Main: ${pkg.main}`);
 		}
 		if (pkg.module) {
-			console.log(`      Module: ${pkg.module}`);
+			logger.info(`      Module: ${pkg.module}`);
 		}
 		if (pkg.types) {
-			console.log(`      Types: ${pkg.types}`);
+			logger.info(`      Types: ${pkg.types}`);
 		}
 		if (pkg.srcDir) {
-			console.log(`      Source: ${pkg.srcDir}/`);
+			logger.info(`      Source: ${pkg.srcDir}/`);
 		}
 
 		if (pkg.exports && typeof pkg.exports === "object") {
 			const exportKeys = Object.keys(pkg.exports);
 			if (exportKeys.length > 0) {
-				console.log(
+				logger.info(
 					`      Exports: ${exportKeys.slice(0, 5).join(", ")}${exportKeys.length > 5 ? ` (+${exportKeys.length - 5} more)` : ""}`
 				);
 			}
 		}
 
-		console.log();
+		logger.empty();
 	}
 }
