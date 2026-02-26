@@ -2,6 +2,7 @@
 
 import { parseArgs } from "node:util";
 import { name, version } from "../package.json";
+import { logger } from "./cli-logger.ts";
 import { aliasCommand } from "./commands/alias.ts";
 import { analyzeCommand } from "./commands/analyze.ts";
 import { discoverCommand } from "./commands/discover.ts";
@@ -27,7 +28,7 @@ const { values, positionals } = parseArgs({
 });
 
 function showHelp() {
-	console.log(`
+	logger.info(`
 ${name} v${version}
 
 Precise TypeScript/JavaScript module refactoring tool.
@@ -64,13 +65,13 @@ Examples:
 }
 
 function showVersion() {
-	console.log(`${name} v${version}`);
+	logger.info(`${name} v${version}`);
 }
 
 function showCommandHelp(command: string) {
 	switch (command) {
 		case "move":
-			console.log(`
+			logger.info(`
 Usage: ${name} move <source> <target> [options]
 
 Move a TypeScript/JavaScript module to a new location and update all references.
@@ -96,7 +97,7 @@ Examples:
 `);
 			break;
 		case "rename":
-			console.log(`
+			logger.info(`
 Usage: ${name} rename <file> <oldName> <newName> [options]
 
 Rename an exported symbol (class, function, component, type) and update all imports.
@@ -124,7 +125,7 @@ Examples:
 `);
 			break;
 		case "analyze":
-			console.log(`
+			logger.info(`
 Usage: ${name} analyze <file> [options]
 
 Analyze a module's imports, exports, and references throughout the codebase.
@@ -147,7 +148,7 @@ Examples:
 `);
 			break;
 		case "discover":
-			console.log(`
+			logger.info(`
 Usage: ${name} discover <directory> [options]
 
 Discover all tsconfig.json files in a directory and understand project structure.
@@ -170,7 +171,7 @@ Examples:
 `);
 			break;
 		case "find":
-			console.log(`
+			logger.info(`
 Usage: ${name} find <query> -p <project> [options]
 
 Find files and exports by name within a project.
@@ -195,7 +196,7 @@ Examples:
 `);
 			break;
 		case "alias":
-			console.log(`
+			logger.info(`
 Usage: ${name} alias <target> --prefer=<strategy> [options]
 
 Normalize import specifiers to use path aliases, relative paths, or the shortest option.
@@ -253,8 +254,8 @@ async function main() {
 		case "move": {
 			const [source, target] = args;
 			if (!(source && target)) {
-				console.error("Error: move requires <source> and <target> arguments");
-				console.error(`Run '${name} move --help' for usage`);
+				logger.error("Error: move requires <source> and <target> arguments");
+				logger.error(`Run '${name} move --help' for usage`);
 				process.exit(1);
 			}
 			await moveCommand({
@@ -271,10 +272,10 @@ async function main() {
 		case "rename": {
 			const [file, oldName, newName] = args;
 			if (!(file && oldName && newName)) {
-				console.error(
+				logger.error(
 					"Error: rename requires <file>, <oldName>, and <newName> arguments"
 				);
-				console.error(`Run '${name} rename --help' for usage`);
+				logger.error(`Run '${name} rename --help' for usage`);
 				process.exit(1);
 			}
 			await renameCommand({
@@ -291,8 +292,8 @@ async function main() {
 		case "analyze": {
 			const [file] = args;
 			if (!file) {
-				console.error("Error: analyze requires a <file> argument");
-				console.error(`Run '${name} analyze --help' for usage`);
+				logger.error("Error: analyze requires a <file> argument");
+				logger.error(`Run '${name} analyze --help' for usage`);
 				process.exit(1);
 			}
 			await analyzeCommand({
@@ -306,8 +307,8 @@ async function main() {
 		case "discover": {
 			const [directory] = args;
 			if (!directory) {
-				console.error("Error: discover requires a <directory> argument");
-				console.error(`Run '${name} discover --help' for usage`);
+				logger.error("Error: discover requires a <directory> argument");
+				logger.error(`Run '${name} discover --help' for usage`);
 				process.exit(1);
 			}
 			await discoverCommand({
@@ -320,8 +321,8 @@ async function main() {
 		case "workspace": {
 			const [directory] = args;
 			if (!directory) {
-				console.error("Error: workspace requires a <directory> argument");
-				console.error(`Run '${name} workspace --help' for usage`);
+				logger.error("Error: workspace requires a <directory> argument");
+				logger.error(`Run '${name} workspace --help' for usage`);
 				process.exit(1);
 			}
 			await workspaceCommand({
@@ -335,18 +336,18 @@ async function main() {
 		case "find": {
 			const [query] = args;
 			if (!query) {
-				console.error("Error: find requires a <query> argument");
-				console.error(`Run '${name} find --help' for usage`);
+				logger.error("Error: find requires a <query> argument");
+				logger.error(`Run '${name} find --help' for usage`);
 				process.exit(1);
 			}
 			if (!values.project) {
-				console.error("Error: find requires -p <project> option");
-				console.error(`Run '${name} find --help' for usage`);
+				logger.error("Error: find requires -p <project> option");
+				logger.error(`Run '${name} find --help' for usage`);
 				process.exit(1);
 			}
 			const findType = values.type as "file" | "export" | "all" | undefined;
 			if (findType && !["file", "export", "all"].includes(findType)) {
-				console.error("Error: --type must be 'file', 'export', or 'all'");
+				logger.error("Error: --type must be 'file', 'export', or 'all'");
 				process.exit(1);
 			}
 			await findCommand({
@@ -361,18 +362,18 @@ async function main() {
 		case "alias": {
 			const [target] = args;
 			if (!target) {
-				console.error("Error: alias requires a <target> argument");
-				console.error(`Run '${name} alias --help' for usage`);
+				logger.error("Error: alias requires a <target> argument");
+				logger.error(`Run '${name} alias --help' for usage`);
 				process.exit(1);
 			}
 			if (!values.prefer) {
-				console.error("Error: alias requires --prefer option");
-				console.error(`Run '${name} alias --help' for usage`);
+				logger.error("Error: alias requires --prefer option");
+				logger.error(`Run '${name} alias --help' for usage`);
 				process.exit(1);
 			}
 			const prefer = values.prefer as "alias" | "relative" | "shortest";
 			if (!["alias", "relative", "shortest"].includes(prefer)) {
-				console.error(
+				logger.error(
 					"Error: --prefer must be 'alias', 'relative', or 'shortest'"
 				);
 				process.exit(1);
@@ -393,13 +394,13 @@ async function main() {
 			break;
 
 		default:
-			console.error(`Unknown command: ${command}`);
+			logger.error(`Unknown command: ${command}`);
 			showHelp();
 			process.exit(1);
 	}
 }
 
 main().catch((error) => {
-	console.error(error);
+	logger.error(String(error));
 	process.exit(1);
 });
