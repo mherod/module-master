@@ -1,6 +1,6 @@
 /**
  * CLI Logger - Structured logging for user interface output
- * Replaces console.log with a proper logging interface that satisfies linting rules
+ * Uses process.stdout/stderr for direct stream output.
  */
 
 export class CLILogger {
@@ -8,28 +8,28 @@ export class CLILogger {
 	 * Log informational messages to the user
 	 */
 	info(message: string): void {
-		console.log(message);
+		process.stdout.write(`${message}\n`);
 	}
 
 	/**
 	 * Log success messages
 	 */
 	success(message: string): void {
-		console.log(message);
+		process.stdout.write(`${message}\n`);
 	}
 
 	/**
 	 * Log error messages
 	 */
 	error(message: string): void {
-		console.error(message);
+		process.stderr.write(`${message}\n`);
 	}
 
 	/**
 	 * Log empty line
 	 */
 	empty(): void {
-		console.log();
+		process.stdout.write("\n");
 	}
 
 	/**
