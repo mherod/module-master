@@ -1,4 +1,5 @@
 import path from "node:path";
+import { logger } from "../cli-logger.ts";
 import {
 	discoverWorkspace,
 	printWorkspaceInfo,
@@ -20,14 +21,14 @@ export async function workspaceCommand(
 	const workspace = await discoverWorkspace(absoluteDir);
 
 	if (!workspace) {
-		console.error("❌ No workspace found. Looking for:");
-		console.error("   - pnpm-workspace.yaml");
-		console.error("   - package.json with 'workspaces' field");
+		logger.error("❌ No workspace found. Looking for:");
+		logger.error("   - pnpm-workspace.yaml");
+		logger.error("   - package.json with 'workspaces' field");
 		process.exit(1);
 	}
 
 	if (json) {
-		console.log(JSON.stringify(workspace, null, 2));
+		logger.info(JSON.stringify(workspace, null, 2));
 		return;
 	}
 
@@ -39,21 +40,21 @@ export async function workspaceCommand(
 }
 
 function printDetailedPackageInfo(workspace: WorkspaceInfo): void {
-	console.log("\n📋 Package Details:\n");
+	logger.info("\n📋 Package Details:\n");
 
 	for (const pkg of workspace.packages) {
-		console.log(`━━━ ${pkg.name} ━━━`);
+		logger.info(`━━━ ${pkg.name} ━━━`);
 
 		if (pkg.exports && typeof pkg.exports === "object") {
-			console.log("\n   Exports:");
+			logger.info("\n   Exports:");
 			for (const [key, value] of Object.entries(pkg.exports)) {
 				if (typeof value === "string") {
-					console.log(`      ${key} → ${value}`);
+					logger.info(`      ${key} → ${value}`);
 				} else if (typeof value === "object") {
-					console.log(`      ${key}:`);
+					logger.info(`      ${key}:`);
 					for (const [condKey, condValue] of Object.entries(value)) {
 						if (typeof condValue === "string") {
-							console.log(`         ${condKey}: ${condValue}`);
+							logger.info(`         ${condKey}: ${condValue}`);
 						}
 					}
 				}
@@ -65,10 +66,10 @@ function printDetailedPackageInfo(workspace: WorkspaceInfo): void {
 				workspace.packages.some((p) => p.name === dep)
 			);
 			if (internalDeps.length > 0) {
-				console.log(`\n   Internal dependencies: ${internalDeps.join(", ")}`);
+				logger.info(`\n   Internal dependencies: ${internalDeps.join(", ")}`);
 			}
 		}
 
-		console.log();
+		logger.empty();
 	}
 }
