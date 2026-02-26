@@ -103,6 +103,7 @@ export function findAliasForPath(
 			if (normalizedTarget.startsWith(absolutePattern)) {
 				const remainder = normalizedTarget
 					.slice(absolutePattern.length)
+					.replace(/^\//, "") // strip leading slash left by path.normalize dropping trailing /
 					.replace(/\.[tj]sx?$/, "");
 
 				// For wildcard aliases, use them if there's a remainder

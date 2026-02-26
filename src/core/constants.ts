@@ -13,7 +13,7 @@ export const TSC_ERROR_PATTERN = ": error TS";
 
 /** Pattern to detect export statements in a file */
 export const EXPORT_STATEMENT_PATTERN =
-	/\bexport\s+(\*|{|default|const|let|var|function|class|type|interface|enum)\b/;
+	/\bexport\s+(?:\*|{|(?:default|const|let|var|function|class|type|interface|enum)\b)/;
 
 /** TypeScript/JavaScript file extensions for scanning */
 export const TS_JS_EXTENSIONS = /\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/;
