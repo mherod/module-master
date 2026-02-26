@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
+import { logger } from "../cli-logger.ts";
 import type { ProjectConfig } from "../types.ts";
 import { TSC_ERROR_PATTERN } from "./constants.ts";
 
@@ -106,30 +107,30 @@ export function canTypeCheck(project: ProjectConfig): boolean {
  */
 export function printVerificationResults(result: VerificationResult): void {
 	if (result.success) {
-		console.log("✅ Type checking passed - no new errors introduced");
+		logger.info("✅ Type checking passed - no new errors introduced");
 
 		if (result.fixedErrors.length > 0) {
-			console.log(`\n🎉 Fixed ${result.fixedErrors.length} existing error(s):`);
+			logger.info(`\n🎉 Fixed ${result.fixedErrors.length} existing error(s):`);
 			for (const error of result.fixedErrors.slice(0, 5)) {
-				console.log(`   ${error}`);
+				logger.info(`   ${error}`);
 			}
 			if (result.fixedErrors.length > 5) {
-				console.log(`   ... and ${result.fixedErrors.length - 5} more`);
+				logger.info(`   ... and ${result.fixedErrors.length - 5} more`);
 			}
 		}
 	} else {
-		console.error(
+		logger.error(
 			`\n❌ Type checking failed - ${result.newErrors.length} new error(s) introduced:`
 		);
 		for (const error of result.newErrors.slice(0, 10)) {
-			console.error(`   ${error}`);
+			logger.error(`   ${error}`);
 		}
 		if (result.newErrors.length > 10) {
-			console.error(`   ... and ${result.newErrors.length - 10} more`);
+			logger.error(`   ... and ${result.newErrors.length - 10} more`);
 		}
 	}
 
-	console.log(
+	logger.info(
 		`\nType errors: ${result.errorsAfter.length} total (${result.errorsBefore.length} before, ${result.newErrors.length} new, ${result.fixedErrors.length} fixed)`
 	);
 }
