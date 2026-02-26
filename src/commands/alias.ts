@@ -1,5 +1,6 @@
 import path from "node:path";
 import ts from "typescript";
+import { logger } from "../cli-logger.ts";
 import {
 	createProgram,
 	loadProject,
@@ -51,24 +52,24 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 	// Find and load project config
 	const tsconfigPath = resolveTsConfig(projectArg, absoluteTarget);
 	if (!tsconfigPath) {
-		console.error("Could not find tsconfig.json");
+		logger.error("Could not find tsconfig.json");
 		process.exit(1);
 	}
 
 	const project = loadProject(tsconfigPath);
 
-	console.log(`\n${dryRun ? "🔍 Dry run:" : "🔧"} Normalizing imports...`);
-	console.log(`   Target: ${absoluteTarget}`);
-	console.log(`   Strategy: ${prefer}`);
+	logger.info(`\n${dryRun ? "🔍 Dry run:" : "🔧"} Normalizing imports...`);
+	logger.info(`   Target: ${absoluteTarget}`);
+	logger.info(`   Strategy: ${prefer}`);
 	if (verify) {
-		console.log("   Verification: enabled");
+		logger.info("   Verification: enabled");
 	}
-	console.log();
+	logger.empty();
 
 	const result = await normalizeImports(absoluteTarget, prefer, project);
 
 	if (result.changes.length === 0) {
-		console.log(
+		logger.info(
 			"✨ No changes needed. All imports already follow the preferred style.\n"
 		);
 		return;
@@ -87,11 +88,11 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 		);
 
 		printResults(result, dryRun, verbose);
-		console.log();
+		logger.empty();
 		printVerificationResults(verifyResult);
 
 		if (!verifyResult.success) {
-			console.error(
+			logger.error(
 				"\n⚠️  Type checking failed. Changes were applied but introduced errors."
 			);
 			process.exit(1);
@@ -298,7 +299,7 @@ function printResults(
 	dryRun: boolean,
 	verbose: boolean
 ): void {
-	console.log(
+	logger.info(
 		`${dryRun ? "📋 Would update" : "✅ Updated"} ${result.importsUpdated} import(s) in ${result.filesProcessed} file(s)\n`
 	);
 
@@ -313,17 +314,17 @@ function printResults(
 
 		for (const [file, changes] of byFile) {
 			const relativePath = path.relative(process.cwd(), file);
-			console.log(`📄 ${relativePath}`);
+			logger.info(`📄 ${relativePath}`);
 			for (const change of changes) {
-				console.log(`   Line ${change.line}:`);
-				console.log(`      - ${change.oldSpecifier}`);
-				console.log(`      + ${change.newSpecifier}`);
+				logger.info(`   Line ${change.line}:`);
+				logger.info(`      - ${change.oldSpecifier}`);
+				logger.info(`      + ${change.newSpecifier}`);
 			}
-			console.log();
+			logger.empty();
 		}
 	}
 
 	if (!dryRun) {
-		console.log("✨ Import normalization complete.\n");
+		logger.info("✨ Import normalization complete.\n");
 	}
 }

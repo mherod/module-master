@@ -1,5 +1,6 @@
 import path from "node:path";
 import ts from "typescript";
+import { logger } from "../cli-logger.ts";
 import { TSC_ERROR_PATTERN } from "../core/constants.ts";
 import {
 	buildDependencyGraph,
@@ -65,7 +66,7 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 		path.dirname(absoluteSource)
 	);
 	if (!tsconfigPath) {
-		console.error("Could not find tsconfig.json");
+		logger.error("Could not find tsconfig.json");
 		process.exit(1);
 	}
 
@@ -74,18 +75,18 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 	// Discover workspace for cross-package move support
 	const workspace = await discoverWorkspace(project.rootDir);
 	if (verbose && workspace) {
-		console.log(
+		logger.info(
 			`Found workspace: ${workspace.type} with ${workspace.packages.length} packages`
 		);
 	}
 
-	console.log(`\n${dryRun ? "🔍 Dry run:" : "🚀"} Moving module...`);
-	console.log(`   From: ${absoluteSource}`);
-	console.log(`   To:   ${absoluteTarget}`);
+	logger.info(`\n${dryRun ? "🔍 Dry run:" : "🚀"} Moving module...`);
+	logger.info(`   From: ${absoluteSource}`);
+	logger.info(`   To:   ${absoluteTarget}`);
 	if (verify && !dryRun) {
-		console.log("   Verification: enabled");
+		logger.info("   Verification: enabled");
 	}
-	console.log();
+	logger.empty();
 
 	const result = await moveModule(
 		absoluteSource,
@@ -117,21 +118,21 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 		// Run type checking to verify the move didn't break anything
 		const errors = await runTypeCheck(project);
 		if (errors.length > 0) {
-			console.error(
+			logger.error(
 				`\n❌ Type checking failed after move - ${errors.length} error(s):`
 			);
 			for (const error of errors.slice(0, 10)) {
-				console.error(`   ${error}`);
+				logger.error(`   ${error}`);
 			}
 			if (errors.length > 10) {
-				console.error(`   ... and ${errors.length - 10} more`);
+				logger.error(`   ... and ${errors.length - 10} more`);
 			}
-			console.error(
+			logger.error(
 				"\n⚠️  Move completed but introduced type errors. Please review."
 			);
 			process.exit(1);
 		}
-		console.log("\n✅ Type checking passed - no errors introduced");
+		logger.info("\n✅ Type checking passed - no errors introduced");
 	}
 
 	printResult(result, dryRun, verbose);
@@ -227,10 +228,10 @@ async function runPackageBuilds(
 		return;
 	}
 
-	console.log("\n📦 Rebuilding affected packages...");
+	logger.info("\n📦 Rebuilding affected packages...");
 
 	for (const pkg of packagesToRebuild) {
-		console.log(`   Building ${pkg.name}...`);
+		logger.info(`   Building ${pkg.name}...`);
 
 		const result = spawnSync("pnpm", ["run", pkg.script], {
 			cwd: pkg.path,
@@ -240,12 +241,12 @@ async function runPackageBuilds(
 		});
 
 		if (result.status !== 0) {
-			console.error(`   ❌ Build failed for ${pkg.name}`);
+			logger.error(`   ❌ Build failed for ${pkg.name}`);
 			if (!verbose && result.stderr) {
-				console.error(`   ${result.stderr.slice(0, 200)}`);
+				logger.error(`   ${result.stderr.slice(0, 200)}`);
 			}
 		} else {
-			console.log(`   ✅ ${pkg.name} built successfully`);
+			logger.info(`   ✅ ${pkg.name} built successfully`);
 		}
 	}
 }
@@ -297,20 +298,20 @@ export async function moveModule(
 
 	// Build dependency graph
 	if (verbose) {
-		console.log("Building dependency graph...");
+		logger.info("Building dependency graph...");
 	}
 	const graph = buildDependencyGraph(project);
 
 	// Find all files that reference the source file
 	const references = findAllReferences(sourcePath, graph);
 	if (verbose) {
-		console.log(`Found ${references.length} references to update`);
+		logger.info(`Found ${references.length} references to update`);
 	}
 
 	// Find barrel files that re-export the source
 	const barrelFiles = findBarrelReExports(sourcePath, graph);
 	if (verbose && barrelFiles.length > 0) {
-		console.log(`Found ${barrelFiles.length} barrel file(s) to update`);
+		logger.info(`Found ${barrelFiles.length} barrel file(s) to update`);
 	}
 
 	// Group references by source file
@@ -329,7 +330,7 @@ export async function moveModule(
 	// Scan exports from the source file for cross-package move handling
 	const movedFileExports = sourceAst ? scanExports(sourceAst) : [];
 	if (verbose && movedFileExports.length > 0) {
-		console.log(
+		logger.info(
 			`Moved file exports: ${movedFileExports.map((e) => e.name).join(", ")}`
 		);
 	}
@@ -475,7 +476,7 @@ export async function moveModule(
 							await Bun.write(destBarrelPath, newContent);
 						}
 						if (verbose) {
-							console.log(
+							logger.info(
 								`Added export to destination barrel: ${destBarrelPath}`
 							);
 						}
@@ -605,13 +606,13 @@ function printResult(
 	verbose: boolean
 ): void {
 	if (result.success) {
-		console.log(`✅ ${dryRun ? "Would move" : "Moved"} successfully!\n`);
+		logger.info(`✅ ${dryRun ? "Would move" : "Moved"} successfully!\n`);
 	} else {
-		console.log(`❌ ${dryRun ? "Would fail" : "Failed"}\n`);
+		logger.info(`❌ ${dryRun ? "Would fail" : "Failed"}\n`);
 	}
 
 	if (result.updatedReferences.length > 0) {
-		console.log(
+		logger.info(
 			`📝 ${dryRun ? "Would update" : "Updated"} ${result.updatedReferences.length} reference(s):`
 		);
 
@@ -624,25 +625,25 @@ function printResult(
 
 		for (const [file, refs] of byFile) {
 			const relativePath = path.relative(process.cwd(), file);
-			console.log(`   • ${relativePath}`);
+			logger.info(`   • ${relativePath}`);
 			if (verbose) {
 				for (const ref of refs) {
-					console.log(
+					logger.info(
 						`     L${ref.line}: "${ref.oldSpecifier}" → "${ref.newSpecifier}"`
 					);
 				}
 			}
 		}
-		console.log();
+		logger.empty();
 	}
 
 	if (result.errors.length > 0) {
-		console.log(`⚠️  Errors (${result.errors.length}):`);
+		logger.info(`⚠️  Errors (${result.errors.length}):`);
 		for (const error of result.errors) {
 			const relativePath = path.relative(process.cwd(), error.file);
 			const severity = error.recoverable ? "warning" : "error";
-			console.log(`   [${severity}] ${relativePath}: ${error.message}`);
+			logger.info(`   [${severity}] ${relativePath}: ${error.message}`);
 		}
-		console.log();
+		logger.empty();
 	}
 }

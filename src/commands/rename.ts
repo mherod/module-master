@@ -1,5 +1,6 @@
 import path from "node:path";
 import ts from "typescript";
+import { logger } from "../cli-logger.ts";
 import { buildDependencyGraph, findAllReferences } from "../core/graph.ts";
 import {
 	createProgram,
@@ -48,15 +49,15 @@ export async function renameCommand(options: RenameOptions): Promise<void> {
 
 	const tsconfigPath = resolveTsConfig(projectArg, path.dirname(absolutePath));
 	if (!tsconfigPath) {
-		console.error("Could not find tsconfig.json");
+		logger.error("Could not find tsconfig.json");
 		process.exit(1);
 	}
 
 	const project = loadProject(tsconfigPath, absolutePath);
 
-	console.log(`\n${dryRun ? "🔍 Dry run:" : "🚀"} Renaming symbol...`);
-	console.log(`   File: ${absolutePath}`);
-	console.log(`   ${oldName} → ${newName}\n`);
+	logger.info(`\n${dryRun ? "🔍 Dry run:" : "🚀"} Renaming symbol...`);
+	logger.info(`   File: ${absolutePath}`);
+	logger.info(`   ${oldName} → ${newName}\n`);
 
 	const result = await renameSymbol(
 		absolutePath,
@@ -98,14 +99,14 @@ export async function renameSymbol(
 
 	// Build dependency graph
 	if (verbose) {
-		console.log("Building dependency graph...");
+		logger.info("Building dependency graph...");
 	}
 	const graph = buildDependencyGraph(project);
 
 	// Find all files that import from this file
 	const references = findAllReferences(filePath, graph);
 	if (verbose) {
-		console.log(`Found ${references.length} references to check`);
+		logger.info(`Found ${references.length} references to check`);
 	}
 
 	// Create program for parsing
@@ -561,13 +562,13 @@ function printResult(
 	verbose: boolean
 ): void {
 	if (result.success) {
-		console.log(`✅ ${dryRun ? "Would rename" : "Renamed"} successfully!\n`);
+		logger.info(`✅ ${dryRun ? "Would rename" : "Renamed"} successfully!\n`);
 	} else {
-		console.log(`❌ ${dryRun ? "Would fail" : "Failed"}\n`);
+		logger.info(`❌ ${dryRun ? "Would fail" : "Failed"}\n`);
 	}
 
 	if (result.updatedReferences.length > 0) {
-		console.log(
+		logger.info(
 			`📝 ${dryRun ? "Would update" : "Updated"} ${result.updatedReferences.length} reference(s):`
 		);
 
@@ -580,24 +581,24 @@ function printResult(
 
 		for (const [file, refs] of byFile) {
 			const relativePath = path.relative(process.cwd(), file);
-			console.log(`   • ${relativePath}`);
+			logger.info(`   • ${relativePath}`);
 			if (verbose) {
 				for (const ref of refs) {
-					console.log(
+					logger.info(
 						`     L${ref.line}: "${ref.oldSpecifier}" → "${ref.newSpecifier}"`
 					);
 				}
 			}
 		}
-		console.log();
+		logger.empty();
 	}
 
 	if (result.errors.length > 0) {
-		console.log(`⚠️  Errors (${result.errors.length}):`);
+		logger.info(`⚠️  Errors (${result.errors.length}):`);
 		for (const error of result.errors) {
 			const relativePath = path.relative(process.cwd(), error.file);
-			console.log(`   ${relativePath}: ${error.message}`);
+			logger.info(`   ${relativePath}: ${error.message}`);
 		}
-		console.log();
+		logger.empty();
 	}
 }

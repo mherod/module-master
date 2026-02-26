@@ -1,4 +1,5 @@
 import path from "node:path";
+import { logger } from "../cli-logger.ts";
 import {
 	buildDependencyGraph,
 	findAllReferences,
@@ -30,7 +31,7 @@ export function analyzeCommand(options: AnalyzeOptions): void {
 	// Find and load project config
 	const tsconfigPath = resolveTsConfig(projectArg, path.dirname(absolutePath));
 	if (!tsconfigPath) {
-		console.error("Could not find tsconfig.json");
+		logger.error("Could not find tsconfig.json");
 		process.exit(1);
 	}
 
@@ -82,29 +83,29 @@ export function analyze(
 function printAnalysis(result: AnalysisResult, verbose?: boolean): void {
 	const fileName = path.basename(result.file);
 
-	console.log(`\n📄 ${fileName}`);
-	console.log(`   ${result.file}\n`);
+	logger.info(`\n📄 ${fileName}`);
+	logger.info(`   ${result.file}\n`);
 
 	// Exports
-	console.log(`📤 Exports (${result.exports.length}):`);
+	logger.info(`📤 Exports (${result.exports.length}):`);
 	if (result.exports.length === 0) {
-		console.log("   (none)");
+		logger.info("   (none)");
 	} else {
 		for (const exp of result.exports) {
 			const typeMarker = exp.isType ? " (type)" : "";
 			const defaultMarker = exp.type === "default" ? " [default]" : "";
-			console.log(
+			logger.info(
 				`   • ${exp.name}${typeMarker}${defaultMarker} (line ${exp.line})`
 			);
 		}
 	}
 
-	console.log();
+	logger.empty();
 
 	// Imports
-	console.log(`📥 Imports (${result.imports.length}):`);
+	logger.info(`📥 Imports (${result.imports.length}):`);
 	if (result.imports.length === 0) {
-		console.log("   (none)");
+		logger.info("   (none)");
 	} else {
 		for (const imp of result.imports) {
 			const bindings = imp.bindings
@@ -112,20 +113,20 @@ function printAnalysis(result: AnalysisResult, verbose?: boolean): void {
 				.join(", ");
 			const bindingsStr = bindings ? ` { ${bindings} }` : "";
 			const typeMarker = imp.isTypeOnly ? " (type-only)" : "";
-			console.log(`   • ${imp.specifier}${bindingsStr}${typeMarker}`);
+			logger.info(`   • ${imp.specifier}${bindingsStr}${typeMarker}`);
 			if (verbose) {
-				console.log(`     → ${imp.resolvedPath}`);
-				console.log(`     type: ${imp.type}, line: ${imp.line}`);
+				logger.info(`     → ${imp.resolvedPath}`);
+				logger.info(`     type: ${imp.type}, line: ${imp.line}`);
 			}
 		}
 	}
 
-	console.log();
+	logger.empty();
 
 	// Referenced by
-	console.log(`🔗 Referenced by (${result.referencedBy.length} files):`);
+	logger.info(`🔗 Referenced by (${result.referencedBy.length} files):`);
 	if (result.referencedBy.length === 0) {
-		console.log("   (none)");
+		logger.info("   (none)");
 	} else {
 		const grouped = new Map<string, typeof result.referencedBy>();
 		for (const ref of result.referencedBy) {
@@ -136,32 +137,32 @@ function printAnalysis(result: AnalysisResult, verbose?: boolean): void {
 
 		for (const [sourceFile, refs] of grouped) {
 			const relativePath = path.relative(process.cwd(), sourceFile);
-			console.log(`   • ${relativePath}`);
+			logger.info(`   • ${relativePath}`);
 			if (verbose) {
 				for (const ref of refs) {
-					console.log(`     line ${ref.line}: ${ref.type} "${ref.specifier}"`);
+					logger.info(`     line ${ref.line}: ${ref.type} "${ref.specifier}"`);
 				}
 			}
 		}
 	}
 
-	console.log();
+	logger.empty();
 
 	// Barrel files
 	if (result.barrelExports.length > 0) {
-		console.log("📦 Barrel file re-exports:");
+		logger.info("📦 Barrel file re-exports:");
 		for (const barrel of result.barrelExports) {
 			const relativePath = path.relative(process.cwd(), barrel.barrelPath);
-			console.log(`   • ${relativePath}`);
+			logger.info(`   • ${relativePath}`);
 			if (verbose && barrel.exports.length > 0) {
 				for (const exp of barrel.exports) {
 					const alias = exp.alias ? ` as ${exp.alias}` : "";
-					console.log(
+					logger.info(
 						`     ${exp.type}: ${exp.name ?? "*"}${alias} from "${exp.from}"`
 					);
 				}
 			}
 		}
-		console.log();
+		logger.empty();
 	}
 }

@@ -1,5 +1,6 @@
 import path from "node:path";
 import ts from "typescript";
+import { logger } from "../cli-logger.ts";
 import { scanExports } from "../core/scanner.ts";
 import { discoverProject } from "../core/tsconfig-discovery.ts";
 import type { ExportInfo } from "../types.ts";
@@ -32,12 +33,12 @@ export async function findCommand(options: FindOptions): Promise<void> {
 	const { query, project, type = "all", verbose } = options;
 	const absoluteProject = path.resolve(project);
 
-	console.log(`\n🔍 Searching for "${query}" in ${absoluteProject}\n`);
+	logger.info(`\n🔍 Searching for "${query}" in ${absoluteProject}\n`);
 
 	const discovery = discoverProject(absoluteProject);
 
 	if (discovery.configs.length === 0) {
-		console.error("No tsconfig.json files found in project.");
+		logger.error("No tsconfig.json files found in project.");
 		process.exit(1);
 	}
 
@@ -157,22 +158,22 @@ function printResults(
 	const totalResults = files.length + exports.length;
 
 	if (totalResults === 0) {
-		console.log("No matches found.\n");
+		logger.info("No matches found.\n");
 		return;
 	}
 
 	// Files
 	if (files.length > 0) {
-		console.log(`📁 Files (${files.length}):`);
+		logger.info(`📁 Files (${files.length}):`);
 		for (const file of files) {
-			console.log(`   ${file.relativePath}`);
+			logger.info(`   ${file.relativePath}`);
 		}
-		console.log();
+		logger.empty();
 	}
 
 	// Exports
 	if (exports.length > 0) {
-		console.log(`📤 Exports (${exports.length}):`);
+		logger.info(`📤 Exports (${exports.length}):`);
 
 		// Group by file for cleaner output
 		const byFile = new Map<string, ExportMatch[]>();
@@ -183,23 +184,23 @@ function printResults(
 		}
 
 		for (const [relativePath, fileExports] of byFile) {
-			console.log(`   ${relativePath}`);
+			logger.info(`   ${relativePath}`);
 			for (const exp of fileExports) {
 				const typeMarker = exp.export.isType ? " (type)" : "";
 				const defaultMarker = exp.export.type === "default" ? " [default]" : "";
-				console.log(
+				logger.info(
 					`      • ${exp.export.name}${typeMarker}${defaultMarker} (line ${exp.export.line})`
 				);
 			}
 		}
-		console.log();
+		logger.empty();
 	}
 
-	console.log(`Found ${totalResults} result(s).\n`);
+	logger.info(`Found ${totalResults} result(s).\n`);
 
 	const firstFile = files[0];
 	if (verbose && firstFile) {
-		console.log("💡 To analyze a file, run:");
-		console.log(`   bun src/cli.ts analyze ${firstFile.path} -p ${baseDir}\n`);
+		logger.info("💡 To analyze a file, run:");
+		logger.info(`   bun src/cli.ts analyze ${firstFile.path} -p ${baseDir}\n`);
 	}
 }
