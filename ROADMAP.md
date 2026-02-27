@@ -7,7 +7,7 @@
 Extract a function, class, type, or component from an existing file into a new module, updating the original file to import from the new location.
 
 ```bash
-module-master extract src/utils.ts parseConfig src/config/parser.ts
+resect extract src/utils.ts parseConfig src/config/parser.ts
 ```
 
 **Before:**
@@ -39,9 +39,9 @@ Use cases:
 Create or update index.ts barrel files that re-export from sibling modules. Supports different export styles and can sync with existing exports.
 
 ```bash
-module-master barrel src/components           # Generate index.ts
-module-master barrel src/utils --style=named  # Named exports only
-module-master barrel src/hooks --sync         # Update existing barrel
+resect barrel src/components           # Generate index.ts
+resect barrel src/utils --style=named  # Named exports only
+resect barrel src/hooks --sync         # Update existing barrel
 ```
 
 **Generated:**
@@ -65,10 +65,10 @@ Use cases:
 Scan the codebase to identify exports that are never imported. Helps clean up dead code and reduce bundle size.
 
 ```bash
-module-master unused                     # Scan entire project
-module-master unused src/utils           # Scan specific directory
-module-master unused --ignore="*.test.ts"  # Exclude test files
-module-master unused --remove            # Remove unused exports (destructive)
+resect unused                     # Scan entire project
+resect unused src/utils           # Scan specific directory
+resect unused --ignore="*.test.ts"  # Exclude test files
+resect unused --remove            # Remove unused exports (destructive)
 ```
 
 **Output:**
@@ -100,10 +100,10 @@ Use cases:
 Rewrite import/export specifiers to either prefer `tsconfig` aliases, strict relative paths, or the shortest valid path.
 
 ```bash
-module-master alias src --prefer=alias
-module-master alias src --prefer=relative
-module-master alias src --prefer=shortest
-module-master alias src/components/Button.tsx --prefer=alias --dry-run
+resect alias src --prefer=alias
+resect alias src --prefer=relative
+resect alias src --prefer=shortest
+resect alias src/components/Button.tsx --prefer=alias --dry-run
 ```
 
 Use cases:
@@ -119,9 +119,9 @@ Use cases:
 Scan the dependency graph for cycles, report each edge, and optionally output JSON or even suggest breaking points.
 
 ```bash
-module-master cycles
-module-master cycles src --max-depth=50
-module-master cycles --format=json
+resect cycles
+resect cycles src --max-depth=50
+resect cycles --format=json
 ```
 
 Use cases:
@@ -136,9 +136,9 @@ Use cases:
 Export the project's dependency graph in human-readable or machine formats so teams can explore deep import trees, visualize hotspots, and feed diagrams into docs.
 
 ```bash
-module-master graph
-module-master graph src --depth=3 --format=dot > deps.dot
-module-master graph src/components --format=json --include=barrels
+resect graph
+resect graph src --depth=3 --format=dot > deps.dot
+resect graph src/components --format=json --include=barrels
 ```
 
 Use cases:
@@ -153,9 +153,9 @@ Use cases:
 Detect TypeScript or JavaScript files that have zero incoming references (excluding test fixtures) so you can confidently retire them or gate their deletion behind a dry run.
 
 ```bash
-module-master orphan
-module-master orphan src/utils --ignore="*.test.ts" --dry-run
-module-master orphan --delete
+resect orphan
+resect orphan src/utils --ignore="*.test.ts" --dry-run
+resect orphan --delete
 ```
 
 Use cases:
@@ -170,8 +170,8 @@ Use cases:
 Combine several small modules into one target file while updating all imports/re-exports in the project, optionally collapsing barrels or applying a new public API surface.
 
 ```bash
-module-master aggregate src/legacy/logger.ts src/legacy/metrics.ts --target=src/utils/logging.ts
-module-master aggregate src/ui/icons/* --target=src/ui/icons/index.ts --dry-run
+resect aggregate src/legacy/logger.ts src/legacy/metrics.ts --target=src/utils/logging.ts
+resect aggregate src/ui/icons/* --target=src/ui/icons/index.ts --dry-run
 ```
 
 Use cases:
@@ -186,9 +186,9 @@ Use cases:
 Generate the full JSDoc comment for a top-level declaration so you can review it without opening the file or share the aligned docblock with others.
 
 ```bash
-module-master doc src/utils/logger.ts logRequest
-module-master doc src/index.ts --kind=function --format=markdown
-module-master doc src/components/Button.tsx --verbose
+resect doc src/utils/logger.ts logRequest
+resect doc src/index.ts --kind=function --format=markdown
+resect doc src/components/Button.tsx --verbose
 ```
 
 Use cases:

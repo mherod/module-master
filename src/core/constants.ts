@@ -1,5 +1,5 @@
 /**
- * Shared constants and patterns for module-master
+ * Shared constants and patterns for resect
  */
 
 /** Pattern to match TypeScript/JavaScript file extensions */

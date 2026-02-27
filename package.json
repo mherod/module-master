@@ -1,10 +1,10 @@
 {
-  "name": "module-master",
-  "version": "0.1.0",
-  "description": "Precise TypeScript/JavaScript module refactoring CLI. Move files, rename exports, and update all import references.",
+  "name": "resect",
+  "version": "1.0.0",
+  "description": "Surgical TypeScript/JavaScript module refactoring CLI. Move files, rename exports, and watch every import update automatically.",
   "type": "module",
   "bin": {
-    "module-master": "./src/cli.ts"
+    "resect": "./src/cli.ts"
   },
   "files": [
     "src",
@@ -13,7 +13,7 @@
   ],
   "scripts": {
     "dev": "bun run src/cli.ts",
-    "build": "bun build src/cli.ts --compile --outfile dist/module-master",
+    "build": "bun build src/cli.ts --compile --outfile dist/resect",
     "test": "bun test",
     "lint": "bunx @biomejs/biome check --write .",
     "typecheck": "bunx tsc --noEmit",
@@ -21,7 +21,7 @@
     "git:unlock": "rm -f .git/index.lock",
     "check": "ultracite check",
     "fix": "ultracite fix",
-    "prepare": "husky"
+    "prepare": "[ -d .git ] && husky || true"
   },
   "keywords": [
     "typescript",
@@ -42,11 +42,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mherod/module-master.git"
+    "url": "git+https://github.com/mherod/resect.git"
   },
-  "homepage": "https://github.com/mherod/module-master#readme",
+  "homepage": "https://github.com/mherod/resect#readme",
   "bugs": {
-    "url": "https://github.com/mherod/module-master/issues"
+    "url": "https://github.com/mherod/resect/issues"
   },
   "engines": {
     "bun": ">=1.0.0"

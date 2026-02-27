@@ -1,10 +1,10 @@
-# module-master
+# resect
 
 **The surgical refactoring tool for TypeScript monorepos.** Move files between packages, rename exports, and watch every import update automatically — with zero breaking changes.
 
 Built on the TypeScript Compiler API for AST-level precision. Understands your barrel files, respects your path aliases, and handles the gnarly edge cases that break other tools.
 
-## Why module-master?
+## Why resect?
 
 Refactoring in monorepos is painful. Move a utility from your app to a shared package and you'll spend the next hour:
 - Hunting down every import that needs updating
@@ -12,10 +12,10 @@ Refactoring in monorepos is painful. Move a utility from your app to a shared pa
 - Rebuilding packages in the right order
 - Fixing the type errors you inevitably missed
 
-**module-master does all of this in one command:**
+**resect does all of this in one command:**
 
 ```bash
-bun src/cli.ts move apps/web/src/utils/formatDate.ts packages/shared/src/formatDate.ts
+resect move apps/web/src/utils/formatDate.ts packages/shared/src/formatDate.ts
 ```
 
 That's it. Every import updated. Barrel files handled. Packages rebuilt. Type-checked and verified.
@@ -23,28 +23,32 @@ That's it. Every import updated. Barrel files handled. Packages rebuilt. Type-ch
 ## Install
 
 ```bash
-bun install
+# Global install (recommended)
+bun add -g resect
+
+# Or with npm
+npm install -g resect
 ```
 
 ## Quick Start
 
 ```bash
 # Move a file and update all imports
-bun src/cli.ts move src/old/file.ts src/new/file.ts
+resect move src/old/file.ts src/new/file.ts
 
 # Preview changes without modifying files
-bun src/cli.ts move src/old.ts src/new.ts --dry-run
+resect move src/old.ts src/new.ts --dry-run
 
 # Move between packages in a monorepo
-bun src/cli.ts move apps/web/src/utils/helper.ts packages/shared/src/helper.ts
+resect move apps/web/src/utils/helper.ts packages/shared/src/helper.ts
 ```
 
 ## Cross-Package Refactoring
 
-The killer feature. Move files between packages in your monorepo and module-master handles everything:
+The killer feature. Move files between packages in your monorepo and resect handles everything:
 
 ```bash
-bun src/cli.ts move apps/main-web/lib/utils/date-formatter.ts packages/shared-utils/src/date-formatter.ts --verbose
+resect move apps/main-web/lib/utils/date-formatter.ts packages/shared-utils/src/date-formatter.ts --verbose
 ```
 
 ### What happens automatically:
@@ -68,7 +72,7 @@ import { makeAuthorUrl } from "@/lib/utils";
 
 ### No more duplicate export errors
 
-Other tools naively change `export * from "./moved-file"` to `export * from "@scope/package"`, which pulls in everything and causes conflicts. module-master removes the re-export entirely — the destination package exports it now.
+Other tools naively change `export * from "./moved-file"` to `export * from "@scope/package"`, which pulls in everything and causes conflicts. resect removes the re-export entirely — the destination package exports it now.
 
 ## Commands
 
@@ -77,7 +81,7 @@ Other tools naively change `export * from "./moved-file"` to `export * from "@sc
 Move a file and update all import references across the codebase.
 
 ```bash
-bun src/cli.ts move src/utils/old.ts src/helpers/new.ts --dry-run
+resect move src/utils/old.ts src/helpers/new.ts --dry-run
 ```
 
 **Handles:**
@@ -93,7 +97,7 @@ bun src/cli.ts move src/utils/old.ts src/helpers/new.ts --dry-run
 Rename an exported symbol and update all imports.
 
 ```bash
-bun src/cli.ts rename src/components/Button.tsx Button PrimaryButton --dry-run
+resect rename src/components/Button.tsx Button PrimaryButton --dry-run
 ```
 
 - Renames the export in the source file
@@ -106,7 +110,7 @@ bun src/cli.ts rename src/components/Button.tsx Button PrimaryButton --dry-run
 Understand a module's place in your codebase.
 
 ```bash
-bun src/cli.ts analyze src/components/Button.tsx --verbose
+resect analyze src/components/Button.tsx --verbose
 ```
 
 Shows:
@@ -120,9 +124,9 @@ Shows:
 Search for files and exports by name.
 
 ```bash
-bun src/cli.ts find User -p /path/to/project
-bun src/cli.ts find Button --type export
-bun src/cli.ts find helpers --type file
+resect find User -p /path/to/project
+resect find Button --type export
+resect find helpers --type file
 ```
 
 - Case-insensitive partial matching
@@ -134,9 +138,9 @@ bun src/cli.ts find helpers --type file
 Normalize import paths using tsconfig aliases, relative paths, or the shortest option.
 
 ```bash
-bun src/cli.ts alias src/components --prefer=alias
-bun src/cli.ts alias src --prefer=relative
-bun src/cli.ts alias . --prefer=shortest
+resect alias src/components --prefer=alias
+resect alias src --prefer=relative
+resect alias . --prefer=shortest
 ```
 
 ### `discover <directory>`
@@ -144,7 +148,7 @@ bun src/cli.ts alias . --prefer=shortest
 Map all tsconfig.json files in a project.
 
 ```bash
-bun src/cli.ts discover /path/to/monorepo --verbose
+resect discover /path/to/monorepo --verbose
 ```
 
 Shows tsconfig inheritance, project references, file ownership, and path aliases.
@@ -154,7 +158,7 @@ Shows tsconfig inheritance, project references, file ownership, and path aliases
 Discover monorepo workspace packages and their structure.
 
 ```bash
-bun src/cli.ts workspace /path/to/monorepo --json
+resect workspace /path/to/monorepo --json
 ```
 
 Supports pnpm, yarn, and npm workspaces. Shows packages, entrypoints, barrel files, and internal dependencies.

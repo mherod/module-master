@@ -4,7 +4,7 @@ describe("cli", () => {
 	test("--version returns version", async () => {
 		const proc = Bun.spawn(["bun", "src/cli.ts", "--version"]);
 		const output = await new Response(proc.stdout).text();
-		expect(output).toContain("module-master v");
+		expect(output).toContain("resect v");
 	});
 
 	test("--help shows usage", async () => {
