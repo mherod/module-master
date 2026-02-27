@@ -9,18 +9,20 @@ resect is a CLI tool for precise TypeScript/JavaScript module refactoring. It mo
 ## Commands
 
 ```bash
-bun install          # Install dependencies
-bun test             # Run tests
-bun run lint         # Lint and format with Biome
-bun run typecheck    # Type check with tsc
-bun run dev          # Run CLI in development
-bun run build        # Compile to standalone binary
+pnpm install         # Install dependencies
+pnpm test            # Run tests (uses bun as runtime)
+pnpm run lint        # Lint and format with Biome
+pnpm run typecheck   # Type check with tsc
+pnpm run dev         # Run CLI in development
+pnpm run build       # Compile to standalone binary
 ```
 
 Run a single test file:
 ```bash
 bun test src/cli.test.ts
 ```
+
+**Package management vs runtime:** pnpm is the package manager (`pnpm install`, `pnpm publish`). Bun is the runtime (`bun test`, `bun run src/cli.ts`).
 
 ## Safe File Deletion
 
