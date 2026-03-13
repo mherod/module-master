@@ -7,7 +7,7 @@ import {
 	loadProject,
 	resolveTsConfig,
 } from "../core/project.ts";
-import { normalizePath, resolveModulePath } from "../core/resolver.ts";
+import { normalizePath } from "../core/resolver.ts";
 import { getNameNode, hasExportModifier } from "../core/scanner.ts";
 import {
 	applyTextChanges,
@@ -208,7 +208,7 @@ export async function renameSymbol(
 	}
 
 	// Update each importing file
-	for (const [importingFile] of refsByFile) {
+	for (const [importingFile, fileRefs] of refsByFile) {
 		try {
 			const fileAst = program.getSourceFile(importingFile);
 			if (!fileAst) {
@@ -218,10 +218,9 @@ export async function renameSymbol(
 
 			const result = updateImportReferences(
 				fileAst,
-				filePath,
+				fileRefs,
 				oldName,
-				newName,
-				project
+				newName
 			);
 			if (result.updates.length > 0) {
 				updatedReferences.push(
@@ -463,31 +462,39 @@ function renameInSourceFile(
 	return { newContent, changes: uniqueChanges, updates };
 }
 
+/**
+ * Update import/re-export references for a renamed symbol.
+ * Accepts pre-filtered ModuleReference[] scoped to the target file,
+ * mirroring the pattern used by updateFileReferences in updater.ts.
+ */
 function updateImportReferences(
 	sourceFile: ts.SourceFile,
-	targetFilePath: string,
+	references: ModuleReference[],
 	oldName: string,
-	newName: string,
-	project: ProjectConfig
+	newName: string
 ): { newContent: string; updates: Omit<UpdatedReference, "file">[] } {
 	const changes: TextChange[] = [];
 	const updates: Omit<UpdatedReference, "file">[] = [];
-	const normalizedTarget = normalizePath(targetFilePath);
 
-	/** Check if a module specifier resolves to the target file */
-	function resolvesToTarget(specifier: string): boolean {
-		const resolved = resolveModulePath(specifier, sourceFile.fileName, project);
-		return resolved !== null && normalizePath(resolved) === normalizedTarget;
-	}
+	// Build a set of (specifier, line) pairs from the pre-filtered references
+	const refKeys = new Set(
+		references.map((ref) => `${ref.specifier}:${ref.line}`)
+	);
 
 	function visit(node: ts.Node) {
 		// Handle: import { oldName } from './target'
-		// Handle: import { oldName as alias } from './target'
 		if (
 			ts.isImportDeclaration(node) &&
-			ts.isStringLiteral(node.moduleSpecifier) &&
-			resolvesToTarget(node.moduleSpecifier.text)
+			ts.isStringLiteral(node.moduleSpecifier)
 		) {
+			const { line } = sourceFile.getLineAndCharacterOfPosition(
+				node.getStart(sourceFile)
+			);
+			if (!refKeys.has(`${node.moduleSpecifier.text}:${line + 1}`)) {
+				ts.forEachChild(node, visit);
+				return;
+			}
+
 			const importClause = node.importClause;
 			if (
 				importClause?.namedBindings &&
@@ -497,10 +504,6 @@ function updateImportReferences(
 					const importedName = element.propertyName?.text ?? element.name.text;
 
 					if (importedName === oldName) {
-						const { line } = sourceFile.getLineAndCharacterOfPosition(
-							element.getStart(sourceFile)
-						);
-
 						if (element.propertyName) {
 							changes.push({
 								start: element.propertyName.getStart(sourceFile),
@@ -529,63 +532,59 @@ function updateImportReferences(
 		if (
 			ts.isExportDeclaration(node) &&
 			node.moduleSpecifier &&
-			ts.isStringLiteral(node.moduleSpecifier) &&
-			resolvesToTarget(node.moduleSpecifier.text) &&
-			node.exportClause &&
-			ts.isNamespaceExport(node.exportClause) &&
-			node.exportClause.name.text === oldName
+			ts.isStringLiteral(node.moduleSpecifier)
 		) {
 			const { line } = sourceFile.getLineAndCharacterOfPosition(
 				node.getStart(sourceFile)
 			);
-			changes.push({
-				start: node.exportClause.name.getStart(sourceFile),
-				end: node.exportClause.name.getEnd(),
-				newText: newName,
-			});
-			updates.push({
-				line: line + 1,
-				oldSpecifier: oldName,
-				newSpecifier: newName,
-			});
-		}
+			if (!refKeys.has(`${node.moduleSpecifier.text}:${line + 1}`)) {
+				ts.forEachChild(node, visit);
+				return;
+			}
 
-		// Handle named re-exports: export { oldName } from './target'
-		if (
-			ts.isExportDeclaration(node) &&
-			node.moduleSpecifier &&
-			ts.isStringLiteral(node.moduleSpecifier) &&
-			resolvesToTarget(node.moduleSpecifier.text) &&
-			node.exportClause &&
-			ts.isNamedExports(node.exportClause)
-		) {
-			for (const element of node.exportClause.elements) {
-				const importedName = element.propertyName?.text ?? element.name.text;
+			if (
+				node.exportClause &&
+				ts.isNamespaceExport(node.exportClause) &&
+				node.exportClause.name.text === oldName
+			) {
+				changes.push({
+					start: node.exportClause.name.getStart(sourceFile),
+					end: node.exportClause.name.getEnd(),
+					newText: newName,
+				});
+				updates.push({
+					line: line + 1,
+					oldSpecifier: oldName,
+					newSpecifier: newName,
+				});
+			}
 
-				if (importedName === oldName) {
-					const { line } = sourceFile.getLineAndCharacterOfPosition(
-						element.getStart(sourceFile)
-					);
+			// Handle named re-exports: export { oldName } from './target'
+			if (node.exportClause && ts.isNamedExports(node.exportClause)) {
+				for (const element of node.exportClause.elements) {
+					const importedName = element.propertyName?.text ?? element.name.text;
 
-					if (element.propertyName) {
-						changes.push({
-							start: element.propertyName.getStart(sourceFile),
-							end: element.propertyName.getEnd(),
-							newText: newName,
-						});
-					} else {
-						changes.push({
-							start: element.name.getStart(sourceFile),
-							end: element.name.getEnd(),
-							newText: newName,
+					if (importedName === oldName) {
+						if (element.propertyName) {
+							changes.push({
+								start: element.propertyName.getStart(sourceFile),
+								end: element.propertyName.getEnd(),
+								newText: newName,
+							});
+						} else {
+							changes.push({
+								start: element.name.getStart(sourceFile),
+								end: element.name.getEnd(),
+								newText: newName,
+							});
+						}
+
+						updates.push({
+							line: line + 1,
+							oldSpecifier: oldName,
+							newSpecifier: newName,
 						});
 					}
-
-					updates.push({
-						line: line + 1,
-						oldSpecifier: oldName,
-						newSpecifier: newName,
-					});
 				}
 			}
 		}
@@ -595,9 +594,7 @@ function updateImportReferences(
 
 	visit(sourceFile);
 
-	// Apply changes using shared utility
 	const newContent = applyTextChanges(sourceFile.text, changes);
-
 	return { newContent, updates };
 }
 
