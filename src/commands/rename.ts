@@ -8,7 +8,7 @@ import {
 	resolveTsConfig,
 } from "../core/project.ts";
 import { normalizePath } from "../core/resolver.ts";
-import { hasExportModifier } from "../core/scanner.ts";
+import { getNameNode, hasExportModifier } from "../core/scanner.ts";
 import {
 	applyTextChanges,
 	deduplicateChanges,
@@ -433,31 +433,6 @@ function renameInSourceFile(
 	const newContent = applyTextChanges(sourceFile.text, uniqueChanges);
 
 	return { newContent, changes: uniqueChanges, updates };
-}
-
-function getNameNode(node: ts.Node): ts.Identifier | null {
-	if (ts.isFunctionDeclaration(node) && node.name) {
-		return node.name;
-	}
-	if (ts.isClassDeclaration(node) && node.name) {
-		return node.name;
-	}
-	if (ts.isVariableStatement(node)) {
-		const decl = node.declarationList.declarations[0];
-		if (decl && ts.isIdentifier(decl.name)) {
-			return decl.name;
-		}
-	}
-	if (ts.isTypeAliasDeclaration(node)) {
-		return node.name;
-	}
-	if (ts.isInterfaceDeclaration(node)) {
-		return node.name;
-	}
-	if (ts.isEnumDeclaration(node)) {
-		return node.name;
-	}
-	return null;
 }
 
 function updateImportReferences(
