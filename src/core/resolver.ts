@@ -40,19 +40,6 @@ export function resolveModuleSpecifier(
 }
 
 /**
- * Resolve a module specifier to an absolute file path.
- * Returns null for external packages and unresolvable specifiers.
- */
-export function resolveModulePath(
-	specifier: string,
-	fromFile: string,
-	project: ProjectConfig
-): string | null {
-	const result = resolveModuleSpecifier(specifier, fromFile, project);
-	return result.kind === "resolved" ? result.path : null;
-}
-
-/**
  * Calculate the new import specifier after a file move
  */
 export function calculateNewSpecifier(
