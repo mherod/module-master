@@ -150,6 +150,43 @@ export async function renameSymbol(
 		};
 	}
 
+	// Check for conflicts in importing files: would renaming introduce a
+	// duplicate binding in any file that imports oldName without an alias?
+	const importConflicts: { file: string; message: string }[] = [];
+	for (const ref of references) {
+		if (normalizePath(ref.sourceFile) === normalizePath(filePath)) {
+			continue;
+		}
+		// Only non-aliased named imports introduce newName as a local binding
+		if (!ref.bindings) {
+			continue;
+		}
+		const hasUnaliasedImport = ref.bindings.some(
+			(b) => b.name === oldName && !b.alias
+		);
+		if (!hasUnaliasedImport) {
+			continue;
+		}
+		const importingAst = program.getSourceFile(ref.sourceFile);
+		if (!importingAst) {
+			continue;
+		}
+		if (hasLocalBinding(importingAst, newName, oldName)) {
+			importConflicts.push({
+				file: ref.sourceFile,
+				message: `File already declares "${newName}" — rename would cause a conflict`,
+			});
+		}
+	}
+	if (importConflicts.length > 0) {
+		return {
+			success: false,
+			renamedSymbol: { file: filePath, oldName, newName },
+			updatedReferences: [],
+			errors: importConflicts,
+		};
+	}
+
 	// Rename in source file
 	const sourceResult = renameInSourceFile(sourceAst, oldName, newName);
 	if (sourceResult.changes.length > 0) {
@@ -570,6 +607,90 @@ function updateImportReferences(
 	const newContent = applyTextChanges(sourceFile.text, changes);
 
 	return { newContent, updates };
+}
+
+/**
+ * Check if a source file already has a local binding with the given name,
+ * excluding the import binding for skipName (the symbol being renamed).
+ */
+function hasLocalBinding(
+	sourceFile: ts.SourceFile,
+	name: string,
+	skipName: string
+): boolean {
+	let found = false;
+
+	function visit(node: ts.Node) {
+		if (found) {
+			return;
+		}
+
+		// Check variable declarations: const/let/var name = ...
+		if (
+			ts.isVariableDeclaration(node) &&
+			ts.isIdentifier(node.name) &&
+			node.name.text === name
+		) {
+			found = true;
+			return;
+		}
+
+		// Check function declarations: function name() {}
+		if (ts.isFunctionDeclaration(node) && node.name?.text === name) {
+			found = true;
+			return;
+		}
+
+		// Check class declarations: class name {}
+		if (ts.isClassDeclaration(node) && node.name?.text === name) {
+			found = true;
+			return;
+		}
+
+		// Check type/interface declarations
+		if (ts.isTypeAliasDeclaration(node) && node.name.text === name) {
+			found = true;
+			return;
+		}
+		if (ts.isInterfaceDeclaration(node) && node.name.text === name) {
+			found = true;
+			return;
+		}
+
+		// Check enum declarations
+		if (ts.isEnumDeclaration(node) && node.name.text === name) {
+			found = true;
+			return;
+		}
+
+		// Check import bindings (local name, not the imported name)
+		// Skip the import of skipName — that's the one being renamed
+		if (ts.isImportSpecifier(node)) {
+			const localName = node.name.text;
+			const importedName = node.propertyName?.text ?? node.name.text;
+			if (localName === name && importedName !== skipName) {
+				found = true;
+				return;
+			}
+		}
+
+		// Check namespace imports: import * as name
+		if (ts.isNamespaceImport(node) && node.name.text === name) {
+			found = true;
+			return;
+		}
+
+		// Check default import: import name from '...'
+		if (ts.isImportClause(node) && node.name && node.name.text === name) {
+			found = true;
+			return;
+		}
+
+		ts.forEachChild(node, visit);
+	}
+
+	visit(sourceFile);
+	return found;
 }
 
 function printResult(
