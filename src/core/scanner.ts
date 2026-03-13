@@ -512,7 +512,8 @@ export function hasExportModifier(node: ts.Node): boolean {
 
 /**
  * Get the name identifier from a declaration node.
- * Supports function, class, variable, type alias, interface, and enum declarations.
+ * Supports function, class, variable (including arrow functions),
+ * type alias, interface, enum, and export default declarations.
  */
 export function getNameNode(node: ts.Node): ts.Identifier | null {
 	if (ts.isFunctionDeclaration(node) && node.name) {
@@ -527,6 +528,10 @@ export function getNameNode(node: ts.Node): ts.Identifier | null {
 			return decl.name;
 		}
 	}
+	// Handle VariableDeclaration directly (e.g., const foo = () => {})
+	if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+		return node.name;
+	}
 	if (ts.isTypeAliasDeclaration(node)) {
 		return node.name;
 	}
@@ -535,6 +540,14 @@ export function getNameNode(node: ts.Node): ts.Identifier | null {
 	}
 	if (ts.isEnumDeclaration(node)) {
 		return node.name;
+	}
+	// Handle export default <identifier> (ExportAssignment)
+	if (
+		ts.isExportAssignment(node) &&
+		!node.isExportEquals &&
+		ts.isIdentifier(node.expression)
+	) {
+		return node.expression;
 	}
 	return null;
 }
