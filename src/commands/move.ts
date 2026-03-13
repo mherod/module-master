@@ -25,7 +25,11 @@ import {
 	updateBarrelExports,
 	updateFileReferences,
 } from "../core/updater.ts";
-import { runTypeCheck } from "../core/verify.ts";
+import {
+	checkBindingConflicts,
+	checkExportConflict,
+	runTypeCheck,
+} from "../core/verify.ts";
 import {
 	discoverWorkspace,
 	findBuildScript,
@@ -321,11 +325,12 @@ export async function moveModule(
 					ts.ScriptTarget.Latest,
 					true
 				);
-				const barrelExports = scanExports(barrelAst);
-				const movedNames = new Set(movedFileExports.map((e) => e.name));
-				const conflicts = barrelExports.filter((e) => movedNames.has(e.name));
-				if (conflicts.length > 0) {
-					const names = conflicts.map((c) => c.name).join(", ");
+				const exportConflict = checkExportConflict(
+					barrelAst,
+					movedFileExports.map((e) => e.name)
+				);
+				if (exportConflict.hasConflict) {
+					const names = exportConflict.conflicts.map((c) => c.name).join(", ");
 					return {
 						success: false,
 						movedFile: { from: sourcePath, to: targetPath },
@@ -346,44 +351,44 @@ export async function moveModule(
 	// Check for binding conflicts in files that import the moved module
 	if (movedFileExports.length > 0) {
 		const movedNames = new Set(movedFileExports.map((e) => e.name));
-		const bindingConflicts: MoveError[] = [];
+		const importingFiles: Array<{
+			sourceFile: ts.SourceFile;
+			specifier: string;
+			bindings: Array<{ name: string; alias?: string }>;
+		}> = [];
 
 		for (const ref of references) {
 			if (normalizePath(ref.sourceFile) === normalizePath(sourcePath)) {
 				continue;
 			}
-			// Only non-aliased named imports would introduce a conflicting binding
 			if (!ref.bindings) {
-				continue;
-			}
-			const unaliasedMovedBindings = ref.bindings.filter(
-				(b) => movedNames.has(b.name) && !b.alias
-			);
-			if (unaliasedMovedBindings.length === 0) {
 				continue;
 			}
 			const importingAst = program.getSourceFile(ref.sourceFile);
 			if (!importingAst) {
 				continue;
 			}
-			for (const binding of unaliasedMovedBindings) {
-				if (hasLocalBinding(importingAst, binding.name, ref.specifier)) {
-					bindingConflicts.push({
-						file: ref.sourceFile,
-						message: `Already declares "${binding.name}" — move would cause a conflict`,
-						recoverable: false,
-					});
-					break;
-				}
-			}
+			importingFiles.push({
+				sourceFile: importingAst,
+				specifier: ref.specifier,
+				bindings: ref.bindings.map((b) => ({
+					name: b.name,
+					alias: b.alias,
+				})),
+			});
 		}
 
-		if (bindingConflicts.length > 0) {
+		const bindingResult = checkBindingConflicts(importingFiles, movedNames);
+		if (bindingResult.hasConflict) {
 			return {
 				success: false,
 				movedFile: { from: sourcePath, to: targetPath },
 				updatedReferences: [],
-				errors: bindingConflicts,
+				errors: bindingResult.conflicts.map((c) => ({
+					file: c.file,
+					message: `Already declares "${c.name}" — move would cause a conflict`,
+					recoverable: false,
+				})),
 			};
 		}
 	}
@@ -651,90 +656,6 @@ function findSpecifierInSource(
 
 	visit(sourceFile);
 	return result;
-}
-
-/**
- * Check if a source file already has a local binding with the given name,
- * excluding imports from the specified module specifier.
- */
-function hasLocalBinding(
-	sourceFile: ts.SourceFile,
-	name: string,
-	skipSpecifier: string
-): boolean {
-	let found = false;
-
-	function visit(node: ts.Node) {
-		if (found) {
-			return;
-		}
-
-		if (
-			ts.isVariableDeclaration(node) &&
-			ts.isIdentifier(node.name) &&
-			node.name.text === name
-		) {
-			found = true;
-			return;
-		}
-
-		if (ts.isFunctionDeclaration(node) && node.name?.text === name) {
-			found = true;
-			return;
-		}
-
-		if (ts.isClassDeclaration(node) && node.name?.text === name) {
-			found = true;
-			return;
-		}
-
-		if (ts.isTypeAliasDeclaration(node) && node.name.text === name) {
-			found = true;
-			return;
-		}
-
-		if (ts.isInterfaceDeclaration(node) && node.name.text === name) {
-			found = true;
-			return;
-		}
-
-		if (ts.isEnumDeclaration(node) && node.name.text === name) {
-			found = true;
-			return;
-		}
-
-		// Check import bindings — skip imports from the module being moved
-		if (
-			ts.isImportSpecifier(node) &&
-			node.name.text === name &&
-			node.parent &&
-			ts.isNamedImports(node.parent) &&
-			node.parent.parent &&
-			ts.isImportClause(node.parent.parent) &&
-			node.parent.parent.parent &&
-			ts.isImportDeclaration(node.parent.parent.parent) &&
-			ts.isStringLiteral(node.parent.parent.parent.moduleSpecifier) &&
-			node.parent.parent.parent.moduleSpecifier.text !== skipSpecifier
-		) {
-			found = true;
-			return;
-		}
-
-		if (ts.isNamespaceImport(node) && node.name.text === name) {
-			found = true;
-			return;
-		}
-
-		if (ts.isImportClause(node) && node.name && node.name.text === name) {
-			found = true;
-			return;
-		}
-
-		ts.forEachChild(node, visit);
-	}
-
-	visit(sourceFile);
-	return found;
 }
 
 function printResult(
