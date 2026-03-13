@@ -7,7 +7,7 @@ import {
 	loadProject,
 	resolveTsConfig,
 } from "../core/project.ts";
-import { normalizePath } from "../core/resolver.ts";
+import { normalizePath, resolveModulePath } from "../core/resolver.ts";
 import { getNameNode, hasExportModifier } from "../core/scanner.ts";
 import {
 	applyTextChanges,
@@ -465,20 +465,28 @@ function renameInSourceFile(
 
 function updateImportReferences(
 	sourceFile: ts.SourceFile,
-	_targetFilePath: string,
+	targetFilePath: string,
 	oldName: string,
 	newName: string,
-	_project: ProjectConfig
+	project: ProjectConfig
 ): { newContent: string; updates: Omit<UpdatedReference, "file">[] } {
 	const changes: TextChange[] = [];
 	const updates: Omit<UpdatedReference, "file">[] = [];
+	const normalizedTarget = normalizePath(targetFilePath);
+
+	/** Check if a module specifier resolves to the target file */
+	function resolvesToTarget(specifier: string): boolean {
+		const resolved = resolveModulePath(specifier, sourceFile.fileName, project);
+		return resolved !== null && normalizePath(resolved) === normalizedTarget;
+	}
 
 	function visit(node: ts.Node) {
 		// Handle: import { oldName } from './target'
 		// Handle: import { oldName as alias } from './target'
 		if (
 			ts.isImportDeclaration(node) &&
-			ts.isStringLiteral(node.moduleSpecifier)
+			ts.isStringLiteral(node.moduleSpecifier) &&
+			resolvesToTarget(node.moduleSpecifier.text)
 		) {
 			const importClause = node.importClause;
 			if (
@@ -486,9 +494,6 @@ function updateImportReferences(
 				ts.isNamedImports(importClause.namedBindings)
 			) {
 				for (const element of importClause.namedBindings.elements) {
-					// element.propertyName is the imported name, element.name is the local binding
-					// import { importedName as localName }
-					// If no propertyName, then name is both
 					const importedName = element.propertyName?.text ?? element.name.text;
 
 					if (importedName === oldName) {
@@ -497,14 +502,12 @@ function updateImportReferences(
 						);
 
 						if (element.propertyName) {
-							// import { oldName as alias } → import { newName as alias }
 							changes.push({
 								start: element.propertyName.getStart(sourceFile),
 								end: element.propertyName.getEnd(),
 								newText: newName,
 							});
 						} else {
-							// import { oldName } → import { newName }
 							changes.push({
 								start: element.name.getStart(sourceFile),
 								end: element.name.getEnd(),
@@ -527,6 +530,7 @@ function updateImportReferences(
 			ts.isExportDeclaration(node) &&
 			node.moduleSpecifier &&
 			ts.isStringLiteral(node.moduleSpecifier) &&
+			resolvesToTarget(node.moduleSpecifier.text) &&
 			node.exportClause &&
 			ts.isNamespaceExport(node.exportClause) &&
 			node.exportClause.name.text === oldName
@@ -551,11 +555,11 @@ function updateImportReferences(
 			ts.isExportDeclaration(node) &&
 			node.moduleSpecifier &&
 			ts.isStringLiteral(node.moduleSpecifier) &&
+			resolvesToTarget(node.moduleSpecifier.text) &&
 			node.exportClause &&
 			ts.isNamedExports(node.exportClause)
 		) {
 			for (const element of node.exportClause.elements) {
-				// element.propertyName is the imported name, element.name is the re-exported name
 				const importedName = element.propertyName?.text ?? element.name.text;
 
 				if (importedName === oldName) {
@@ -564,14 +568,12 @@ function updateImportReferences(
 					);
 
 					if (element.propertyName) {
-						// export { oldName as alias } from → export { newName as alias } from
 						changes.push({
 							start: element.propertyName.getStart(sourceFile),
 							end: element.propertyName.getEnd(),
 							newText: newName,
 						});
 					} else {
-						// export { oldName } from → export { newName } from
 						changes.push({
 							start: element.name.getStart(sourceFile),
 							end: element.name.getEnd(),
