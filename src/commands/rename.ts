@@ -134,6 +134,22 @@ export async function renameSymbol(
 		};
 	}
 
+	// Check for conflicts: does the new name already exist as an export?
+	const conflictingExport = findExport(sourceAst, newName);
+	if (conflictingExport) {
+		return {
+			success: false,
+			renamedSymbol: { file: filePath, oldName, newName },
+			updatedReferences: [],
+			errors: [
+				{
+					file: filePath,
+					message: `Export "${newName}" already exists at line ${conflictingExport.line}`,
+				},
+			],
+		};
+	}
+
 	// Rename in source file
 	const sourceResult = renameInSourceFile(sourceAst, oldName, newName);
 	if (sourceResult.changes.length > 0) {
