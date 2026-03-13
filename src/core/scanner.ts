@@ -42,6 +42,63 @@ export function scanModuleReferences(
 	return references;
 }
 
+export interface UnresolvableDiagnostic {
+	specifier: string;
+	line: number;
+	diagnostic: string;
+}
+
+/**
+ * Scan a source file for import specifiers that cannot be resolved.
+ * Returns structured diagnostics for each unresolvable specifier.
+ */
+export function scanUnresolvableImports(
+	sourceFile: ts.SourceFile,
+	project: ProjectConfig
+): UnresolvableDiagnostic[] {
+	const diagnostics: UnresolvableDiagnostic[] = [];
+
+	function visit(node: ts.Node) {
+		let specifierNode: ts.StringLiteral | undefined;
+
+		if (
+			ts.isImportDeclaration(node) &&
+			ts.isStringLiteral(node.moduleSpecifier)
+		) {
+			specifierNode = node.moduleSpecifier;
+		} else if (
+			ts.isExportDeclaration(node) &&
+			node.moduleSpecifier &&
+			ts.isStringLiteral(node.moduleSpecifier)
+		) {
+			specifierNode = node.moduleSpecifier;
+		}
+
+		if (specifierNode) {
+			const resolved = resolveModuleSpecifier(
+				specifierNode.text,
+				sourceFile.fileName,
+				project
+			);
+			if (resolved.kind === "unresolvable") {
+				const { line } = sourceFile.getLineAndCharacterOfPosition(
+					node.getStart(sourceFile)
+				);
+				diagnostics.push({
+					specifier: specifierNode.text,
+					line: line + 1,
+					diagnostic: resolved.diagnostic,
+				});
+			}
+		}
+
+		ts.forEachChild(node, visit);
+	}
+
+	visit(sourceFile);
+	return diagnostics;
+}
+
 /**
  * Extract a module reference from a node if applicable
  */

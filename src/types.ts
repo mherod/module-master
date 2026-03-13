@@ -113,6 +113,11 @@ export interface AnalysisResult {
 	exports: ExportInfo[];
 	referencedBy: ModuleReference[];
 	barrelExports: BarrelExport[];
+	unresolvable: Array<{
+		specifier: string;
+		line: number;
+		diagnostic: string;
+	}>;
 }
 
 export interface ExportInfo {

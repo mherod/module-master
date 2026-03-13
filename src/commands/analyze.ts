@@ -14,6 +14,7 @@ import {
 	scanBarrelExports,
 	scanExports,
 	scanModuleReferences,
+	scanUnresolvableImports,
 } from "../core/scanner.ts";
 import type { AnalysisResult, ProjectConfig } from "../types.ts";
 
@@ -55,6 +56,7 @@ export function analyze(
 	const imports = scanModuleReferences(sourceFile, project);
 	const exports = scanExports(sourceFile);
 	const barrelExports = scanBarrelExports(sourceFile, project);
+	const unresolvable = scanUnresolvableImports(sourceFile, project);
 
 	// Build graph to find reverse references
 	const graph = buildDependencyGraph(project);
@@ -77,6 +79,7 @@ export function analyze(
 		exports,
 		referencedBy,
 		barrelExports: barrelsWithContext,
+		unresolvable,
 	};
 }
 
@@ -147,6 +150,18 @@ function printAnalysis(result: AnalysisResult, verbose?: boolean): void {
 	}
 
 	logger.empty();
+
+	// Unresolvable imports
+	if (result.unresolvable.length > 0) {
+		logger.info(`⚠️  Unresolvable imports (${result.unresolvable.length}):`);
+		for (const diag of result.unresolvable) {
+			logger.info(`   • "${diag.specifier}" (line ${diag.line})`);
+			if (verbose) {
+				logger.info(`     ${diag.diagnostic}`);
+			}
+		}
+		logger.empty();
+	}
 
 	// Barrel files
 	if (result.barrelExports.length > 0) {
