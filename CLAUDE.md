@@ -169,6 +169,37 @@ The `verify.ts` module provides safety for refactoring operations:
 
 Verification spawns `tsc` as a subprocess using `spawnSync` and parses error output. Errors are matched as lines containing `: error TS`. The tool tracks which errors existed before, which are new, and which were fixed.
 
+`runTypeCheck(project)` is exported from `verify.ts` and reused by `move.ts`.
+
+DON'T: Duplicate `runTypeCheck` logic in command files. Import from `verify.ts`.
+
+## Conflict Detection
+
+All three mutating commands (`move`, `rename`, `alias`) perform conflict detection before applying changes. The read-only commands (`find`, `discover`, `workspace`, `analyze`) have no write operations and need no conflict guards.
+
+### Rename Conflict Detection (`src/commands/rename.ts`)
+
+Before renaming an export, `renameSymbol()` checks:
+1. **Source file export conflict**: Does `newName` already exist as an export in the source file? Uses `findExport(sourceAst, newName)`.
+2. **Importer binding conflict**: For each file importing the old symbol without an alias (`import { oldName }`), does that file already declare a local binding named `newName`? Uses `hasLocalBinding()`.
+
+### Move Conflict Detection (`src/commands/move.ts`)
+
+Before moving a file, `moveModule()` checks:
+1. **Destination barrel conflict**: If a destination barrel exists, do any of the moved file's export names already exist in the barrel's exports? Parses the barrel with `scanExports()`.
+2. **Importer binding conflict**: For each file importing from the moved module with non-aliased bindings, does that file already declare a local binding with the same name? Uses `hasLocalBinding()`.
+
+### Alias Conflict Detection (`src/commands/alias.ts`)
+
+Before normalizing an import specifier, `normalizeImports()` checks:
+- **Duplicate specifier with overlapping bindings**: Would the new specifier match an existing import in the same file that already imports a binding with the same local name? Skips the change and warns instead of creating duplicate imports.
+
+### `hasLocalBinding()` Helper
+
+Both `move.ts` and `rename.ts` implement `hasLocalBinding()` — an AST walker that checks if a file already declares a given name via variable/function/class/type/interface/enum declarations or import bindings (excluding the import being changed). When adding new mutating commands, include equivalent conflict detection.
+
+DON'T: Add a new mutating command without conflict detection. All commands that write files must check for export name and binding conflicts before applying changes.
+
 ## Workspace Discovery
 
 The `workspace` command (`src/commands/workspace.ts`) discovers monorepo structure:
