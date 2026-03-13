@@ -13,7 +13,7 @@ import {
 	deduplicateChanges,
 	type TextChange,
 } from "../core/text-changes.ts";
-import { hasLocalBinding } from "../core/verify.ts";
+import { checkAllConflicts } from "../core/verify.ts";
 import type {
 	ModuleReference,
 	ProjectConfig,
@@ -135,30 +135,16 @@ export async function renameSymbol(
 		};
 	}
 
-	// Check for conflicts: does the new name already exist as an export?
-	const conflictingExport = findExport(sourceAst, newName);
-	if (conflictingExport) {
-		return {
-			success: false,
-			renamedSymbol: { file: filePath, oldName, newName },
-			updatedReferences: [],
-			errors: [
-				{
-					file: filePath,
-					message: `Export "${newName}" already exists at line ${conflictingExport.line}`,
-				},
-			],
-		};
-	}
-
-	// Check for conflicts in importing files: would renaming introduce a
-	// duplicate binding in any file that imports oldName without an alias?
-	const importConflicts: { file: string; message: string }[] = [];
+	// Check for all conflicts (export name + binding) in a single call
+	const importingFiles: Array<{
+		sourceFile: ts.SourceFile;
+		specifier: string;
+		bindings: Array<{ name: string; alias?: string }>;
+	}> = [];
 	for (const ref of references) {
 		if (normalizePath(ref.sourceFile) === normalizePath(filePath)) {
 			continue;
 		}
-		// Only non-aliased named imports introduce newName as a local binding
 		if (!ref.bindings) {
 			continue;
 		}
@@ -172,19 +158,29 @@ export async function renameSymbol(
 		if (!importingAst) {
 			continue;
 		}
-		if (hasLocalBinding(importingAst, newName, "", oldName)) {
-			importConflicts.push({
-				file: ref.sourceFile,
-				message: `File already declares "${newName}" — rename would cause a conflict`,
-			});
-		}
+		importingFiles.push({
+			sourceFile: importingAst,
+			specifier: ref.specifier,
+			bindings: ref.bindings.map((b) => ({ name: b.name, alias: b.alias })),
+		});
 	}
-	if (importConflicts.length > 0) {
+
+	const conflictResult = checkAllConflicts({
+		exportNames: [newName],
+		targetSourceFile: sourceAst,
+		importingFiles,
+		skipImportedName: oldName,
+	});
+
+	if (conflictResult.hasConflict) {
 		return {
 			success: false,
 			renamedSymbol: { file: filePath, oldName, newName },
 			updatedReferences: [],
-			errors: importConflicts,
+			errors: conflictResult.conflicts.map((c) => ({
+				file: c.file,
+				message: `"${c.name}" already exists${c.line ? ` at line ${c.line}` : ""} — rename would cause a conflict`,
+			})),
 		};
 	}
 

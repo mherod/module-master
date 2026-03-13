@@ -306,3 +306,66 @@ export function checkBindingConflicts(
 
 	return { hasConflict: conflicts.length > 0, conflicts };
 }
+
+export interface AllConflictCheckOptions {
+	exportNames: string[];
+	targetSourceFile?: ts.SourceFile;
+	importingFiles: Array<{
+		sourceFile: ts.SourceFile;
+		specifier: string;
+		bindings: Array<{ name: string; alias?: string }>;
+	}>;
+	skipImportedName?: string;
+}
+
+/**
+ * Perform all conflict checks in a single call.
+ * Composes checkExportConflict and checkBindingConflicts.
+ */
+export function checkAllConflicts(
+	options: AllConflictCheckOptions
+): ConflictResult {
+	const allConflicts: ConflictResult["conflicts"] = [];
+	const nameSet = new Set(options.exportNames);
+
+	if (options.targetSourceFile) {
+		const exportResult = checkExportConflict(
+			options.targetSourceFile,
+			options.exportNames
+		);
+		allConflicts.push(...exportResult.conflicts);
+	}
+
+	if (options.skipImportedName) {
+		for (const { sourceFile, bindings } of options.importingFiles) {
+			for (const binding of bindings) {
+				if (binding.alias || !nameSet.has(binding.name)) {
+					continue;
+				}
+				if (
+					hasLocalBinding(
+						sourceFile,
+						binding.name,
+						"",
+						options.skipImportedName
+					)
+				) {
+					allConflicts.push({
+						file: sourceFile.fileName,
+						name: binding.name,
+						line: 0,
+					});
+					break;
+				}
+			}
+		}
+	} else {
+		const bindingResult = checkBindingConflicts(
+			options.importingFiles,
+			nameSet
+		);
+		allConflicts.push(...bindingResult.conflicts);
+	}
+
+	return { hasConflict: allConflicts.length > 0, conflicts: allConflicts };
+}

@@ -25,11 +25,7 @@ import {
 	updateBarrelExports,
 	updateFileReferences,
 } from "../core/updater.ts";
-import {
-	checkBindingConflicts,
-	checkExportConflict,
-	runTypeCheck,
-} from "../core/verify.ts";
+import { checkAllConflicts, runTypeCheck } from "../core/verify.ts";
 import {
 	discoverWorkspace,
 	findBuildScript,
@@ -312,51 +308,30 @@ export async function moveModule(
 		);
 	}
 
-	// Check for export name conflicts at the destination barrel
-	if (workspace && movedFileExports.length > 0) {
-		const destBarrelPath = findDestinationBarrel(targetPath, workspace);
-		if (destBarrelPath) {
-			const destBarrelFile = Bun.file(destBarrelPath);
-			if (await destBarrelFile.exists()) {
-				const barrelContent = await destBarrelFile.text();
-				const barrelAst = ts.createSourceFile(
-					destBarrelPath,
-					barrelContent,
-					ts.ScriptTarget.Latest,
-					true
-				);
-				const exportConflict = checkExportConflict(
-					barrelAst,
-					movedFileExports.map((e) => e.name)
-				);
-				if (exportConflict.hasConflict) {
-					const names = exportConflict.conflicts.map((c) => c.name).join(", ");
-					return {
-						success: false,
-						movedFile: { from: sourcePath, to: targetPath },
-						updatedReferences: [],
-						errors: [
-							{
-								file: destBarrelPath,
-								message: `Destination barrel already exports: ${names}`,
-								recoverable: false,
-							},
-						],
-					};
+	// Check for all conflicts (export name + binding) in a single call
+	if (movedFileExports.length > 0) {
+		let targetBarrelAst: ts.SourceFile | undefined;
+		if (workspace) {
+			const destBarrelPath = findDestinationBarrel(targetPath, workspace);
+			if (destBarrelPath) {
+				const destBarrelFile = Bun.file(destBarrelPath);
+				if (await destBarrelFile.exists()) {
+					const barrelContent = await destBarrelFile.text();
+					targetBarrelAst = ts.createSourceFile(
+						destBarrelPath,
+						barrelContent,
+						ts.ScriptTarget.Latest,
+						true
+					);
 				}
 			}
 		}
-	}
 
-	// Check for binding conflicts in files that import the moved module
-	if (movedFileExports.length > 0) {
-		const movedNames = new Set(movedFileExports.map((e) => e.name));
 		const importingFiles: Array<{
 			sourceFile: ts.SourceFile;
 			specifier: string;
 			bindings: Array<{ name: string; alias?: string }>;
 		}> = [];
-
 		for (const ref of references) {
 			if (normalizePath(ref.sourceFile) === normalizePath(sourcePath)) {
 				continue;
@@ -378,15 +353,20 @@ export async function moveModule(
 			});
 		}
 
-		const bindingResult = checkBindingConflicts(importingFiles, movedNames);
-		if (bindingResult.hasConflict) {
+		const conflictResult = checkAllConflicts({
+			exportNames: movedFileExports.map((e) => e.name),
+			targetSourceFile: targetBarrelAst,
+			importingFiles,
+		});
+
+		if (conflictResult.hasConflict) {
 			return {
 				success: false,
 				movedFile: { from: sourcePath, to: targetPath },
 				updatedReferences: [],
-				errors: bindingResult.conflicts.map((c) => ({
+				errors: conflictResult.conflicts.map((c) => ({
 					file: c.file,
-					message: `Already declares "${c.name}" — move would cause a conflict`,
+					message: `Conflict: "${c.name}" already exists${c.line ? ` at line ${c.line}` : ""}`,
 					recoverable: false,
 				})),
 			};
