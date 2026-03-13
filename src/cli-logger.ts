@@ -19,6 +19,13 @@ export class CLILogger {
 	}
 
 	/**
+	 * Log warning messages (non-fatal diagnostics)
+	 */
+	warn(message: string): void {
+		process.stderr.write(`${message}\n`);
+	}
+
+	/**
 	 * Log error messages
 	 */
 	error(message: string): void {

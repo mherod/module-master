@@ -21,7 +21,7 @@ function warnIfUnresolvable(
 	fromFile: string
 ): void {
 	if (result.kind === "unresolvable") {
-		logger.error(`Warning: cannot resolve "${specifier}" from ${fromFile}`);
+		logger.warn(`Warning: cannot resolve "${specifier}" from ${fromFile}`);
 	}
 }
 

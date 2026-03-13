@@ -556,7 +556,7 @@ export function updateBarrelExports(
 			// Only process if this export points to the file being moved
 			if (resolved.kind !== "resolved") {
 				if (resolved.kind === "unresolvable") {
-					logger.error(
+					logger.warn(
 						`Warning: cannot resolve "${specifier}" from ${sourceFile.fileName}`
 					);
 				}
