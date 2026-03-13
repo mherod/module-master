@@ -8,7 +8,7 @@ import type {
 	ProjectConfig,
 	ReferenceType,
 } from "../types.ts";
-import { resolveModulePath } from "./resolver.ts";
+import { resolveModuleSpecifier } from "./resolver.ts";
 
 /**
  * Scan a source file for all module references (imports and exports)
@@ -102,13 +102,12 @@ function extractImportDeclaration(
 	}
 
 	const specifier = node.moduleSpecifier.text;
-	const resolvedPath = resolveModulePath(
+	const resolved = resolveModuleSpecifier(
 		specifier,
 		sourceFile.fileName,
 		project
 	);
-
-	if (!resolvedPath) {
+	if (resolved.kind !== "resolved") {
 		return null; // External package or unresolvable
 	}
 
@@ -153,7 +152,7 @@ function extractImportDeclaration(
 	return {
 		sourceFile: sourceFile.fileName,
 		specifier,
-		resolvedPath,
+		resolvedPath: resolved.path,
 		type,
 		line: line + 1,
 		column: character + 1,
@@ -172,13 +171,12 @@ function extractExportDeclaration(
 	}
 
 	const specifier = node.moduleSpecifier.text;
-	const resolvedPath = resolveModulePath(
+	const resolved = resolveModuleSpecifier(
 		specifier,
 		sourceFile.fileName,
 		project
 	);
-
-	if (!resolvedPath) {
+	if (resolved.kind !== "resolved") {
 		return null;
 	}
 
@@ -212,7 +210,7 @@ function extractExportDeclaration(
 	return {
 		sourceFile: sourceFile.fileName,
 		specifier,
-		resolvedPath,
+		resolvedPath: resolved.path,
 		type,
 		line: line + 1,
 		column: character + 1,
@@ -232,13 +230,12 @@ function extractDynamicImport(
 	}
 
 	const specifier = arg.text;
-	const resolvedPath = resolveModulePath(
+	const resolved = resolveModuleSpecifier(
 		specifier,
 		sourceFile.fileName,
 		project
 	);
-
-	if (!resolvedPath) {
+	if (resolved.kind !== "resolved") {
 		return null;
 	}
 
@@ -249,7 +246,7 @@ function extractDynamicImport(
 	return {
 		sourceFile: sourceFile.fileName,
 		specifier,
-		resolvedPath,
+		resolvedPath: resolved.path,
 		type: "import-dynamic",
 		line: line + 1,
 		column: character + 1,
@@ -269,13 +266,12 @@ function extractRequire(
 	}
 
 	const specifier = arg.text;
-	const resolvedPath = resolveModulePath(
+	const resolved = resolveModuleSpecifier(
 		specifier,
 		sourceFile.fileName,
 		project
 	);
-
-	if (!resolvedPath) {
+	if (resolved.kind !== "resolved") {
 		return null;
 	}
 
@@ -286,7 +282,7 @@ function extractRequire(
 	return {
 		sourceFile: sourceFile.fileName,
 		specifier,
-		resolvedPath,
+		resolvedPath: resolved.path,
 		type,
 		line: line + 1,
 		column: character + 1,
@@ -450,16 +446,17 @@ export function scanBarrelExports(
 			ts.isStringLiteral(node.moduleSpecifier)
 		) {
 			const specifier = node.moduleSpecifier.text;
-			const resolvedPath = resolveModulePath(
+			const resolved = resolveModuleSpecifier(
 				specifier,
 				sourceFile.fileName,
 				project
 			);
 
-			if (!resolvedPath) {
+			if (resolved.kind !== "resolved") {
 				return;
 			}
 
+			const resolvedPath = resolved.path;
 			const entries = entriesBySource.get(resolvedPath) ?? [];
 			entriesBySource.set(resolvedPath, entries);
 

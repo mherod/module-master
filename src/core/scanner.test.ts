@@ -6,7 +6,10 @@ import { scanModuleReferences } from "./scanner";
 // Mock resolver to avoid file system lookups
 mock.module("./resolver", () => {
 	return {
-		resolveModulePath: (specifier: string) => `/resolved/${specifier}`,
+		resolveModuleSpecifier: (specifier: string) => ({
+			kind: "resolved",
+			path: `/resolved/${specifier}`,
+		}),
 	};
 });
 

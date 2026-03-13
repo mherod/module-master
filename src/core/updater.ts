@@ -13,7 +13,7 @@ import {
 	findPackageForPath,
 	isCrossPackageMove,
 	normalizePath,
-	resolveModulePath,
+	resolveModuleSpecifier,
 } from "./resolver.ts";
 import type { TextChange } from "./text-changes.ts";
 
@@ -546,7 +546,7 @@ export function updateBarrelExports(
 			const specifier = node.moduleSpecifier.text;
 
 			// Resolve the specifier to see if it points to the moved file
-			const resolvedPath = resolveModulePath(
+			const resolved = resolveModuleSpecifier(
 				specifier,
 				sourceFile.fileName,
 				project
@@ -554,8 +554,8 @@ export function updateBarrelExports(
 
 			// Only process if this export points to the file being moved
 			if (
-				!resolvedPath ||
-				normalizePath(resolvedPath) !== normalizePath(oldPath)
+				resolved.kind !== "resolved" ||
+				normalizePath(resolved.path) !== normalizePath(oldPath)
 			) {
 				ts.forEachChild(node, visit);
 				return;

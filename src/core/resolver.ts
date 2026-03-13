@@ -3,14 +3,20 @@ import ts from "typescript";
 import type { ProjectConfig } from "../types.ts";
 import type { WorkspaceInfo } from "./workspace.ts";
 
+export type ResolveResult =
+	| { kind: "resolved"; path: string }
+	| { kind: "external"; specifier: string }
+	| { kind: "unresolvable"; specifier: string };
+
 /**
- * Resolve a module specifier to an absolute file path
+ * Resolve a module specifier to a structured result distinguishing
+ * resolved paths, external packages, and unresolvable specifiers.
  */
-export function resolveModulePath(
+export function resolveModuleSpecifier(
 	specifier: string,
 	fromFile: string,
 	project: ProjectConfig
-): string | null {
+): ResolveResult {
 	const result = ts.resolveModuleName(
 		specifier,
 		fromFile,
@@ -19,10 +25,31 @@ export function resolveModulePath(
 	);
 
 	if (result.resolvedModule) {
-		return result.resolvedModule.resolvedFileName;
+		if (result.resolvedModule.isExternalLibraryImport) {
+			return { kind: "external", specifier };
+		}
+		return { kind: "resolved", path: result.resolvedModule.resolvedFileName };
 	}
 
-	return null;
+	// Bare specifiers without ./ or ../ are external packages
+	if (!(specifier.startsWith(".") || path.isAbsolute(specifier))) {
+		return { kind: "external", specifier };
+	}
+
+	return { kind: "unresolvable", specifier };
+}
+
+/**
+ * Resolve a module specifier to an absolute file path.
+ * Returns null for external packages and unresolvable specifiers.
+ */
+export function resolveModulePath(
+	specifier: string,
+	fromFile: string,
+	project: ProjectConfig
+): string | null {
+	const result = resolveModuleSpecifier(specifier, fromFile, project);
+	return result.kind === "resolved" ? result.path : null;
 }
 
 /**
