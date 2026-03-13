@@ -7,14 +7,21 @@ import { TSC_ERROR_PATTERN } from "./constants.ts";
 import { createProgram } from "./project.ts";
 import { scanExports, scanUnresolvableImports } from "./scanner.ts";
 
+export interface UnresolvableDiagnosticWithFile {
+	file: string;
+	specifier: string;
+	line: number;
+	diagnostic: string;
+}
+
 export interface VerificationResult {
 	success: boolean;
 	errorsBefore: string[];
 	errorsAfter: string[];
 	newErrors: string[];
 	fixedErrors: string[];
-	/** Count of unresolvable imports detected after changes */
-	unresolvableAfter?: number;
+	/** Unresolvable imports detected after changes, with file paths and specifiers */
+	unresolvableDiagnostics?: UnresolvableDiagnosticWithFile[];
 }
 
 /**
@@ -37,13 +44,15 @@ export async function verifyTypeChecking(
 	// Run type check after changes
 	const errorsAfter = runTypeCheck(project);
 
-	// Count unresolvable imports after changes are applied
+	// Collect unresolvable imports after changes are applied
 	const program = createProgram(project);
-	let unresolvableAfter = 0;
+	const unresolvableDiagnostics: UnresolvableDiagnosticWithFile[] = [];
 	for (const file of project.files) {
 		const sf = program.getSourceFile(file);
 		if (sf) {
-			unresolvableAfter += scanUnresolvableImports(sf, project).length;
+			for (const diag of scanUnresolvableImports(sf, project)) {
+				unresolvableDiagnostics.push({ file, ...diag });
+			}
 		}
 	}
 
@@ -59,7 +68,7 @@ export async function verifyTypeChecking(
 		errorsAfter,
 		newErrors,
 		fixedErrors,
-		unresolvableAfter,
+		unresolvableDiagnostics,
 	};
 }
 
@@ -150,10 +159,21 @@ export function printVerificationResults(result: VerificationResult): void {
 		`\nType errors: ${result.errorsAfter.length} total (${result.errorsBefore.length} before, ${result.newErrors.length} new, ${result.fixedErrors.length} fixed)`
 	);
 
-	if (result.unresolvableAfter && result.unresolvableAfter > 0) {
+	if (
+		result.unresolvableDiagnostics &&
+		result.unresolvableDiagnostics.length > 0
+	) {
 		logger.warn(
-			`⚠️  ${result.unresolvableAfter} unresolvable import(s) detected after changes`
+			`⚠️  ${result.unresolvableDiagnostics.length} unresolvable import(s) detected after changes:`
 		);
+		for (const diag of result.unresolvableDiagnostics.slice(0, 10)) {
+			logger.warn(`   ${diag.file}:${diag.line}: "${diag.specifier}"`);
+		}
+		if (result.unresolvableDiagnostics.length > 10) {
+			logger.warn(
+				`   ... and ${result.unresolvableDiagnostics.length - 10} more`
+			);
+		}
 	}
 }
 
