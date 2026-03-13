@@ -93,13 +93,21 @@ export function updateFileReferences(
 					? (findCrossPackageImport(newPath, workspace) ?? ref.specifier)
 					: ref.specifier;
 
-				const splitChange = createImportSplit(
-					sourceFile,
-					ref,
-					movedBindings,
-					remainingBindings,
-					newSpecifier
-				);
+				const splitChange =
+					createImportSplit(
+						sourceFile,
+						ref,
+						movedBindings,
+						remainingBindings,
+						newSpecifier
+					) ??
+					createExportSplit(
+						sourceFile,
+						ref,
+						movedBindings,
+						remainingBindings,
+						newSpecifier
+					);
 
 				if (splitChange) {
 					importSplits.push(splitChange);
@@ -319,6 +327,76 @@ function createImportSplit(
 		start,
 		end,
 		newText: `${movedImport}\n${indent}${remainingImport}`,
+	};
+}
+
+/**
+ * Create an export split change that replaces a single re-export with two re-exports.
+ * Handles: export { a, b } from './module' → export { a } from '@pkg/new'; export { b } from './module';
+ * Preserves isTypeOnly on each generated export clause.
+ */
+function createExportSplit(
+	sourceFile: ts.SourceFile,
+	ref: ModuleReference,
+	movedBindings: ImportBinding[],
+	remainingBindings: ImportBinding[],
+	newSpecifier: string
+): ImportSplitChange | null {
+	let nodePosition: { start: number; end: number } | null = null;
+
+	function visit(node: ts.Node) {
+		if (nodePosition) {
+			return;
+		}
+
+		if (
+			ts.isExportDeclaration(node) &&
+			node.moduleSpecifier &&
+			ts.isStringLiteral(node.moduleSpecifier) &&
+			node.moduleSpecifier.text === ref.specifier
+		) {
+			const start = node.getStart(sourceFile);
+			const { line } = sourceFile.getLineAndCharacterOfPosition(start);
+			if (line + 1 === ref.line) {
+				nodePosition = { start, end: node.getEnd() };
+			}
+		}
+
+		ts.forEachChild(node, visit);
+	}
+
+	visit(sourceFile);
+
+	if (!nodePosition) {
+		return null;
+	}
+
+	const movedBindingStr = movedBindings
+		.map((b) => (b.alias ? `${b.name} as ${b.alias}` : b.name))
+		.join(", ");
+	const remainingBindingStr = remainingBindings
+		.map((b) => (b.alias ? `${b.name} as ${b.alias}` : b.name))
+		.join(", ");
+
+	const movedTypeOnly = movedBindings.every((b) => b.isType);
+	const remainingTypeOnly = remainingBindings.every((b) => b.isType);
+
+	const movedExport = movedTypeOnly
+		? `export type { ${movedBindingStr} } from "${newSpecifier}";`
+		: `export { ${movedBindingStr} } from "${newSpecifier}";`;
+
+	const remainingExport = remainingTypeOnly
+		? `export type { ${remainingBindingStr} } from "${ref.specifier}";`
+		: `export { ${remainingBindingStr} } from "${ref.specifier}";`;
+
+	const { start, end } = nodePosition;
+	const lineStart = sourceFile.getLineAndCharacterOfPosition(start);
+	const indent = sourceFile.text.slice(start - lineStart.character, start);
+
+	return {
+		start,
+		end,
+		newText: `${movedExport}\n${indent}${remainingExport}`,
 	};
 }
 
