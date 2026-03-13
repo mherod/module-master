@@ -295,17 +295,23 @@ function findExport(
 			}
 		}
 
-		// export default Name (when name is "default")
-		if (
-			ts.isExportAssignment(node) &&
-			!node.isExportEquals &&
-			name === "default"
-		) {
-			const { line } = sourceFile.getLineAndCharacterOfPosition(
-				node.getStart(sourceFile)
-			);
-			result = { type: "default", node, line: line + 1 };
-			return;
+		// export default Name
+		if (ts.isExportAssignment(node) && !node.isExportEquals) {
+			if (name === "default") {
+				const { line } = sourceFile.getLineAndCharacterOfPosition(
+					node.getStart(sourceFile)
+				);
+				result = { type: "default", node, line: line + 1 };
+				return;
+			}
+			// Match by the identifier in the expression (e.g., export default myFunc)
+			if (ts.isIdentifier(node.expression) && node.expression.text === name) {
+				const { line } = sourceFile.getLineAndCharacterOfPosition(
+					node.getStart(sourceFile)
+				);
+				result = { type: "default", node, line: line + 1 };
+				return;
+			}
 		}
 
 		ts.forEachChild(node, visit);
@@ -377,6 +383,28 @@ function renameInSourceFile(
 					});
 				}
 			}
+		}
+
+		// Rename identifier in export default <identifier>
+		if (
+			ts.isExportAssignment(node) &&
+			!node.isExportEquals &&
+			ts.isIdentifier(node.expression) &&
+			node.expression.text === oldName
+		) {
+			const { line } = sourceFile.getLineAndCharacterOfPosition(
+				node.getStart(sourceFile)
+			);
+			changes.push({
+				start: node.expression.getStart(sourceFile),
+				end: node.expression.getEnd(),
+				newText: newName,
+			});
+			updates.push({
+				line: line + 1,
+				oldSpecifier: oldName,
+				newSpecifier: newName,
+			});
 		}
 
 		// Also rename usages within the file itself
