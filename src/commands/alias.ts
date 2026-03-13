@@ -109,10 +109,23 @@ async function normalizeImports(
 	project: ProjectConfig
 ): Promise<AliasResult> {
 	const changes: AliasChange[] = [];
+	const skipped: AliasChange[] = [];
 	const filesToProcess = getFilesToProcess(target, project);
 
 	for (const file of filesToProcess) {
 		const references = await getFileReferences(file, project);
+
+		// Build a set of existing specifiers and their bindings in this file
+		const existingSpecifiers = new Map<string, Set<string>>();
+		for (const ref of references) {
+			const bindings = existingSpecifiers.get(ref.specifier) ?? new Set();
+			if (ref.bindings) {
+				for (const b of ref.bindings) {
+					bindings.add(b.alias ?? b.name);
+				}
+			}
+			existingSpecifiers.set(ref.specifier, bindings);
+		}
 
 		for (const ref of references) {
 			// Skip external packages (node_modules, built-in modules)
@@ -132,6 +145,25 @@ async function normalizeImports(
 			);
 
 			if (newSpecifier && newSpecifier !== ref.specifier) {
+				// Check for duplicate specifier conflict: would the new specifier
+				// collide with an existing import that has overlapping bindings?
+				const existingBindings = existingSpecifiers.get(newSpecifier);
+				if (existingBindings && ref.bindings) {
+					const overlapping = ref.bindings.some((b) =>
+						existingBindings.has(b.alias ?? b.name)
+					);
+					if (overlapping) {
+						skipped.push({
+							file,
+							line: ref.line,
+							oldSpecifier: ref.specifier,
+							newSpecifier,
+							strategy: prefer,
+						});
+						continue;
+					}
+				}
+
 				changes.push({
 					file,
 					line: ref.line,
@@ -141,6 +173,19 @@ async function normalizeImports(
 				});
 			}
 		}
+	}
+
+	if (skipped.length > 0) {
+		logger.info(
+			`⚠️  Skipped ${skipped.length} import(s) to avoid binding conflicts:`
+		);
+		for (const change of skipped) {
+			const relativePath = path.relative(process.cwd(), change.file);
+			logger.info(
+				`   ${relativePath}:${change.line}: "${change.oldSpecifier}" → "${change.newSpecifier}" would duplicate a binding`
+			);
+		}
+		logger.empty();
 	}
 
 	return {
