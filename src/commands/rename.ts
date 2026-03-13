@@ -522,7 +522,31 @@ function updateImportReferences(
 			}
 		}
 
-		// Handle re-exports: export { oldName } from './target'
+		// Handle namespace re-exports: export * as oldName from './target'
+		if (
+			ts.isExportDeclaration(node) &&
+			node.moduleSpecifier &&
+			ts.isStringLiteral(node.moduleSpecifier) &&
+			node.exportClause &&
+			ts.isNamespaceExport(node.exportClause) &&
+			node.exportClause.name.text === oldName
+		) {
+			const { line } = sourceFile.getLineAndCharacterOfPosition(
+				node.getStart(sourceFile)
+			);
+			changes.push({
+				start: node.exportClause.name.getStart(sourceFile),
+				end: node.exportClause.name.getEnd(),
+				newText: newName,
+			});
+			updates.push({
+				line: line + 1,
+				oldSpecifier: oldName,
+				newSpecifier: newName,
+			});
+		}
+
+		// Handle named re-exports: export { oldName } from './target'
 		if (
 			ts.isExportDeclaration(node) &&
 			node.moduleSpecifier &&
