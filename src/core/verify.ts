@@ -4,7 +4,8 @@ import ts from "typescript";
 import { logger } from "../cli-logger.ts";
 import type { ProjectConfig } from "../types.ts";
 import { TSC_ERROR_PATTERN } from "./constants.ts";
-import { scanExports } from "./scanner.ts";
+import { createProgram } from "./project.ts";
+import { scanExports, scanUnresolvableImports } from "./scanner.ts";
 
 export interface VerificationResult {
 	success: boolean;
@@ -12,6 +13,8 @@ export interface VerificationResult {
 	errorsAfter: string[];
 	newErrors: string[];
 	fixedErrors: string[];
+	/** Count of unresolvable imports detected after changes */
+	unresolvableAfter?: number;
 }
 
 /**
@@ -34,6 +37,16 @@ export async function verifyTypeChecking(
 	// Run type check after changes
 	const errorsAfter = runTypeCheck(project);
 
+	// Count unresolvable imports after changes are applied
+	const program = createProgram(project);
+	let unresolvableAfter = 0;
+	for (const file of project.files) {
+		const sf = program.getSourceFile(file);
+		if (sf) {
+			unresolvableAfter += scanUnresolvableImports(sf, project).length;
+		}
+	}
+
 	// Compare errors
 	const newErrors = errorsAfter.filter((err) => !errorsBefore.includes(err));
 	const fixedErrors = errorsBefore.filter((err) => !errorsAfter.includes(err));
@@ -46,6 +59,7 @@ export async function verifyTypeChecking(
 		errorsAfter,
 		newErrors,
 		fixedErrors,
+		unresolvableAfter,
 	};
 }
 
@@ -135,6 +149,12 @@ export function printVerificationResults(result: VerificationResult): void {
 	logger.info(
 		`\nType errors: ${result.errorsAfter.length} total (${result.errorsBefore.length} before, ${result.newErrors.length} new, ${result.fixedErrors.length} fixed)`
 	);
+
+	if (result.unresolvableAfter && result.unresolvableAfter > 0) {
+		logger.warn(
+			`⚠️  ${result.unresolvableAfter} unresolvable import(s) detected after changes`
+		);
+	}
 }
 
 export interface ConflictResult {
