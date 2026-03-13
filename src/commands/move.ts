@@ -308,6 +308,86 @@ export async function moveModule(
 		);
 	}
 
+	// Check for export name conflicts at the destination barrel
+	if (workspace && movedFileExports.length > 0) {
+		const destBarrelPath = findDestinationBarrel(targetPath, workspace);
+		if (destBarrelPath) {
+			const destBarrelFile = Bun.file(destBarrelPath);
+			if (await destBarrelFile.exists()) {
+				const barrelContent = await destBarrelFile.text();
+				const barrelAst = ts.createSourceFile(
+					destBarrelPath,
+					barrelContent,
+					ts.ScriptTarget.Latest,
+					true
+				);
+				const barrelExports = scanExports(barrelAst);
+				const movedNames = new Set(movedFileExports.map((e) => e.name));
+				const conflicts = barrelExports.filter((e) => movedNames.has(e.name));
+				if (conflicts.length > 0) {
+					const names = conflicts.map((c) => c.name).join(", ");
+					return {
+						success: false,
+						movedFile: { from: sourcePath, to: targetPath },
+						updatedReferences: [],
+						errors: [
+							{
+								file: destBarrelPath,
+								message: `Destination barrel already exports: ${names}`,
+								recoverable: false,
+							},
+						],
+					};
+				}
+			}
+		}
+	}
+
+	// Check for binding conflicts in files that import the moved module
+	if (movedFileExports.length > 0) {
+		const movedNames = new Set(movedFileExports.map((e) => e.name));
+		const bindingConflicts: MoveError[] = [];
+
+		for (const ref of references) {
+			if (normalizePath(ref.sourceFile) === normalizePath(sourcePath)) {
+				continue;
+			}
+			// Only non-aliased named imports would introduce a conflicting binding
+			if (!ref.bindings) {
+				continue;
+			}
+			const unaliasedMovedBindings = ref.bindings.filter(
+				(b) => movedNames.has(b.name) && !b.alias
+			);
+			if (unaliasedMovedBindings.length === 0) {
+				continue;
+			}
+			const importingAst = program.getSourceFile(ref.sourceFile);
+			if (!importingAst) {
+				continue;
+			}
+			for (const binding of unaliasedMovedBindings) {
+				if (hasLocalBinding(importingAst, binding.name, ref.specifier)) {
+					bindingConflicts.push({
+						file: ref.sourceFile,
+						message: `Already declares "${binding.name}" — move would cause a conflict`,
+						recoverable: false,
+					});
+					break;
+				}
+			}
+		}
+
+		if (bindingConflicts.length > 0) {
+			return {
+				success: false,
+				movedFile: { from: sourcePath, to: targetPath },
+				updatedReferences: [],
+				errors: bindingConflicts,
+			};
+		}
+	}
+
 	if (sourceAst) {
 		const internalRefs = scanModuleReferences(sourceAst, project);
 		if (internalRefs.length > 0) {
@@ -571,6 +651,90 @@ function findSpecifierInSource(
 
 	visit(sourceFile);
 	return result;
+}
+
+/**
+ * Check if a source file already has a local binding with the given name,
+ * excluding imports from the specified module specifier.
+ */
+function hasLocalBinding(
+	sourceFile: ts.SourceFile,
+	name: string,
+	skipSpecifier: string
+): boolean {
+	let found = false;
+
+	function visit(node: ts.Node) {
+		if (found) {
+			return;
+		}
+
+		if (
+			ts.isVariableDeclaration(node) &&
+			ts.isIdentifier(node.name) &&
+			node.name.text === name
+		) {
+			found = true;
+			return;
+		}
+
+		if (ts.isFunctionDeclaration(node) && node.name?.text === name) {
+			found = true;
+			return;
+		}
+
+		if (ts.isClassDeclaration(node) && node.name?.text === name) {
+			found = true;
+			return;
+		}
+
+		if (ts.isTypeAliasDeclaration(node) && node.name.text === name) {
+			found = true;
+			return;
+		}
+
+		if (ts.isInterfaceDeclaration(node) && node.name.text === name) {
+			found = true;
+			return;
+		}
+
+		if (ts.isEnumDeclaration(node) && node.name.text === name) {
+			found = true;
+			return;
+		}
+
+		// Check import bindings — skip imports from the module being moved
+		if (
+			ts.isImportSpecifier(node) &&
+			node.name.text === name &&
+			node.parent &&
+			ts.isNamedImports(node.parent) &&
+			node.parent.parent &&
+			ts.isImportClause(node.parent.parent) &&
+			node.parent.parent.parent &&
+			ts.isImportDeclaration(node.parent.parent.parent) &&
+			ts.isStringLiteral(node.parent.parent.parent.moduleSpecifier) &&
+			node.parent.parent.parent.moduleSpecifier.text !== skipSpecifier
+		) {
+			found = true;
+			return;
+		}
+
+		if (ts.isNamespaceImport(node) && node.name.text === name) {
+			found = true;
+			return;
+		}
+
+		if (ts.isImportClause(node) && node.name && node.name.text === name) {
+			found = true;
+			return;
+		}
+
+		ts.forEachChild(node, visit);
+	}
+
+	visit(sourceFile);
+	return found;
 }
 
 function printResult(
