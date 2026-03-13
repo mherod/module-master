@@ -6,7 +6,7 @@ import type { WorkspaceInfo } from "./workspace.ts";
 export type ResolveResult =
 	| { kind: "resolved"; path: string }
 	| { kind: "external"; specifier: string }
-	| { kind: "unresolvable"; specifier: string };
+	| { kind: "unresolvable"; specifier: string; diagnostic: string };
 
 /**
  * Resolve a module specifier to a structured result distinguishing
@@ -36,7 +36,11 @@ export function resolveModuleSpecifier(
 		return { kind: "external", specifier };
 	}
 
-	return { kind: "unresolvable", specifier };
+	return {
+		kind: "unresolvable",
+		specifier,
+		diagnostic: `Cannot resolve "${specifier}" from ${fromFile}`,
+	};
 }
 
 /**

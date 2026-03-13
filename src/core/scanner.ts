@@ -15,13 +15,9 @@ import { type ResolveResult, resolveModuleSpecifier } from "./resolver.ts";
  * Warn when a specifier cannot be resolved. External packages are expected
  * and skipped silently; unresolvable specifiers indicate a config or path error.
  */
-function warnIfUnresolvable(
-	result: ResolveResult,
-	specifier: string,
-	fromFile: string
-): void {
+function warnIfUnresolvable(result: ResolveResult): void {
 	if (result.kind === "unresolvable") {
-		logger.warn(`Warning: cannot resolve "${specifier}" from ${fromFile}`);
+		logger.warn(result.diagnostic);
 	}
 }
 
@@ -123,7 +119,7 @@ function extractImportDeclaration(
 		project
 	);
 	if (resolved.kind !== "resolved") {
-		warnIfUnresolvable(resolved, specifier, sourceFile.fileName);
+		warnIfUnresolvable(resolved);
 		return null;
 	}
 
@@ -193,7 +189,7 @@ function extractExportDeclaration(
 		project
 	);
 	if (resolved.kind !== "resolved") {
-		warnIfUnresolvable(resolved, specifier, sourceFile.fileName);
+		warnIfUnresolvable(resolved);
 		return null;
 	}
 
@@ -253,7 +249,7 @@ function extractDynamicImport(
 		project
 	);
 	if (resolved.kind !== "resolved") {
-		warnIfUnresolvable(resolved, specifier, sourceFile.fileName);
+		warnIfUnresolvable(resolved);
 		return null;
 	}
 
@@ -290,7 +286,7 @@ function extractRequire(
 		project
 	);
 	if (resolved.kind !== "resolved") {
-		warnIfUnresolvable(resolved, specifier, sourceFile.fileName);
+		warnIfUnresolvable(resolved);
 		return null;
 	}
 
@@ -472,7 +468,7 @@ export function scanBarrelExports(
 			);
 
 			if (resolved.kind !== "resolved") {
-				warnIfUnresolvable(resolved, specifier, sourceFile.fileName);
+				warnIfUnresolvable(resolved);
 				return;
 			}
 
