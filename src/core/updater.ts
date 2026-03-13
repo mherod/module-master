@@ -364,7 +364,7 @@ function findExportDeclarationRange(
 /**
  * Find the exact location of a module specifier in the source
  */
-function findSpecifierLocation(
+export function findSpecifierLocation(
 	sourceFile: ts.SourceFile,
 	ref: ModuleReference
 ): { start: number; end: number } | null {

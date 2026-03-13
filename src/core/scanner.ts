@@ -500,7 +500,7 @@ export function scanBarrelExports(
 	return barrels;
 }
 
-function hasExportModifier(node: ts.Node): boolean {
+export function hasExportModifier(node: ts.Node): boolean {
 	return (
 		ts.canHaveModifiers(node) &&
 		(ts

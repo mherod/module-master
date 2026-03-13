@@ -8,6 +8,7 @@ import {
 	resolveTsConfig,
 } from "../core/project.ts";
 import { normalizePath } from "../core/resolver.ts";
+import { hasExportModifier } from "../core/scanner.ts";
 import {
 	applyTextChanges,
 	deduplicateChanges,
@@ -265,8 +266,8 @@ function findExport(
 
 		// export class/function/const Name
 		if (hasExportModifier(node)) {
-			const declName = getDeclarationName(node);
-			if (declName === name) {
+			const nameNode = getNameNode(node);
+			if (nameNode?.text === name) {
 				const { line } = sourceFile.getLineAndCharacterOfPosition(
 					node.getStart(sourceFile)
 				);
@@ -312,41 +313,6 @@ function findExport(
 
 	visit(sourceFile);
 	return result;
-}
-
-function getDeclarationName(node: ts.Node): string | null {
-	if (ts.isFunctionDeclaration(node) && node.name) {
-		return node.name.text;
-	}
-	if (ts.isClassDeclaration(node) && node.name) {
-		return node.name.text;
-	}
-	if (ts.isVariableStatement(node)) {
-		const decl = node.declarationList.declarations[0];
-		if (decl && ts.isIdentifier(decl.name)) {
-			return decl.name.text;
-		}
-	}
-	if (ts.isTypeAliasDeclaration(node)) {
-		return node.name.text;
-	}
-	if (ts.isInterfaceDeclaration(node)) {
-		return node.name.text;
-	}
-	if (ts.isEnumDeclaration(node)) {
-		return node.name.text;
-	}
-	return null;
-}
-
-function hasExportModifier(node: ts.Node): boolean {
-	return (
-		ts.canHaveModifiers(node) &&
-		(ts
-			.getModifiers(node)
-			?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword) ??
-			false)
-	);
 }
 
 function renameInSourceFile(

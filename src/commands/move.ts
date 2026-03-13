@@ -22,6 +22,7 @@ import { applyTextChanges } from "../core/text-changes.ts";
 import {
 	addExportToDestinationBarrel,
 	findDestinationBarrel,
+	findSpecifierLocation,
 	updateBarrelExports,
 	updateFileReferences,
 } from "../core/updater.ts";
@@ -559,11 +560,7 @@ function updateInternalImports(
 		);
 
 		if (newSpecifier !== ref.specifier) {
-			const location = findSpecifierInSource(
-				sourceFile,
-				ref.specifier,
-				ref.line
-			);
+			const location = findSpecifierLocation(sourceFile, ref);
 			if (location) {
 				changes.push({
 					start: location.start,
@@ -585,57 +582,6 @@ function updateInternalImports(
 	const newContent = applyTextChanges(sourceFile.text, changes);
 
 	return { newContent, updates };
-}
-
-function findSpecifierInSource(
-	sourceFile: ts.SourceFile,
-	specifier: string,
-	line: number
-): { start: number; end: number } | null {
-	let result: { start: number; end: number } | null = null;
-
-	function visit(node: ts.Node) {
-		if (result) {
-			return;
-		}
-
-		let moduleSpecifier: ts.StringLiteral | undefined;
-
-		if (
-			ts.isImportDeclaration(node) &&
-			ts.isStringLiteral(node.moduleSpecifier)
-		) {
-			moduleSpecifier = node.moduleSpecifier;
-		} else if (
-			ts.isExportDeclaration(node) &&
-			node.moduleSpecifier &&
-			ts.isStringLiteral(node.moduleSpecifier)
-		) {
-			moduleSpecifier = node.moduleSpecifier;
-		} else if (ts.isCallExpression(node)) {
-			const arg = node.arguments[0];
-			if (arg && ts.isStringLiteral(arg)) {
-				moduleSpecifier = arg;
-			}
-		}
-
-		if (moduleSpecifier && moduleSpecifier.text === specifier) {
-			const { line: nodeLine } = sourceFile.getLineAndCharacterOfPosition(
-				node.getStart(sourceFile)
-			);
-			if (nodeLine + 1 === line) {
-				result = {
-					start: moduleSpecifier.getStart(sourceFile) + 1,
-					end: moduleSpecifier.getEnd() - 1,
-				};
-			}
-		}
-
-		ts.forEachChild(node, visit);
-	}
-
-	visit(sourceFile);
-	return result;
 }
 
 function printResult(
