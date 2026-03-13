@@ -16,6 +16,7 @@ import {
 	scanModuleReferences,
 	scanUnresolvableImports,
 } from "../core/scanner.ts";
+import { collectUnresolvableDiagnostics } from "../core/verify.ts";
 import type { AnalysisResult, ProjectConfig } from "../types.ts";
 
 export interface AnalyzeOptions {
@@ -40,6 +41,16 @@ export function analyzeCommand(options: AnalyzeOptions): void {
 	const result = analyze(absolutePath, project);
 
 	printAnalysis(result, verbose);
+
+	const projectDiagnostics = collectUnresolvableDiagnostics(project);
+	if (projectDiagnostics.length > 0) {
+		logger.warn(
+			`\n⚠️  ${projectDiagnostics.length} unresolvable import(s) across project:`
+		);
+		for (const diag of projectDiagnostics) {
+			logger.warn(`   ${diag.file}:${diag.line}: "${diag.specifier}"`);
+		}
+	}
 }
 
 export function analyze(

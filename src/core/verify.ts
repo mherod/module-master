@@ -14,6 +14,26 @@ export interface UnresolvableDiagnosticWithFile {
 	diagnostic: string;
 }
 
+/**
+ * Collect all unresolvable imports across every project file.
+ * Returns structured diagnostics with file path, specifier, line, and message.
+ */
+export function collectUnresolvableDiagnostics(
+	project: ProjectConfig
+): UnresolvableDiagnosticWithFile[] {
+	const program = createProgram(project);
+	const diagnostics: UnresolvableDiagnosticWithFile[] = [];
+	for (const file of project.files) {
+		const sf = program.getSourceFile(file);
+		if (sf) {
+			for (const diag of scanUnresolvableImports(sf, project)) {
+				diagnostics.push({ file, ...diag });
+			}
+		}
+	}
+	return diagnostics;
+}
+
 export interface VerificationResult {
 	success: boolean;
 	errorsBefore: string[];
@@ -45,16 +65,7 @@ export async function verifyTypeChecking(
 	const errorsAfter = runTypeCheck(project);
 
 	// Collect unresolvable imports after changes are applied
-	const program = createProgram(project);
-	const unresolvableDiagnostics: UnresolvableDiagnosticWithFile[] = [];
-	for (const file of project.files) {
-		const sf = program.getSourceFile(file);
-		if (sf) {
-			for (const diag of scanUnresolvableImports(sf, project)) {
-				unresolvableDiagnostics.push({ file, ...diag });
-			}
-		}
-	}
+	const unresolvableDiagnostics = collectUnresolvableDiagnostics(project);
 
 	// Compare errors
 	const newErrors = errorsAfter.filter((err) => !errorsBefore.includes(err));
