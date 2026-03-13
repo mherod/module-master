@@ -1,7 +1,6 @@
 import path from "node:path";
 import ts from "typescript";
 import { logger } from "../cli-logger.ts";
-import { TSC_ERROR_PATTERN } from "../core/constants.ts";
 import {
 	buildDependencyGraph,
 	findAllReferences,
@@ -26,6 +25,7 @@ import {
 	updateBarrelExports,
 	updateFileReferences,
 } from "../core/updater.ts";
+import { runTypeCheck } from "../core/verify.ts";
 import {
 	discoverWorkspace,
 	findBuildScript,
@@ -142,33 +142,6 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 	}
 }
 
-async function runTypeCheck(project: ProjectConfig): Promise<string[]> {
-	const { spawnSync } = await import("node:child_process");
-	const result = spawnSync(
-		"tsc",
-		["--noEmit", "-p", project.tsconfigPath, "--pretty", "false"],
-		{
-			cwd: project.rootDir,
-			encoding: "utf-8",
-			shell: false,
-		}
-	);
-
-	if (result.status === 0) {
-		return [];
-	}
-
-	const output = (result.stdout + result.stderr).trim();
-	if (!output) {
-		return [];
-	}
-
-	return output
-		.split("\n")
-		.filter((line) => line.includes(TSC_ERROR_PATTERN))
-		.map((line) => line.trim());
-}
-
 async function runPackageBuilds(
 	sourcePath: string,
 	targetPath: string,
@@ -240,13 +213,13 @@ async function runPackageBuilds(
 			stdio: verbose ? "inherit" : "pipe",
 		});
 
-		if (result.status !== 0) {
+		if (result.status === 0) {
+			logger.info(`   ✅ ${pkg.name} built successfully`);
+		} else {
 			logger.error(`   ❌ Build failed for ${pkg.name}`);
 			if (!verbose && result.stderr) {
 				logger.error(`   ${result.stderr.slice(0, 200)}`);
 			}
-		} else {
-			logger.info(`   ✅ ${pkg.name} built successfully`);
 		}
 	}
 }

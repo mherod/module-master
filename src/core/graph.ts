@@ -112,14 +112,14 @@ export function findAllReferences(
 
 			// If referring to a barrel, update resolvedPath to point to original target
 			// so updater knows this effectively imports the target
-			if (exportedFile !== normalizedPath) {
+			if (exportedFile === normalizedPath) {
+				// Direct reference
+				allRefs.push(ref);
+			} else {
 				allRefs.push({
 					...ref,
 					resolvedPath: normalizedPath,
 				});
-			} else {
-				// Direct reference
-				allRefs.push(ref);
 			}
 		}
 	}

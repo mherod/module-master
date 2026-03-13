@@ -50,7 +50,7 @@ export async function verifyTypeChecking(
 /**
  * Run TypeScript compiler in noEmit mode and capture errors
  */
-function runTypeCheck(project: ProjectConfig): string[] {
+export function runTypeCheck(project: ProjectConfig): string[] {
 	const tsconfigPath = project.tsconfigPath;
 	const cwd = path.dirname(tsconfigPath);
 
