@@ -1,5 +1,6 @@
 import path from "node:path";
 import ts from "typescript";
+import { logger } from "../cli-logger.ts";
 import type {
 	ExportInfo,
 	ImportBinding,
@@ -553,10 +554,16 @@ export function updateBarrelExports(
 			);
 
 			// Only process if this export points to the file being moved
-			if (
-				resolved.kind !== "resolved" ||
-				normalizePath(resolved.path) !== normalizePath(oldPath)
-			) {
+			if (resolved.kind !== "resolved") {
+				if (resolved.kind === "unresolvable") {
+					logger.error(
+						`Warning: cannot resolve "${specifier}" from ${sourceFile.fileName}`
+					);
+				}
+				ts.forEachChild(node, visit);
+				return;
+			}
+			if (normalizePath(resolved.path) !== normalizePath(oldPath)) {
 				ts.forEachChild(node, visit);
 				return;
 			}
