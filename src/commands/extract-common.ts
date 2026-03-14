@@ -6,7 +6,7 @@ import {
 	findCrossPackageImport,
 	isCrossPackageMove,
 } from "../core/resolver.ts";
-import { parseSourceFile } from "../core/scanner.ts";
+import { withSourceFile } from "../core/scanner.ts";
 import { analyzeSimilarity } from "../core/similarity.ts";
 import { applyTextChanges, type TextChange } from "../core/text-changes.ts";
 import type { WorkspaceInfo } from "../core/workspace.ts";
@@ -158,11 +158,11 @@ function findFunctionNode(
  * Parse a file and find the function node.
  */
 function locateFunctionNode(fn: FunctionInfo): FunctionNode | null {
-	const sourceFile = parseSourceFile(fn.file);
-	if (!sourceFile) {
-		return null;
-	}
-	return findFunctionNode(sourceFile, fn.file, fn.name, fn.line);
+	return withSourceFile(
+		fn.file,
+		(sourceFile) => findFunctionNode(sourceFile, fn.file, fn.name, fn.line),
+		null
+	);
 }
 
 /**

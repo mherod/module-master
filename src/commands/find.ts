@@ -1,6 +1,6 @@
 import path from "node:path";
 import { logger } from "../cli-logger.ts";
-import { parseSourceFile, scanExports } from "../core/scanner.ts";
+import { scanExports, withSourceFile } from "../core/scanner.ts";
 import { discoverProject } from "../core/tsconfig-discovery.ts";
 import {
 	discoverWorkspace,
@@ -207,11 +207,7 @@ function search(
 }
 
 function getFileExports(filePath: string): ExportInfo[] {
-	const sourceFile = parseSourceFile(filePath);
-	if (!sourceFile) {
-		return [];
-	}
-	return scanExports(sourceFile);
+	return withSourceFile(filePath, scanExports, []);
 }
 
 function printResults(

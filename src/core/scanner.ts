@@ -195,6 +195,30 @@ function resolveDeclarationRef(
 	};
 }
 
+function buildModuleReference(
+	sourceFile: ts.SourceFile,
+	base: {
+		specifier: string;
+		resolvedPath: string;
+		line: number;
+		column: number;
+	},
+	type: ReferenceType,
+	bindings: ImportBinding[],
+	isTypeOnly: boolean
+): ModuleReference {
+	return {
+		sourceFile: sourceFile.fileName,
+		specifier: base.specifier,
+		resolvedPath: base.resolvedPath,
+		type,
+		line: base.line,
+		column: base.column,
+		bindings: bindings.length > 0 ? bindings : undefined,
+		isTypeOnly,
+	};
+}
+
 function extractImportDeclaration(
 	node: ts.ImportDeclaration,
 	sourceFile: ts.SourceFile,
@@ -250,16 +274,13 @@ function extractImportDeclaration(
 		});
 	}
 
-	return {
-		sourceFile: sourceFile.fileName,
-		specifier,
-		resolvedPath,
+	return buildModuleReference(
+		sourceFile,
+		{ specifier, resolvedPath, line, column },
 		type,
-		line,
-		column,
-		bindings: bindings.length > 0 ? bindings : undefined,
-		isTypeOnly,
-	};
+		bindings,
+		isTypeOnly
+	);
 }
 
 function extractExportDeclaration(
@@ -306,16 +327,13 @@ function extractExportDeclaration(
 		}
 	}
 
-	return {
-		sourceFile: sourceFile.fileName,
-		specifier,
-		resolvedPath,
+	return buildModuleReference(
+		sourceFile,
+		{ specifier, resolvedPath, line, column },
 		type,
-		line,
-		column,
-		bindings: bindings.length > 0 ? bindings : undefined,
-		isTypeOnly,
-	};
+		bindings,
+		isTypeOnly
+	);
 }
 
 /**
@@ -629,4 +647,56 @@ export function parseSourceFile(filePath: string): ts.SourceFile | null {
 		return null;
 	}
 	return ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
+}
+
+/**
+ * Run a callback with a parsed source file from disk or an existing program.
+ *
+ * @example
+ * const exports = withSourceFile(filePath, scanExports, []);
+ *
+ * @example
+ * const refs = withSourceFile(
+ *   program,
+ *   filePath,
+ *   (sourceFile) => scanModuleReferences(sourceFile, project),
+ *   []
+ * );
+ */
+export function withSourceFile<T>(
+	filePath: string,
+	callback: (sourceFile: ts.SourceFile) => T,
+	fallback: T
+): T;
+export function withSourceFile<T>(
+	program: ts.Program,
+	filePath: string,
+	callback: (sourceFile: ts.SourceFile) => T,
+	fallback: T
+): T;
+export function withSourceFile<T>(
+	source: string | ts.Program,
+	filePathOrCallback: string | ((sourceFile: ts.SourceFile) => T),
+	callbackOrFallback: ((sourceFile: ts.SourceFile) => T) | T,
+	maybeFallback?: T
+): T {
+	let sourceFile: ts.SourceFile | undefined | null;
+	let callback: (sourceFile: ts.SourceFile) => T;
+	let fallback: T;
+
+	if (typeof source === "string") {
+		sourceFile = parseSourceFile(source);
+		callback = filePathOrCallback as (sourceFile: ts.SourceFile) => T;
+		fallback = callbackOrFallback as T;
+	} else {
+		sourceFile = source.getSourceFile(filePathOrCallback as string);
+		callback = callbackOrFallback as (sourceFile: ts.SourceFile) => T;
+		fallback = maybeFallback as T;
+	}
+
+	if (!sourceFile) {
+		return fallback;
+	}
+
+	return callback(sourceFile);
 }

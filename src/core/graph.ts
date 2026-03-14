@@ -1,7 +1,11 @@
 import type { ModuleReference, ProjectConfig } from "../types.ts";
 import { createProgram, getProjectFiles } from "./project.ts";
 import { normalizePath } from "./resolver.ts";
-import { scanBarrelExports, scanModuleReferences } from "./scanner.ts";
+import {
+	scanBarrelExports,
+	scanModuleReferences,
+	withSourceFile,
+} from "./scanner.ts";
 
 export interface DependencyGraph {
 	/** Map from file path to files it imports */
@@ -27,31 +31,35 @@ export function buildDependencyGraph(project: ProjectConfig): DependencyGraph {
 	const barrelReExports = new Map<string, string[]>();
 
 	for (const file of files) {
-		const sourceFile = program.getSourceFile(file);
-		if (!sourceFile) {
-			continue;
-		}
+		withSourceFile(
+			program,
+			file,
+			(sourceFile) => {
+				const normalizedFile = normalizePath(file);
+				const refs = scanModuleReferences(sourceFile, project);
+				imports.set(normalizedFile, refs);
 
-		const normalizedFile = normalizePath(file);
-		const refs = scanModuleReferences(sourceFile, project);
-		imports.set(normalizedFile, refs);
+				// Check if this is a barrel file and track what it re-exports
+				const barrels = scanBarrelExports(sourceFile, project);
+				if (barrels.length > 0) {
+					barrelFiles.add(normalizedFile);
+					// Store the actual files this barrel re-exports
+					const reExportedFiles = barrels.map((b) =>
+						normalizePath(b.resolvedPath)
+					);
+					barrelReExports.set(normalizedFile, reExportedFiles);
+				}
 
-		// Check if this is a barrel file and track what it re-exports
-		const barrels = scanBarrelExports(sourceFile, project);
-		if (barrels.length > 0) {
-			barrelFiles.add(normalizedFile);
-			// Store the actual files this barrel re-exports
-			const reExportedFiles = barrels.map((b) => normalizePath(b.resolvedPath));
-			barrelReExports.set(normalizedFile, reExportedFiles);
-		}
-
-		// Populate reverse mapping
-		for (const ref of refs) {
-			const normalizedResolved = normalizePath(ref.resolvedPath);
-			const existing = importedBy.get(normalizedResolved) ?? [];
-			existing.push(ref);
-			importedBy.set(normalizedResolved, existing);
-		}
+				// Populate reverse mapping
+				for (const ref of refs) {
+					const normalizedResolved = normalizePath(ref.resolvedPath);
+					const existing = importedBy.get(normalizedResolved) ?? [];
+					existing.push(ref);
+					importedBy.set(normalizedResolved, existing);
+				}
+			},
+			undefined
+		);
 	}
 
 	return { imports, importedBy, barrelFiles, barrelReExports };

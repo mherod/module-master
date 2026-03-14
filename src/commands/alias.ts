@@ -10,7 +10,7 @@ import {
 	calculateRelativeSpecifier,
 	findAliasForPath,
 } from "../core/resolver.ts";
-import { scanModuleReferences } from "../core/scanner.ts";
+import { scanModuleReferences, withSourceFile } from "../core/scanner.ts";
 import {
 	printVerificationResults,
 	verifyTypeChecking,
@@ -322,13 +322,12 @@ function getFileReferences(
 	program: ts.Program,
 	project: ProjectConfig
 ): ModuleReference[] {
-	const sourceFile = program.getSourceFile(filePath);
-
-	if (!sourceFile) {
-		return [];
-	}
-
-	return scanModuleReferences(sourceFile, project);
+	return withSourceFile(
+		program,
+		filePath,
+		(sourceFile) => scanModuleReferences(sourceFile, project),
+		[]
+	);
 }
 
 function calculatePreferredSpecifier(
