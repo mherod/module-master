@@ -231,9 +231,17 @@ export function updateFileReferences(
 	}
 
 	// After applying each split, adjust positions of pending specifier changes
-	// whose start is higher than the split's insertion point. Each split may
-	// insert or remove bytes; changes at higher positions must be shifted by the
-	// same delta so they still point to the correct content.
+	// whose start is higher than the split's insertion point.
+	//
+	// splitDelta = split.newText.length - (split.end - split.start)
+	//   > 0  : split inserted bytes (e.g. one import expanded into two)
+	//   < 0  : split removed bytes (e.g. export declaration removed,
+	//           findExportDeclarationRange returns newText:"")
+	//   === 0: no-op — adjustment skipped
+	//
+	// Both addition and removal are handled by the same arithmetic: each
+	// change whose start is above the split's insertion point is shifted by
+	// exactly splitDelta bytes so it still addresses the correct content.
 	for (const split of importSplits) {
 		const splitDelta = split.newText.length - (split.end - split.start);
 		if (splitDelta !== 0) {
