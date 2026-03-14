@@ -618,3 +618,15 @@ export function getNameNode(node: ts.Node): ts.Identifier | null {
 	}
 	return null;
 }
+
+/**
+ * Read and parse a TypeScript/JavaScript file into a SourceFile.
+ * Returns null if the file cannot be read.
+ */
+export function parseSourceFile(filePath: string): ts.SourceFile | null {
+	const content = ts.sys.readFile(filePath);
+	if (!content) {
+		return null;
+	}
+	return ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
+}

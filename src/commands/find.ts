@@ -1,7 +1,6 @@
 import path from "node:path";
-import ts from "typescript";
 import { logger } from "../cli-logger.ts";
-import { scanExports } from "../core/scanner.ts";
+import { parseSourceFile, scanExports } from "../core/scanner.ts";
 import { discoverProject } from "../core/tsconfig-discovery.ts";
 import {
 	discoverWorkspace,
@@ -208,18 +207,10 @@ function search(
 }
 
 function getFileExports(filePath: string): ExportInfo[] {
-	const content = ts.sys.readFile(filePath);
-	if (!content) {
+	const sourceFile = parseSourceFile(filePath);
+	if (!sourceFile) {
 		return [];
 	}
-
-	const sourceFile = ts.createSourceFile(
-		filePath,
-		content,
-		ts.ScriptTarget.Latest,
-		true
-	);
-
 	return scanExports(sourceFile);
 }
 

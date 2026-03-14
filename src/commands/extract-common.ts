@@ -2,6 +2,7 @@ import path from "node:path";
 import ts from "typescript";
 import { logger } from "../cli-logger.ts";
 import { calculateRelativeSpecifier } from "../core/resolver.ts";
+import { parseSourceFile } from "../core/scanner.ts";
 import { analyzeSimilarity } from "../core/similarity.ts";
 import { applyTextChanges, type TextChange } from "../core/text-changes.ts";
 import type { FunctionInfo, SimilarityGroup } from "../types.ts";
@@ -131,16 +132,10 @@ function findFunctionNode(
  * Parse a file and find the function node.
  */
 function locateFunctionNode(fn: FunctionInfo): FunctionNode | null {
-	const content = ts.sys.readFile(fn.file);
-	if (!content) {
+	const sourceFile = parseSourceFile(fn.file);
+	if (!sourceFile) {
 		return null;
 	}
-	const sourceFile = ts.createSourceFile(
-		fn.file,
-		content,
-		ts.ScriptTarget.Latest,
-		true
-	);
 	return findFunctionNode(sourceFile, fn.file, fn.name, fn.line);
 }
 
