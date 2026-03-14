@@ -126,3 +126,38 @@ export interface ExportInfo {
 	isType: boolean;
 	line: number;
 }
+
+export interface FunctionInfo {
+	/** Absolute path to the file */
+	file: string;
+	/** Function name */
+	name: string;
+	/** Line number where the function starts */
+	line: number;
+	/** Column number */
+	column: number;
+	/** Normalized body text for comparison */
+	normalizedBody: string;
+	/** Number of tokens in the normalized body */
+	tokenCount: number;
+}
+
+export type SimilarityBucket = "exact" | "high" | "medium";
+
+export interface SimilarityGroup {
+	/** Similarity level */
+	bucket: SimilarityBucket;
+	/** Similarity score (0–1) */
+	score: number;
+	/** Functions in this group */
+	functions: FunctionInfo[];
+}
+
+export interface SimilarityReport {
+	/** All groups of similar functions, ranked by score descending */
+	groups: SimilarityGroup[];
+	/** Total functions scanned */
+	totalFunctions: number;
+	/** Total files scanned */
+	totalFiles: number;
+}

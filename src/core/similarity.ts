@@ -1,0 +1,318 @@
+import path from "node:path";
+import ts from "typescript";
+import type {
+	FunctionInfo,
+	SimilarityBucket,
+	SimilarityGroup,
+	SimilarityReport,
+} from "../types.ts";
+import { TS_JS_EXTENSIONS } from "./constants.ts";
+import { discoverProject } from "./tsconfig-discovery.ts";
+
+/** Minimum token count for a function body to be included */
+const MIN_TOKEN_COUNT = 8;
+
+const JS_KEYWORDS = new Set([
+	"break",
+	"case",
+	"catch",
+	"class",
+	"const",
+	"continue",
+	"default",
+	"delete",
+	"do",
+	"else",
+	"export",
+	"extends",
+	"false",
+	"finally",
+	"for",
+	"function",
+	"if",
+	"import",
+	"in",
+	"instanceof",
+	"let",
+	"new",
+	"null",
+	"return",
+	"static",
+	"super",
+	"switch",
+	"this",
+	"throw",
+	"true",
+	"try",
+	"typeof",
+	"undefined",
+	"var",
+	"void",
+	"while",
+	"with",
+	"yield",
+	"async",
+	"await",
+	"of",
+	"from",
+	"as",
+	"type",
+	"interface",
+	"enum",
+	"implements",
+	"declare",
+	"abstract",
+	"readonly",
+	"override",
+]);
+
+/**
+ * Normalize a function body text by replacing identifiers, string literals,
+ * and numeric literals with stable placeholders. Structural tokens (keywords,
+ * punctuation) are preserved so that the shape of the body is captured.
+ */
+export function normalizeBody(text: string): string {
+	// Remove line comments
+	let s = text.replace(/\/\/[^\n]*/g, "");
+	// Remove block comments
+	s = s.replace(/\/\*[\s\S]*?\*\//g, "");
+	// Replace template literals (before string literals to avoid overlap)
+	s = s.replace(/`(?:[^`\\]|\\.)*`/g, "$S");
+	// Replace string literals
+	s = s.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, "$S");
+	// Replace numeric literals (must come before identifier replacement)
+	s = s.replace(/\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b/g, "$N");
+	// Replace non-keyword identifiers with $I.
+	// The lookbehind (?<!\$) prevents re-replacing the S/N in already-placed $S/$N.
+	s = s.replace(/(?<!\$)\b([a-zA-Z_$][a-zA-Z0-9_$]*)\b/g, (match) =>
+		JS_KEYWORDS.has(match) ? match : "$I"
+	);
+	// Collapse whitespace
+	s = s.replace(/\s+/g, " ").trim();
+	return s;
+}
+
+/**
+ * Tokenize a normalized body into individual tokens.
+ * Handles placeholders ($I, $S, $N), keywords/identifiers, and punctuation.
+ */
+export function tokenize(normalized: string): string[] {
+	return (
+		normalized.match(/\$[ISN]|[a-zA-Z_$][a-zA-Z0-9_$]*|\d+|[^\s\w$]/g) ?? []
+	);
+}
+
+/**
+ * Compute Jaccard similarity between two token arrays using set intersection.
+ * Returns 1.0 for two empty inputs (treat as identical).
+ */
+export function jaccardSimilarity(a: string[], b: string[]): number {
+	if (a.length === 0 && b.length === 0) {
+		return 1;
+	}
+	const setA = new Set(a);
+	const setB = new Set(b);
+	let intersection = 0;
+	for (const token of setA) {
+		if (setB.has(token)) {
+			intersection++;
+		}
+	}
+	const union = setA.size + setB.size - intersection;
+	return union === 0 ? 1 : intersection / union;
+}
+
+function scoreToBucket(score: number): SimilarityBucket | null {
+	if (score >= 0.999) {
+		return "exact";
+	}
+	if (score >= 0.85) {
+		return "high";
+	}
+	if (score >= 0.7) {
+		return "medium";
+	}
+	return null;
+}
+
+/**
+ * Collect all top-level function declarations and named const arrow/function
+ * expressions from a source file.
+ */
+export function collectFunctions(
+	sourceFile: ts.SourceFile,
+	filePath: string
+): FunctionInfo[] {
+	const functions: FunctionInfo[] = [];
+
+	for (const stmt of sourceFile.statements) {
+		// function foo() {} or export function foo() {}
+		if (ts.isFunctionDeclaration(stmt) && stmt.name && stmt.body) {
+			const bodyText = stmt.body.getText(sourceFile);
+			const normalized = normalizeBody(bodyText);
+			const tokens = tokenize(normalized);
+			if (tokens.length >= MIN_TOKEN_COUNT) {
+				const { line, character } = sourceFile.getLineAndCharacterOfPosition(
+					stmt.getStart(sourceFile)
+				);
+				functions.push({
+					file: filePath,
+					name: stmt.name.text,
+					line: line + 1,
+					column: character,
+					normalizedBody: normalized,
+					tokenCount: tokens.length,
+				});
+			}
+		}
+		// const foo = () => { ... } or const foo = function() { ... }
+		else if (ts.isVariableStatement(stmt)) {
+			for (const decl of stmt.declarationList.declarations) {
+				if (!(ts.isIdentifier(decl.name) && decl.initializer)) {
+					continue;
+				}
+				const init = decl.initializer;
+				if (
+					(ts.isArrowFunction(init) || ts.isFunctionExpression(init)) &&
+					init.body &&
+					ts.isBlock(init.body)
+				) {
+					const bodyText = init.body.getText(sourceFile);
+					const normalized = normalizeBody(bodyText);
+					const tokens = tokenize(normalized);
+					if (tokens.length >= MIN_TOKEN_COUNT) {
+						const { line, character } =
+							sourceFile.getLineAndCharacterOfPosition(
+								stmt.getStart(sourceFile)
+							);
+						functions.push({
+							file: filePath,
+							name: decl.name.text,
+							line: line + 1,
+							column: character,
+							normalizedBody: normalized,
+							tokenCount: tokens.length,
+						});
+					}
+				}
+			}
+		}
+	}
+
+	return functions;
+}
+
+/**
+ * Group a list of functions by similarity score above the given threshold.
+ * Uses exact normalized-body comparison for "exact" bucket and Jaccard
+ * similarity for "high" and "medium" buckets.
+ *
+ * Each function appears in at most one group (greedy assignment).
+ */
+export function findSimilarGroups(
+	functions: FunctionInfo[],
+	threshold = 0.7
+): SimilarityGroup[] {
+	const groups: SimilarityGroup[] = [];
+	const assigned = new Set<number>();
+
+	for (let i = 0; i < functions.length; i++) {
+		if (assigned.has(i)) {
+			continue;
+		}
+
+		const fnI = functions[i];
+		if (!fnI) {
+			continue;
+		}
+		const tokensI = tokenize(fnI.normalizedBody);
+		const group: FunctionInfo[] = [fnI];
+		let minScore = 1.0;
+
+		for (let j = i + 1; j < functions.length; j++) {
+			if (assigned.has(j)) {
+				continue;
+			}
+
+			const fnJ = functions[j];
+			if (!fnJ) {
+				continue;
+			}
+
+			let score: number;
+			if (fnI.normalizedBody === fnJ.normalizedBody) {
+				// Exact match after normalization — same structure, only name/literal differences
+				score = 1.0;
+			} else {
+				const tokensJ = tokenize(fnJ.normalizedBody);
+				score = jaccardSimilarity(tokensI, tokensJ);
+			}
+
+			if (score >= threshold) {
+				group.push(fnJ);
+				assigned.add(j);
+				minScore = Math.min(minScore, score);
+			}
+		}
+
+		if (group.length > 1) {
+			assigned.add(i);
+			const bucket = scoreToBucket(minScore);
+			if (bucket) {
+				groups.push({ bucket, score: minScore, functions: group });
+			}
+		}
+	}
+
+	// Sort by score descending (best matches first)
+	groups.sort((a, b) => b.score - a.score);
+	return groups;
+}
+
+/**
+ * Scan all TypeScript/JavaScript files in a project directory and collect
+ * top-level function declarations and named const function expressions.
+ */
+export async function scanProjectFunctions(
+	directory: string
+): Promise<{ functions: FunctionInfo[]; totalFiles: number }> {
+	const discovery = discoverProject(path.resolve(directory));
+	const allFiles = Array.from(discovery.fileOwnership.keys()).filter((f) =>
+		TS_JS_EXTENSIONS.test(f)
+	);
+
+	const functions: FunctionInfo[] = [];
+
+	for (const filePath of allFiles) {
+		const content = ts.sys.readFile(filePath);
+		if (!content) {
+			continue;
+		}
+		try {
+			const sourceFile = ts.createSourceFile(
+				filePath,
+				content,
+				ts.ScriptTarget.Latest,
+				true
+			);
+			const fileFunctions = collectFunctions(sourceFile, filePath);
+			functions.push(...fileFunctions);
+		} catch {
+			// Skip files that cannot be parsed
+		}
+	}
+
+	return { functions, totalFiles: allFiles.length };
+}
+
+/**
+ * Run the full similarity analysis on a project directory.
+ */
+export async function analyzeSimilarity(
+	directory: string,
+	threshold = 0.7
+): Promise<SimilarityReport> {
+	const { functions, totalFiles } = await scanProjectFunctions(directory);
+	const groups = findSimilarGroups(functions, threshold);
+	return { groups, totalFunctions: functions.length, totalFiles };
+}

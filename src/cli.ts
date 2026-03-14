@@ -9,6 +9,7 @@ import { discoverCommand } from "./commands/discover.ts";
 import { findCommand } from "./commands/find.ts";
 import { moveCommand } from "./commands/move.ts";
 import { renameCommand } from "./commands/rename.ts";
+import { similarCommand } from "./commands/similar.ts";
 import { workspaceCommand } from "./commands/workspace.ts";
 
 const { values, positionals } = parseArgs({
@@ -23,6 +24,7 @@ const { values, positionals } = parseArgs({
 		prefer: { type: "string" },
 		"no-verify": { type: "boolean" },
 		json: { type: "boolean" },
+		threshold: { type: "string" },
 	},
 	allowPositionals: true,
 });
@@ -44,6 +46,7 @@ Commands:
   alias <target> --prefer=<strategy>  Normalize imports to use aliases, relative paths, or shortest
   move <source> <target>              Move a module and update all references
   rename <file> <oldName> <newName>   Rename an export and update all imports
+  similar <directory>                 Find similar or duplicate functions for consolidation
 
 Options:
   -h, --help        Show this help message
@@ -54,6 +57,8 @@ Options:
   --prefer          Strategy for alias command (alias, relative, shortest)
   --no-verify       Disable type checking verification (enabled by default)
   --verbose         Enable verbose output
+  --json            Output results as JSON
+  --threshold       Similarity threshold for similar command (0.0–1.0, default 0.7)
 
 Examples:
   ${name} find Entity -p /path/to/project
@@ -61,6 +66,7 @@ Examples:
   ${name} alias src --prefer=alias --dry-run
   ${name} move src/old/file.ts src/new/file.ts --dry-run
   ${name} rename src/components/Button.tsx Button PrimaryButton
+  ${name} similar src --json
 `);
 }
 
@@ -227,6 +233,33 @@ Examples:
   ${name} alias src --prefer=alias --no-verify
 `);
 			break;
+		case "similar":
+			logger.info(`
+Usage: ${name} similar <directory> [options]
+
+Scan a project or directory for similar or duplicate top-level functions.
+Reports candidate groups with similarity score, file paths, symbol names,
+and line numbers for consolidation work.
+
+Arguments:
+  directory    Path to the project directory to scan
+
+Options:
+  --json            Output results as JSON
+  --threshold       Minimum similarity score 0.0–1.0 (default: 0.7)
+  -p, --project     Path to project directory or tsconfig.json
+
+Similarity buckets:
+  exact   Identical after normalization (renamed identifiers or literal differences)
+  high    ≥85% token overlap
+  medium  ≥70% token overlap
+
+Examples:
+  ${name} similar src
+  ${name} similar . --threshold=0.85
+  ${name} similar src --json
+`);
+			break;
 		default:
 			showHelp();
 	}
@@ -385,6 +418,28 @@ async function main() {
 				verbose: values.verbose,
 				verify: !values["no-verify"],
 				project: values.project,
+			});
+			break;
+		}
+
+		case "similar": {
+			const [directory] = args;
+			if (!directory) {
+				logger.error("Error: similar requires a <directory> argument");
+				logger.error(`Run '${name} similar --help' for usage`);
+				process.exit(1);
+			}
+			const rawThreshold = values.threshold;
+			const threshold = rawThreshold === undefined ? 0.7 : Number(rawThreshold);
+			if (Number.isNaN(threshold) || threshold < 0 || threshold > 1) {
+				logger.error("Error: --threshold must be a number between 0.0 and 1.0");
+				process.exit(1);
+			}
+			await similarCommand({
+				directory,
+				project: values.project,
+				json: values.json,
+				threshold,
 			});
 			break;
 		}
