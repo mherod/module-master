@@ -17,16 +17,22 @@ import {
 	scanUnresolvableImports,
 } from "../core/scanner.ts";
 import { collectUnresolvableDiagnostics } from "../core/verify.ts";
-import type { AnalysisResult, ProjectConfig } from "../types.ts";
+import { discoverWorkspace } from "../core/workspace.ts";
+import type {
+	AnalysisResult,
+	ModuleReference,
+	ProjectConfig,
+} from "../types.ts";
 
 export interface AnalyzeOptions {
 	file: string;
 	verbose?: boolean;
 	project?: string;
+	workspace?: boolean;
 }
 
 export async function analyzeCommand(options: AnalyzeOptions): Promise<void> {
-	const { file, verbose, project: projectArg } = options;
+	const { file, verbose, project: projectArg, workspace = false } = options;
 
 	const absolutePath = path.resolve(file);
 
@@ -39,6 +45,34 @@ export async function analyzeCommand(options: AnalyzeOptions): Promise<void> {
 
 	const project = loadProject(tsconfigPath, absolutePath);
 	const result = analyze(absolutePath, project);
+
+	// When workspace mode is enabled, find cross-package references
+	if (workspace) {
+		const wsDir = projectArg
+			? path.resolve(projectArg)
+			: path.dirname(tsconfigPath);
+		const wsInfo = await discoverWorkspace(wsDir);
+		if (wsInfo && wsInfo.packages.length > 0) {
+			const crossRefs: ModuleReference[] = [];
+			for (const pkg of wsInfo.packages) {
+				const pkgTsconfig = pkg.tsconfigPath;
+				if (!pkgTsconfig || pkgTsconfig === tsconfigPath) {
+					continue;
+				}
+				try {
+					const pkgProject = loadProject(pkgTsconfig);
+					const pkgGraph = buildDependencyGraph(pkgProject);
+					const refs = findAllReferences(absolutePath, pkgGraph);
+					crossRefs.push(...refs);
+				} catch {
+					// Skip packages that fail to load
+				}
+			}
+			if (crossRefs.length > 0) {
+				result.referencedBy.push(...crossRefs);
+			}
+		}
+	}
 
 	printAnalysis(result, verbose);
 

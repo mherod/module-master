@@ -337,6 +337,7 @@ async function main() {
 				file,
 				verbose: values.verbose,
 				project: values.project,
+				workspace: values.workspace,
 			});
 			break;
 		}
