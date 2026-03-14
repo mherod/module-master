@@ -178,6 +178,40 @@ resect workspace /path/to/monorepo --verbose
 
 Supports pnpm, yarn, and npm workspaces. Shows packages, entrypoints, barrel files, exports map, and internal dependencies.
 
+### `similar <directory>`
+
+Find similar or duplicate functions across your codebase for consolidation.
+
+```bash
+resect similar src                                    # Scan for duplicates
+resect similar src --threshold=0.9                    # Higher similarity required
+resect similar src --strict                           # Exit code 1 if found (for CI)
+resect similar src --json                             # Machine-readable output
+resect similar src --name-threshold=0.5               # Require similar names too
+resect similar src --same-name-only                   # Only identical names
+resect similar src --skip-same-file                   # Skip same-file groups
+resect similar src --skip-directives                  # Skip functions with "use server" etc.
+resect similar src --min-lines=3                      # Skip thin one-liners
+resect similar src --only-related-to=src/utils/foo.ts # Scope to a file/folder
+resect similar src --workspace                        # Scan across all packages
+```
+
+Uses bigram Jaccard similarity on normalized function bodies. Groups are classified as `exact`, `high`, or `medium` similarity. Supports camelCase token comparison for name filtering.
+
+### `extract-common <directory>`
+
+Consolidate duplicate functions found by `similar` into shared modules.
+
+```bash
+resect extract-common src --dry-run                         # Preview changes
+resect extract-common src --group=1                         # Target specific group
+resect extract-common src --output=src/shared/utils.ts      # Write to new file
+resect extract-common src --threshold=1.0                   # Only exact duplicates
+resect extract-common src --skip-same-file --skip-directives
+```
+
+Without `--output`, keeps one canonical copy in place and replaces all others with imports. With `--output`, writes the function to the specified destination file and rewrites all source locations to import from it.
+
 ## Features
 
 - **AST-level precision** — Uses TypeScript Compiler API, not regex
@@ -193,6 +227,9 @@ Supports pnpm, yarn, and npm workspaces. Shows packages, entrypoints, barrel fil
 - **Dry-run mode** — Preview everything before committing
 - **Unresolvable import detection** — Surfaces broken imports with file, line, and specifier
 - **Modern extension support** — Handles `.mts`, `.cts`, `.mjs`, `.cjs` in addition to classic extensions
+- **Similarity detection** — Find duplicate/similar functions using bigram Jaccard on normalized ASTs
+- **Automated extraction** — Consolidate duplicates by extracting to shared modules with import rewriting
+- **Smart filtering** — Name similarity, body line count, directive detection, same-file exclusion, path scoping
 
 ## Options
 
@@ -206,7 +243,19 @@ Supports pnpm, yarn, and npm workspaces. Shows packages, entrypoints, barrel fil
 | `--no-verify` | | Skip type checking verification (not recommended) |
 | `--type` | `-t` | Filter find results by type: `file`, `export`, or `all` |
 | `--prefer` | | Alias strategy: `alias`, `relative`, or `shortest` |
-| `--json` | | Output in JSON format (workspace command) |
+| `--json` | | Output in JSON format (workspace/similar) |
+| `--threshold` | | Similarity threshold 0.0–1.0 (similar/extract-common) |
+| `--strict` | | Exit with error if similar functions found (CI mode) |
+| `--name-threshold` | | Name similarity threshold (similar/extract-common) |
+| `--same-name-only` | | Only group functions with identical names |
+| `--skip-same-file` | | Skip groups where all functions are in the same file |
+| `--skip-directives` | | Skip functions with compile-time directives |
+| `--min-lines` | | Minimum function body lines to include |
+| `--only-related-to` | | Scope results to a file, folder, or glob pattern |
+| `--max-groups` | | Maximum groups to display (similar) |
+| `--group` | | Target a specific group number (extract-common) |
+| `--output` | `-o` | Write extracted functions to this file (extract-common) |
+| `--workspace` | | Scan across all workspace packages |
 
 ## How It Works
 
