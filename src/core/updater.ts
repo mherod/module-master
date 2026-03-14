@@ -633,17 +633,26 @@ export function updateBarrelExports(
 			newContent.slice(0, removal.start) + newContent.slice(removal.end);
 	}
 
-	// Then apply specifier changes (adjust positions if removals happened)
-	// Note: if we removed lines, the positions are now invalid
-	// So we only apply changes if there were no removals
-	if (removals.length === 0) {
-		changes.sort((a, b) => b.start - a.start);
+	// After applying each removal, adjust positions of pending specifier changes
+	// that appear before the removal site. Removals are applied highest-position
+	// first, so earlier changes are the only ones whose offsets shift.
+	for (const removal of removals) {
+		const removedBytes = removal.end - removal.start;
 		for (const change of changes) {
-			newContent =
-				newContent.slice(0, change.start) +
-				change.newText +
-				newContent.slice(change.end);
+			if (change.start > removal.start) {
+				change.start -= removedBytes;
+				change.end -= removedBytes;
+			}
 		}
+	}
+
+	// Apply specifier changes (positions are now adjusted for any removals)
+	changes.sort((a, b) => b.start - a.start);
+	for (const change of changes) {
+		newContent =
+			newContent.slice(0, change.start) +
+			change.newText +
+			newContent.slice(change.end);
 	}
 
 	return { newContent, updates };
