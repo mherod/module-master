@@ -293,6 +293,7 @@ describe("findSimilarGroups", () => {
 				tokenCount: tokens.length,
 				bodyLength: body.length,
 				bodyLines: body.split("\n").length,
+				hasDirective: false,
 			};
 		}
 		return { ...fn, name };
@@ -400,6 +401,7 @@ describe("findSimilarGroups", () => {
 			tokenCount: tokenize(exactBody).length,
 			bodyLength: 100,
 			bodyLines: 5,
+			hasDirective: false,
 		};
 		const fnE2: ReturnType<typeof collectFunctions>[number] = {
 			file: "b.ts",
@@ -410,6 +412,7 @@ describe("findSimilarGroups", () => {
 			tokenCount: tokenize(exactBody).length,
 			bodyLength: 100,
 			bodyLines: 5,
+			hasDirective: false,
 		};
 
 		// Medium pair: share most tokens but differ on one clause
@@ -426,6 +429,7 @@ describe("findSimilarGroups", () => {
 			tokenCount: tokenize(looseBodyA).length,
 			bodyLength: 120,
 			bodyLines: 5,
+			hasDirective: false,
 		};
 		const fnL2: ReturnType<typeof collectFunctions>[number] = {
 			file: "d.ts",
@@ -436,6 +440,7 @@ describe("findSimilarGroups", () => {
 			tokenCount: tokenize(looseBodyB).length,
 			bodyLength: 130,
 			bodyLines: 5,
+			hasDirective: false,
 		};
 
 		// Verify cross-pair similarity is below threshold 0.7 so groups stay separate
@@ -624,6 +629,7 @@ describe("findSimilarGroups onlyRelatedTo", () => {
 				tokenCount: tokens.length,
 				bodyLength: body.length,
 				bodyLines: body.split("\n").length,
+				hasDirective: false,
 			};
 		}
 		return { ...fn, name: fnName };
@@ -669,5 +675,107 @@ describe("findSimilarGroups onlyRelatedTo", () => {
 			onlyRelatedTo: "/abs/src/utils/nonexistent.ts",
 		});
 		expect(filtered).toHaveLength(0);
+	});
+});
+
+describe("directive detection", () => {
+	function makeFunction(
+		fnName: string,
+		body: string,
+		file = "test.ts"
+	): ReturnType<typeof collectFunctions>[number] {
+		const sf = makeSourceFile(`function ${fnName}() ${body}`);
+		const fns = collectFunctions(sf, file);
+		const fn = fns[0];
+		if (!fn) {
+			const normalized = normalizeBody(body);
+			const tokens = tokenize(normalized);
+			return {
+				file,
+				name: fnName,
+				line: 1,
+				column: 0,
+				normalizedBody: normalized,
+				tokenCount: tokens.length,
+				bodyLength: body.length,
+				bodyLines: body.split("\n").length,
+				hasDirective: false,
+			};
+		}
+		return { ...fn, name: fnName };
+	}
+
+	test("detects 'use server' directive in function body", () => {
+		const code = `
+function serverAction(data: FormData) {
+  "use server";
+  const name = data.get("name");
+  const result = processData(name);
+  return result;
+}
+`;
+		const sf = makeSourceFile(code);
+		const fns = collectFunctions(sf, "test.ts");
+		expect(fns).toHaveLength(1);
+		expect(fns[0]?.hasDirective).toBe(true);
+	});
+
+	test("detects 'use client' directive", () => {
+		const code = `
+function clientComponent(props: unknown) {
+  "use client";
+  const state = useState(props);
+  const rendered = renderUI(state);
+  return rendered;
+}
+`;
+		const sf = makeSourceFile(code);
+		const fns = collectFunctions(sf, "test.ts");
+		expect(fns).toHaveLength(1);
+		expect(fns[0]?.hasDirective).toBe(true);
+	});
+
+	test("does not flag functions without directives", () => {
+		const code = `
+function normalFunction(x: number) {
+  const doubled = x * 2;
+  const result = doubled + 10;
+  return result;
+}
+`;
+		const sf = makeSourceFile(code);
+		const fns = collectFunctions(sf, "test.ts");
+		expect(fns).toHaveLength(1);
+		expect(fns[0]?.hasDirective).toBe(false);
+	});
+
+	test("skipDirectives filters out functions with directives", () => {
+		const bodyWithDirective = `{
+  "use server";
+  const data = fetchData(url);
+  const parsed = parseData(data);
+  return parsed;
+}`;
+		const bodyNormal = `{
+  const data = fetchData(url);
+  const parsed = parseData(data);
+  return parsed;
+}`;
+		const fnA = makeFunction("serverFn", bodyWithDirective, "a.ts");
+		const fnB = makeFunction("normalFnA", bodyNormal, "b.ts");
+		const fnC = makeFunction("normalFnB", bodyNormal, "c.ts");
+
+		// Without filter: serverFn groups with normals (same structure after normalization)
+		const all = findSimilarGroups([fnA, fnB, fnC], 0.7);
+		expect(all.length).toBeGreaterThanOrEqual(1);
+
+		// With skipDirectives: serverFn excluded, only normals group
+		const filtered = findSimilarGroups([fnA, fnB, fnC], {
+			threshold: 0.7,
+			skipDirectives: true,
+		});
+		for (const g of filtered) {
+			expect(g.functions.every((f) => !f.hasDirective)).toBe(true);
+		}
 	});
 });

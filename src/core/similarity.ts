@@ -12,6 +12,10 @@ import { discoverProject } from "./tsconfig-discovery.ts";
 /** Minimum token count for a function body to be included */
 const MIN_TOKEN_COUNT = 8;
 
+/** Compile-time directives that prevent function consolidation */
+const DIRECTIVE_PATTERN =
+	/["']use (cache|cache:\s*\w+|server|client|strict)["']\s*;?/;
+
 const JS_KEYWORDS = new Set([
 	"break",
 	"case",
@@ -205,6 +209,7 @@ export function collectFunctions(
 					tokenCount: tokens.length,
 					bodyLength: bodyText.length,
 					bodyLines: bodyText.split("\n").length,
+					hasDirective: DIRECTIVE_PATTERN.test(bodyText),
 				});
 			}
 		}
@@ -237,6 +242,7 @@ export function collectFunctions(
 							tokenCount: tokens.length,
 							bodyLength: bodyText.length,
 							bodyLines: bodyText.split("\n").length,
+							hasDirective: DIRECTIVE_PATTERN.test(bodyText),
 						});
 					}
 				}
@@ -292,6 +298,8 @@ export interface SimilarityFilterOptions {
 	onlyRelatedTo?: string;
 	/** Exclude functions with fewer body lines than this threshold */
 	minLines?: number;
+	/** Exclude functions containing compile-time directives */
+	skipDirectives?: boolean;
 }
 
 export function findSimilarGroups(
@@ -306,11 +314,16 @@ export function findSimilarGroups(
 	const nameThresholdValue = opts.nameThreshold;
 	const sameNameOnly = opts.sameNameOnly ?? false;
 
-	// Pre-filter: exclude functions below minimum line count
-	const candidates =
-		opts.minLines === undefined
-			? functions
-			: functions.filter((f) => f.bodyLines >= (opts.minLines as number));
+	// Pre-filter: exclude functions below minimum line count or with directives
+	let candidates = functions;
+	if (opts.minLines !== undefined) {
+		candidates = candidates.filter(
+			(f) => f.bodyLines >= (opts.minLines as number)
+		);
+	}
+	if (opts.skipDirectives) {
+		candidates = candidates.filter((f) => !f.hasDirective);
+	}
 
 	const groups: SimilarityGroup[] = [];
 	const assigned = new Set<number>();
@@ -560,6 +573,7 @@ export interface AnalyzeSimilarityOptions {
 	skipSameFile?: boolean;
 	onlyRelatedTo?: string;
 	minLines?: number;
+	skipDirectives?: boolean;
 }
 
 export async function analyzeSimilarity(
@@ -583,6 +597,7 @@ export async function analyzeSimilarity(
 		skipSameFile: opts.skipSameFile,
 		onlyRelatedTo: opts.onlyRelatedTo,
 		minLines: opts.minLines,
+		skipDirectives: opts.skipDirectives,
 	};
 
 	if (ws) {

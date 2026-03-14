@@ -16,6 +16,7 @@ export interface SimilarOptions {
 	skipSameFile?: boolean;
 	onlyRelatedTo?: string;
 	minLines?: number;
+	skipDirectives?: boolean;
 }
 
 export async function similarCommand(options: SimilarOptions): Promise<void> {
@@ -32,6 +33,7 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 		skipSameFile = false,
 		onlyRelatedTo,
 		minLines,
+		skipDirectives,
 	} = options;
 	const absoluteDir = path.resolve(directory);
 
@@ -50,6 +52,7 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 		skipSameFile,
 		onlyRelatedTo,
 		minLines,
+		skipDirectives,
 	});
 
 	if (json) {

@@ -144,6 +144,8 @@ export interface FunctionInfo {
 	bodyLength: number;
 	/** Number of lines in the original function body */
 	bodyLines: number;
+	/** Whether the function body contains a compile-time directive */
+	hasDirective: boolean;
 }
 
 export type SimilarityBucket = "exact" | "high" | "medium";
