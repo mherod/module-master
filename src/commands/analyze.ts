@@ -32,10 +32,17 @@ export interface AnalyzeOptions {
 	verbose?: boolean;
 	project?: string;
 	workspace?: boolean;
+	onlyRelatedTo?: string;
 }
 
 export async function analyzeCommand(options: AnalyzeOptions): Promise<void> {
-	const { file, verbose, project: projectArg, workspace = false } = options;
+	const {
+		file,
+		verbose,
+		project: projectArg,
+		workspace = false,
+		onlyRelatedTo,
+	} = options;
 
 	const absolutePath = path.resolve(file);
 
@@ -85,6 +92,14 @@ export async function analyzeCommand(options: AnalyzeOptions): Promise<void> {
 				result.referencedBy.push(...crossRefs);
 			}
 		}
+	}
+
+	// Filter references to only related paths when requested
+	if (onlyRelatedTo) {
+		const { matchesRelatedPath } = await import("../core/similarity.ts");
+		result.referencedBy = result.referencedBy.filter((ref) =>
+			matchesRelatedPath(ref.sourceFile, onlyRelatedTo)
+		);
 	}
 
 	printAnalysis(result, verbose);

@@ -14,10 +14,11 @@ export interface DiscoverOptions {
 	directory: string;
 	verbose?: boolean;
 	workspace?: boolean;
+	onlyRelatedTo?: string;
 }
 
 export async function discoverCommand(options: DiscoverOptions): Promise<void> {
-	const { directory, verbose, workspace = false } = options;
+	const { directory, verbose, workspace = false, onlyRelatedTo } = options;
 	const absoluteDir = path.resolve(directory);
 
 	if (workspace) {
@@ -41,7 +42,21 @@ export async function discoverCommand(options: DiscoverOptions): Promise<void> {
 			logger.info(`📦 ${pkg.name} (${path.relative(absoluteDir, pkg.path)})`);
 			const scanDir = pkg.srcDir ? path.join(pkg.path, pkg.srcDir) : pkg.path;
 			const discovery = discoverProject(scanDir);
-			printDiscovery(discovery, absoluteDir, verbose);
+			if (onlyRelatedTo) {
+				const { matchesRelatedPath } = await import("../core/similarity.ts");
+				const filtered = new Map(
+					[...discovery.fileOwnership].filter(([fp]) =>
+						matchesRelatedPath(fp, onlyRelatedTo)
+					)
+				);
+				printDiscovery(
+					{ ...discovery, fileOwnership: filtered },
+					absoluteDir,
+					verbose
+				);
+			} else {
+				printDiscovery(discovery, absoluteDir, verbose);
+			}
 		}
 		return;
 	}
@@ -50,7 +65,21 @@ export async function discoverCommand(options: DiscoverOptions): Promise<void> {
 
 	const discovery = discoverProject(absoluteDir);
 
-	printDiscovery(discovery, absoluteDir, verbose);
+	if (onlyRelatedTo) {
+		const { matchesRelatedPath } = await import("../core/similarity.ts");
+		const filtered = new Map(
+			[...discovery.fileOwnership].filter(([fp]) =>
+				matchesRelatedPath(fp, onlyRelatedTo)
+			)
+		);
+		printDiscovery(
+			{ ...discovery, fileOwnership: filtered },
+			absoluteDir,
+			verbose
+		);
+	} else {
+		printDiscovery(discovery, absoluteDir, verbose);
+	}
 }
 
 function printDiscovery(

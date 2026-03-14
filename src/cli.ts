@@ -402,6 +402,7 @@ async function main() {
 				verbose: values.verbose,
 				project: values.project,
 				workspace: values.workspace,
+				onlyRelatedTo: values["only-related-to"],
 			});
 			break;
 		}
@@ -417,6 +418,7 @@ async function main() {
 				directory,
 				verbose: values.verbose,
 				workspace: values.workspace,
+				onlyRelatedTo: values["only-related-to"],
 			});
 			break;
 		}
@@ -459,6 +461,7 @@ async function main() {
 				type: findType,
 				verbose: values.verbose,
 				workspace: values.workspace,
+				onlyRelatedTo: values["only-related-to"],
 			});
 			break;
 		}

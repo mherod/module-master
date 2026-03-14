@@ -15,6 +15,7 @@ export interface FindOptions {
 	type?: "file" | "export" | "all";
 	verbose?: boolean;
 	workspace?: boolean;
+	onlyRelatedTo?: string;
 }
 
 export interface FindResult {
@@ -35,7 +36,14 @@ export interface ExportMatch {
 }
 
 export async function findCommand(options: FindOptions): Promise<void> {
-	const { query, project, type = "all", verbose, workspace = false } = options;
+	const {
+		query,
+		project,
+		type = "all",
+		verbose,
+		workspace = false,
+		onlyRelatedTo,
+	} = options;
 	const absoluteProject = path.resolve(project);
 
 	if (workspace) {
@@ -76,7 +84,16 @@ export async function findCommand(options: FindOptions): Promise<void> {
 			boundedFiles.set(fp, allFiles.get(fp));
 		}
 
-		const result = search(query, boundedFiles, absoluteProject, type);
+		let filesToSearch = boundedFiles;
+		if (onlyRelatedTo) {
+			const { matchesRelatedPath } = await import("../core/similarity.ts");
+			filesToSearch = new Map(
+				[...boundedFiles].filter(([fp]) =>
+					matchesRelatedPath(fp, onlyRelatedTo)
+				)
+			);
+		}
+		const result = search(query, filesToSearch, absoluteProject, type);
 		printResults(result, absoluteProject, verbose);
 		return;
 	}
@@ -90,7 +107,16 @@ export async function findCommand(options: FindOptions): Promise<void> {
 		process.exit(1);
 	}
 
-	const result = search(query, discovery.fileOwnership, absoluteProject, type);
+	let filesToSearch: Map<string, unknown> = discovery.fileOwnership;
+	if (onlyRelatedTo) {
+		const { matchesRelatedPath } = await import("../core/similarity.ts");
+		filesToSearch = new Map(
+			[...discovery.fileOwnership].filter(([fp]) =>
+				matchesRelatedPath(fp, onlyRelatedTo)
+			)
+		);
+	}
+	const result = search(query, filesToSearch, absoluteProject, type);
 
 	printResults(result, absoluteProject, verbose);
 }
