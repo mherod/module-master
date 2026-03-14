@@ -9,6 +9,7 @@ export interface SimilarOptions {
 	json?: boolean;
 	threshold?: number;
 	maxGroups?: number;
+	strict?: boolean;
 	workspace?: boolean;
 }
 
@@ -19,6 +20,7 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 		json,
 		threshold = 0.8,
 		maxGroups = 10,
+		strict = false,
 		workspace = false,
 	} = options;
 	const absoluteDir = path.resolve(directory);
@@ -46,35 +48,36 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 					}
 				: { ...report, totalGroups: report.groups.length, truncated: false };
 		process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+		if (strict && report.groups.length > 0) {
+			process.stderr.write(
+				`error: ${report.groups.length} similar function group(s) found (threshold: ${threshold})\n`
+			);
+			process.exit(1);
+		}
 		return;
 	}
 
 	printReport(report, absoluteDir, maxGroups);
-}
 
-function bucketLabel(group: SimilarityGroup): string {
-	switch (group.bucket) {
-		case "exact":
-			return "exact duplicate (after normalization)";
-		case "high":
-			return `high similarity (${(group.score * 100).toFixed(0)}%)`;
-		case "medium":
-			return `medium similarity (${(group.score * 100).toFixed(0)}%)`;
-		default:
-			return `similarity (${(group.score * 100).toFixed(0)}%)`;
+	if (strict && report.groups.length > 0) {
+		logger.error(
+			`\nerror: ${report.groups.length} similar function group(s) found (threshold: ${threshold})`
+		);
+		process.exit(1);
 	}
 }
 
-function bucketIcon(group: SimilarityGroup): string {
+function bucketInfo(group: SimilarityGroup): { icon: string; label: string } {
+	const pct = `${(group.score * 100).toFixed(0)}%`;
 	switch (group.bucket) {
 		case "exact":
-			return "🔴";
+			return { icon: "🔴", label: "exact duplicate (after normalization)" };
 		case "high":
-			return "🟠";
+			return { icon: "🟠", label: `high similarity (${pct})` };
 		case "medium":
-			return "🟡";
+			return { icon: "🟡", label: `medium similarity (${pct})` };
 		default:
-			return "⚪";
+			return { icon: "⚪", label: `similarity (${pct})` };
 	}
 }
 
@@ -104,8 +107,7 @@ function printReport(
 		if (!group) {
 			continue;
 		}
-		const icon = bucketIcon(group);
-		const label = bucketLabel(group);
+		const { icon, label } = bucketInfo(group);
 
 		logger.info(`${icon} Group ${i + 1}: ${label}`);
 

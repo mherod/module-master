@@ -1,3 +1,5 @@
+import path from "node:path";
+
 /**
  * CLI Logger - Structured logging for user interface output
  * Uses process.stdout/stderr for direct stream output.
@@ -105,3 +107,68 @@ export class CLILogger {
 
 // Global logger instance
 export const logger = new CLILogger();
+
+export interface CommandResultInput {
+	success: boolean;
+	updatedReferences: {
+		file: string;
+		line: number;
+		oldSpecifier: string;
+		newSpecifier: string;
+	}[];
+	errors: Array<{ file: string; message: string; recoverable?: boolean }>;
+}
+
+export function printCommandResult(
+	result: CommandResultInput,
+	verb: string,
+	pastVerb: string,
+	dryRun: boolean,
+	verbose: boolean
+): void {
+	if (result.success) {
+		logger.info(`✅ ${dryRun ? `Would ${verb}` : pastVerb} successfully!\n`);
+	} else {
+		logger.info(`❌ ${dryRun ? "Would fail" : "Failed"}\n`);
+	}
+
+	if (result.updatedReferences.length > 0) {
+		logger.info(
+			`📝 ${dryRun ? "Would update" : "Updated"} ${result.updatedReferences.length} reference(s):`
+		);
+
+		const byFile = new Map<string, typeof result.updatedReferences>();
+		for (const ref of result.updatedReferences) {
+			const existing = byFile.get(ref.file) ?? [];
+			existing.push(ref);
+			byFile.set(ref.file, existing);
+		}
+
+		for (const [file, refs] of byFile) {
+			const relativePath = path.relative(process.cwd(), file);
+			logger.info(`   • ${relativePath}`);
+			if (verbose) {
+				for (const ref of refs) {
+					logger.info(
+						`     L${ref.line}: "${ref.oldSpecifier}" → "${ref.newSpecifier}"`
+					);
+				}
+			}
+		}
+		logger.empty();
+	}
+
+	if (result.errors.length > 0) {
+		logger.info(`⚠️  Errors (${result.errors.length}):`);
+		for (const error of result.errors) {
+			const relativePath = path.relative(process.cwd(), error.file);
+			if (error.recoverable === undefined) {
+				logger.info(`   ${relativePath}: ${error.message}`);
+			} else {
+				const severity = error.recoverable ? "warning" : "error";
+				logger.info(`   [${severity}] ${relativePath}: ${error.message}`);
+			}
+		}
+		logger.empty();
+	}
+}

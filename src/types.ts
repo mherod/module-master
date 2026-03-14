@@ -140,6 +140,8 @@ export interface FunctionInfo {
 	normalizedBody: string;
 	/** Number of tokens in the normalized body */
 	tokenCount: number;
+	/** Length of the original (pre-normalization) body text */
+	bodyLength: number;
 }
 
 export type SimilarityBucket = "exact" | "high" | "medium";

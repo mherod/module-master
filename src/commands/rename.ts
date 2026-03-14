@@ -1,6 +1,6 @@
 import path from "node:path";
 import ts from "typescript";
-import { logger } from "../cli-logger.ts";
+import { logger, printCommandResult } from "../cli-logger.ts";
 import { buildDependencyGraph, findAllReferences } from "../core/graph.ts";
 import {
 	createProgram,
@@ -101,7 +101,7 @@ export async function renameCommand(options: RenameOptions): Promise<void> {
 		extraProjects
 	);
 
-	printResult(result, dryRun, verbose);
+	printCommandResult(result, "rename", "Renamed", dryRun, verbose);
 
 	if (!result.success) {
 		process.exit(1);
@@ -711,51 +711,4 @@ function updateImportReferences(
 
 	const newContent = applyTextChanges(sourceFile.text, changes);
 	return { newContent, updates };
-}
-
-function printResult(
-	result: RenameResult,
-	dryRun: boolean,
-	verbose: boolean
-): void {
-	if (result.success) {
-		logger.info(`✅ ${dryRun ? "Would rename" : "Renamed"} successfully!\n`);
-	} else {
-		logger.info(`❌ ${dryRun ? "Would fail" : "Failed"}\n`);
-	}
-
-	if (result.updatedReferences.length > 0) {
-		logger.info(
-			`📝 ${dryRun ? "Would update" : "Updated"} ${result.updatedReferences.length} reference(s):`
-		);
-
-		const byFile = new Map<string, UpdatedReference[]>();
-		for (const ref of result.updatedReferences) {
-			const existing = byFile.get(ref.file) ?? [];
-			existing.push(ref);
-			byFile.set(ref.file, existing);
-		}
-
-		for (const [file, refs] of byFile) {
-			const relativePath = path.relative(process.cwd(), file);
-			logger.info(`   • ${relativePath}`);
-			if (verbose) {
-				for (const ref of refs) {
-					logger.info(
-						`     L${ref.line}: "${ref.oldSpecifier}" → "${ref.newSpecifier}"`
-					);
-				}
-			}
-		}
-		logger.empty();
-	}
-
-	if (result.errors.length > 0) {
-		logger.info(`⚠️  Errors (${result.errors.length}):`);
-		for (const error of result.errors) {
-			const relativePath = path.relative(process.cwd(), error.file);
-			logger.info(`   ${relativePath}: ${error.message}`);
-		}
-		logger.empty();
-	}
 }

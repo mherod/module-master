@@ -26,6 +26,7 @@ const { values, positionals } = parseArgs({
 		json: { type: "boolean" },
 		threshold: { type: "string" },
 		"max-groups": { type: "string" },
+		strict: { type: "boolean" },
 		workspace: { type: "boolean" },
 	},
 	allowPositionals: true,
@@ -62,6 +63,7 @@ Options:
   --json            Output results as JSON
   --threshold       Similarity threshold for similar command (0.0–1.0, default 0.8)
   --max-groups      Maximum number of groups to display (default: 10)
+  --strict          Exit with error if similar functions are found (for CI/hooks)
   --workspace       Scan across all workspace packages (similar command)
 
 Examples:
@@ -252,6 +254,7 @@ Options:
   --json            Output results as JSON
   --threshold       Minimum similarity score 0.0–1.0 (default: 0.8)
   --max-groups      Maximum number of groups to display (default: 10, 0 for unlimited)
+  --strict          Exit with error code 1 if similar functions are found (for CI/hooks)
   --workspace       Scan across all workspace packages
   -p, --project     Path to project directory or tsconfig.json
 
@@ -266,6 +269,7 @@ Examples:
   ${name} similar src --json
   ${name} similar . --workspace
   ${name} similar src --max-groups=20
+  ${name} similar src --strict              # fail if duplicates found
 `);
 			break;
 		default:
@@ -461,6 +465,7 @@ async function main() {
 				json: values.json,
 				threshold,
 				maxGroups,
+				strict: values.strict,
 				workspace: values.workspace,
 			});
 			break;

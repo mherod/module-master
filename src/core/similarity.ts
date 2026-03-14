@@ -103,7 +103,20 @@ export function tokenize(normalized: string): string[] {
 }
 
 /**
- * Compute Jaccard similarity between two token arrays using set intersection.
+ * Build bigrams (adjacent token pairs) from a token array.
+ * Captures local ordering so that functions with the same token vocabulary
+ * but different structure produce different bigram sets.
+ */
+export function tokenBigrams(tokens: string[]): string[] {
+	const bigrams: string[] = [];
+	for (let i = 0; i < tokens.length - 1; i++) {
+		bigrams.push(`${tokens[i]} ${tokens[i + 1]}`);
+	}
+	return bigrams;
+}
+
+/**
+ * Compute Jaccard similarity between two string arrays using set intersection.
  * Returns 1.0 for two empty inputs (treat as identical).
  */
 export function jaccardSimilarity(a: string[], b: string[]): number {
@@ -162,6 +175,7 @@ export function collectFunctions(
 					column: character,
 					normalizedBody: normalized,
 					tokenCount: tokens.length,
+					bodyLength: bodyText.length,
 				});
 			}
 		}
@@ -192,6 +206,7 @@ export function collectFunctions(
 							column: character,
 							normalizedBody: normalized,
 							tokenCount: tokens.length,
+							bodyLength: bodyText.length,
 						});
 					}
 				}
@@ -239,13 +254,37 @@ export function findSimilarGroups(
 				continue;
 			}
 
+			// Skip if original body sizes are very different — avoids false
+			// positives where normalization collapses large and small functions
+			// to the same token set (e.g. a 40-line template vs a 1-liner).
+			const sizeRatio =
+				Math.min(fnI.bodyLength, fnJ.bodyLength) /
+				Math.max(fnI.bodyLength, fnJ.bodyLength);
+			if (sizeRatio < 0.5) {
+				continue;
+			}
+
+			// Skip if token counts differ significantly — Jaccard on sets
+			// ignores frequency, so functions with the same unique tokens but
+			// different lengths (e.g. a.has(b) vs a.b.has(c(d))) get a
+			// misleading 1.0 score.
+			const tokensJ = tokenize(fnJ.normalizedBody);
+			const tokenRatio =
+				Math.min(tokensI.length, tokensJ.length) /
+				Math.max(tokensI.length, tokensJ.length);
+			if (tokenRatio < 0.75) {
+				continue;
+			}
+
 			let score: number;
 			if (fnI.normalizedBody === fnJ.normalizedBody) {
 				// Exact match after normalization — same structure, only name/literal differences
 				score = 1.0;
 			} else {
-				const tokensJ = tokenize(fnJ.normalizedBody);
-				score = jaccardSimilarity(tokensI, tokensJ);
+				// Use bigrams to capture token ordering — plain set Jaccard
+				// gives misleading 1.0 for functions with the same token
+				// vocabulary but different structure.
+				score = jaccardSimilarity(tokenBigrams(tokensI), tokenBigrams(tokensJ));
 			}
 
 			if (score >= threshold) {

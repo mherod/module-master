@@ -1,6 +1,6 @@
 import path from "node:path";
 import ts from "typescript";
-import { logger } from "../cli-logger.ts";
+import { logger, printCommandResult } from "../cli-logger.ts";
 import {
 	buildDependencyGraph,
 	findAllReferences,
@@ -159,7 +159,7 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 		logger.info("\n✅ Type checking passed - no errors introduced");
 	}
 
-	printResult(result, dryRun, verbose);
+	printCommandResult(result, "move", "Moved", dryRun, verbose);
 
 	if (!result.success) {
 		process.exit(1);
@@ -611,52 +611,4 @@ function updateInternalImports(
 	const newContent = applyTextChanges(sourceFile.text, changes);
 
 	return { newContent, updates };
-}
-
-function printResult(
-	result: MoveResult,
-	dryRun: boolean,
-	verbose: boolean
-): void {
-	if (result.success) {
-		logger.info(`✅ ${dryRun ? "Would move" : "Moved"} successfully!\n`);
-	} else {
-		logger.info(`❌ ${dryRun ? "Would fail" : "Failed"}\n`);
-	}
-
-	if (result.updatedReferences.length > 0) {
-		logger.info(
-			`📝 ${dryRun ? "Would update" : "Updated"} ${result.updatedReferences.length} reference(s):`
-		);
-
-		const byFile = new Map<string, UpdatedReference[]>();
-		for (const ref of result.updatedReferences) {
-			const existing = byFile.get(ref.file) ?? [];
-			existing.push(ref);
-			byFile.set(ref.file, existing);
-		}
-
-		for (const [file, refs] of byFile) {
-			const relativePath = path.relative(process.cwd(), file);
-			logger.info(`   • ${relativePath}`);
-			if (verbose) {
-				for (const ref of refs) {
-					logger.info(
-						`     L${ref.line}: "${ref.oldSpecifier}" → "${ref.newSpecifier}"`
-					);
-				}
-			}
-		}
-		logger.empty();
-	}
-
-	if (result.errors.length > 0) {
-		logger.info(`⚠️  Errors (${result.errors.length}):`);
-		for (const error of result.errors) {
-			const relativePath = path.relative(process.cwd(), error.file);
-			const severity = error.recoverable ? "warning" : "error";
-			logger.info(`   [${severity}] ${relativePath}: ${error.message}`);
-		}
-		logger.empty();
-	}
 }

@@ -288,6 +288,7 @@ describe("findSimilarGroups", () => {
 				column: 0,
 				normalizedBody: normalized,
 				tokenCount: tokens.length,
+				bodyLength: body.length,
 			};
 		}
 		return { ...fn, name };
@@ -393,6 +394,7 @@ describe("findSimilarGroups", () => {
 			column: 0,
 			normalizedBody: exactBody,
 			tokenCount: tokenize(exactBody).length,
+			bodyLength: 100,
 		};
 		const fnE2: ReturnType<typeof collectFunctions>[number] = {
 			file: "b.ts",
@@ -401,6 +403,7 @@ describe("findSimilarGroups", () => {
 			column: 0,
 			normalizedBody: exactBody,
 			tokenCount: tokenize(exactBody).length,
+			bodyLength: 100,
 		};
 
 		// Medium pair: share most tokens but differ on one clause
@@ -415,6 +418,7 @@ describe("findSimilarGroups", () => {
 			column: 0,
 			normalizedBody: looseBodyA,
 			tokenCount: tokenize(looseBodyA).length,
+			bodyLength: 120,
 		};
 		const fnL2: ReturnType<typeof collectFunctions>[number] = {
 			file: "d.ts",
@@ -423,6 +427,7 @@ describe("findSimilarGroups", () => {
 			column: 0,
 			normalizedBody: looseBodyB,
 			tokenCount: tokenize(looseBodyB).length,
+			bodyLength: 130,
 		};
 
 		// Verify cross-pair similarity is below threshold 0.7 so groups stay separate

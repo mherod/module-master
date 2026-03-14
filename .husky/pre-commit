@@ -1,8 +1,14 @@
-npm test
-
 #!/bin/sh
 # Exit on any error
 set -e
+
+# Run tests
+bun test
+
+# Check for duplicate/similar functions (skip if CLI not available)
+if [ -f "src/cli.ts" ]; then
+  bun src/cli.ts similar src --strict --threshold=0.95
+fi
 
 # Check if there are any staged files
 if [ -z "$(git diff --cached --name-only)" ]; then
