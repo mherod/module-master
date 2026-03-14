@@ -1,6 +1,6 @@
 {
   "name": "@mherod/resect",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Surgical TypeScript/JavaScript module refactoring CLI. Move files, rename exports, and watch every import update automatically.",
   "type": "module",
   "bin": {
