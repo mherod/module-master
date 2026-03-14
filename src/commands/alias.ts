@@ -15,6 +15,7 @@ import {
 	printVerificationResults,
 	verifyTypeChecking,
 } from "../core/verify.ts";
+import { getRuntime } from "../runtime/index.ts";
 import type { ModuleReference, ProjectConfig } from "../types.ts";
 
 export interface AliasOptions {
@@ -87,7 +88,7 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 			() => {
 				// No snapshot needed
 			},
-			() => applyChanges(result.changes)
+			async () => applyChanges(result.changes)
 		);
 
 		printResults(result, dryRun, verbose);
@@ -101,7 +102,7 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 			process.exit(1);
 		}
 	} else {
-		applyChanges(result.changes);
+		await applyChanges(result.changes);
 		printResults(result, dryRun, verbose);
 	}
 }
@@ -198,7 +199,7 @@ function normalizeImports(
 	};
 }
 
-function applyChanges(changes: AliasChange[]): void {
+async function applyChanges(changes: AliasChange[]): Promise<void> {
 	// Group changes by file
 	const byFile = new Map<string, AliasChange[]>();
 	for (const change of changes) {
@@ -207,9 +208,12 @@ function applyChanges(changes: AliasChange[]): void {
 		byFile.set(change.file, existing);
 	}
 
+	const rt = getRuntime();
 	for (const [filePath, fileChanges] of byFile) {
-		let content = ts.sys.readFile(filePath);
-		if (!content) {
+		let content: string;
+		try {
+			content = await rt.fs.readFile(filePath);
+		} catch {
 			continue;
 		}
 
@@ -227,7 +231,7 @@ function applyChanges(changes: AliasChange[]): void {
 			content = content.replace(oldImport, `$1${change.newSpecifier}$1`);
 		}
 
-		ts.sys.writeFile(filePath, content);
+		await rt.fs.writeFile(filePath, content);
 	}
 }
 

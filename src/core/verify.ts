@@ -50,7 +50,7 @@ export interface VerificationResult {
 export async function verifyTypeChecking(
 	project: ProjectConfig,
 	beforeSnapshot: () => void,
-	applyChanges: () => void
+	applyChanges: () => Promise<void> | void
 ): Promise<VerificationResult> {
 	// Run type check before changes
 	const errorsBefore = runTypeCheck(project);
@@ -59,7 +59,7 @@ export async function verifyTypeChecking(
 	beforeSnapshot();
 
 	// Apply the changes
-	applyChanges();
+	await applyChanges();
 
 	// Run type check after changes
 	const errorsAfter = runTypeCheck(project);
