@@ -15,6 +15,7 @@ import {
 	printVerificationResults,
 	verifyTypeChecking,
 } from "../core/verify.ts";
+import { discoverWorkspace } from "../core/workspace.ts";
 import { getRuntime } from "../runtime/index.ts";
 import type { ModuleReference, ProjectConfig } from "../types.ts";
 
@@ -25,6 +26,7 @@ export interface AliasOptions {
 	verbose?: boolean;
 	verify?: boolean;
 	project?: string;
+	workspace?: boolean;
 }
 
 export interface AliasResult {
@@ -49,9 +51,66 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 		verbose = false,
 		verify = true,
 		project: projectArg,
+		workspace = false,
 	} = options;
 
 	const absoluteTarget = path.resolve(target);
+
+	// Workspace mode: normalize imports across all packages
+	if (workspace) {
+		const wsDir = projectArg ? path.resolve(projectArg) : absoluteTarget;
+		const wsInfo = await discoverWorkspace(wsDir);
+		if (!wsInfo || wsInfo.packages.length === 0) {
+			logger.error("No workspace packages found.");
+			process.exit(1);
+		}
+
+		logger.info(
+			`\n${dryRun ? "🔍 Dry run:" : "🔧"} Normalizing imports across ${wsInfo.packages.length} workspace package(s)...`
+		);
+		logger.info(`   Strategy: ${prefer}\n`);
+
+		const allChanges: AliasChange[] = [];
+		let totalFiles = 0;
+
+		for (const pkg of wsInfo.packages) {
+			if (!pkg.tsconfigPath) {
+				continue;
+			}
+			try {
+				const pkgProject = loadProject(pkg.tsconfigPath);
+				const pkgDir = pkg.srcDir ? path.join(pkg.path, pkg.srcDir) : pkg.path;
+				const pkgResult = normalizeImports(pkgDir, prefer, pkgProject);
+				allChanges.push(...pkgResult.changes);
+				totalFiles += pkgResult.filesProcessed;
+			} catch {
+				if (verbose) {
+					logger.warn(`   Skipping ${pkg.name}: failed to load project`);
+				}
+			}
+		}
+
+		const result: AliasResult = {
+			filesProcessed: totalFiles,
+			importsUpdated: allChanges.length,
+			changes: allChanges,
+		};
+
+		if (result.changes.length === 0) {
+			logger.info(
+				"✨ No changes needed. All imports already follow the preferred style.\n"
+			);
+			return;
+		}
+
+		if (dryRun) {
+			printResults(result, dryRun, verbose);
+		} else {
+			await applyChanges(result.changes);
+			printResults(result, dryRun, verbose);
+		}
+		return;
+	}
 
 	// Find and load project config
 	const tsconfigPath = resolveTsConfig(projectArg, absoluteTarget);
