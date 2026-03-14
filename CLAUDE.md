@@ -417,3 +417,30 @@ DON'T: Expect `.npmignore` glob patterns like `**/*.test.ts` to filter files tha
 Command handlers in `src/commands/` should only be `async` if they contain `await` expressions. The `analyzeCommand()` and `discoverCommand()` functions are synchronous—no `async` keyword needed.
 
 DON'T: Mark functions as `async` without using `await`. This creates misleading API contracts and unnecessary Promise wrapping.
+
+## CI Gate Authority
+
+The hard-success-gate block after every push is the sole authority for declaring CI success. Run it unmodified every time — do not shortcut it.
+
+DO: Run the full gate block after every push and wait for the final `✅ ALL CHECKS PASSED — push complete` line before asserting success.
+DO: Let `gh run watch` run to completion so every job shows `✓` and the run shows `completed`/`success`.
+DON'T: Declare "CI passed" based on partial `gh run watch` output while jobs are still in-progress.
+DON'T: Omit the gate block or replace it with a shorter check. The gate exists to prevent premature declarations.
+
+## Code Audit Completeness
+
+When fixing a bug at one call site, audit all code paths that share the same pattern before declaring the fix complete.
+
+DO: Grep for the same anti-pattern at adjacent call sites (e.g., barrel removals in `updateBarrelExports` → check import splits in `updateFileReferences`).
+DO: Fix all sites in the same pass to avoid incremental discovery and fragmented commits.
+DON'T: Implement only what the issue text describes — read surrounding code for the same bug at other sites.
+DON'T: Ship a fix with a follow-up comment like "this only covers case X" when case Y at the same layer is known to share the same pattern.
+
+## Scope Planning
+
+Plan the full scope of a fix before writing code. Map all edge cases into the task list upfront.
+
+DO: Use TaskCreate to list every edge case (additions, removals, mixed scenarios) before the first Edit.
+DO: Commit all related changes together as one scope rather than fragmenting across multiple commits.
+DON'T: Ship three commits for what is logically one fix. If offset-correction, documentation, and comments all address the same concern, plan them as one scope.
+DON'T: Declare a fix "done" without checking whether the same pattern applies to neighbouring code paths.
