@@ -11,6 +11,8 @@ export interface SimilarOptions {
 	maxGroups?: number;
 	strict?: boolean;
 	workspace?: boolean;
+	nameThreshold?: number;
+	sameNameOnly?: boolean;
 }
 
 export async function similarCommand(options: SimilarOptions): Promise<void> {
@@ -22,6 +24,8 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 		maxGroups = 10,
 		strict = false,
 		workspace = false,
+		nameThreshold,
+		sameNameOnly = false,
 	} = options;
 	const absoluteDir = path.resolve(directory);
 
@@ -30,12 +34,14 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 		logger.info(`\n🔍 Scanning for similar functions ${mode} ${absoluteDir}\n`);
 	}
 
-	const report = await analyzeSimilarity(
-		absoluteDir,
+	const report = await analyzeSimilarity({
+		directory: absoluteDir,
 		threshold,
-		project,
-		workspace
-	);
+		projectRoot: project,
+		workspace,
+		nameThreshold,
+		sameNameOnly,
+	});
 
 	if (json) {
 		const output =

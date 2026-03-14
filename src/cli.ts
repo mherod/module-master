@@ -27,6 +27,8 @@ const { values, positionals } = parseArgs({
 		threshold: { type: "string" },
 		"max-groups": { type: "string" },
 		strict: { type: "boolean" },
+		"name-threshold": { type: "string" },
+		"same-name-only": { type: "boolean" },
 		workspace: { type: "boolean" },
 	},
 	allowPositionals: true,
@@ -64,6 +66,8 @@ Options:
   --threshold       Similarity threshold for similar command (0.0–1.0, default 0.8)
   --max-groups      Maximum number of groups to display (default: 10)
   --strict          Exit with error if similar functions are found (for CI/hooks)
+  --name-threshold  Name similarity threshold for similar command (0.0–1.0)
+  --same-name-only  Only group functions with identical names (similar command)
   --workspace       Scan across all workspace packages (similar command)
 
 Examples:
@@ -255,6 +259,8 @@ Options:
   --threshold       Minimum similarity score 0.0–1.0 (default: 0.8)
   --max-groups      Maximum number of groups to display (default: 10, 0 for unlimited)
   --strict          Exit with error code 1 if similar functions are found (for CI/hooks)
+  --name-threshold  Only group functions whose names also meet this similarity (0.0–1.0)
+  --same-name-only  Only group functions with identical names
   --workspace       Scan across all workspace packages
   -p, --project     Path to project directory or tsconfig.json
 
@@ -263,6 +269,11 @@ Similarity buckets:
   high    ≥85% token overlap
   medium  ≥80% token overlap
 
+Name filtering:
+  Uses camelCase token comparison. E.g., makeTempDir and createTempDir
+  share tokens "temp" + "dir" and score high, while isShellTool and
+  createTempDir share nothing and are filtered out.
+
 Examples:
   ${name} similar src
   ${name} similar . --threshold=0.85
@@ -270,6 +281,8 @@ Examples:
   ${name} similar . --workspace
   ${name} similar src --max-groups=20
   ${name} similar src --strict              # fail if duplicates found
+  ${name} similar src --name-threshold=0.5  # require similar names
+  ${name} similar src --same-name-only      # only identical names
 `);
 			break;
 		default:
@@ -459,6 +472,18 @@ async function main() {
 				logger.error("Error: --max-groups must be a non-negative integer");
 				process.exit(1);
 			}
+			const rawNameThreshold = values["name-threshold"];
+			const nameThreshold =
+				rawNameThreshold === undefined ? undefined : Number(rawNameThreshold);
+			if (
+				nameThreshold !== undefined &&
+				(Number.isNaN(nameThreshold) || nameThreshold < 0 || nameThreshold > 1)
+			) {
+				logger.error(
+					"Error: --name-threshold must be a number between 0.0 and 1.0"
+				);
+				process.exit(1);
+			}
 			await similarCommand({
 				directory,
 				project: values.project,
@@ -467,6 +492,8 @@ async function main() {
 				maxGroups,
 				strict: values.strict,
 				workspace: values.workspace,
+				nameThreshold,
+				sameNameOnly: values["same-name-only"],
 			});
 			break;
 		}

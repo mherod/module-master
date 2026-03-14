@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test";
 import ts from "typescript";
 import {
 	analyzeSimilarity,
+	camelCaseTokenize,
 	collectFunctions,
 	findSimilarGroups,
 	jaccardSimilarity,
+	nameSimilarity,
 	normalizeBody,
 	scanWorkspaceFunctions,
 	tokenize,
@@ -463,5 +465,98 @@ describe("findSimilarGroups", () => {
 		const allNames = groups.flatMap((g) => g.functions.map((f) => f.name));
 		const uniqueNames = new Set(allNames);
 		expect(uniqueNames.size).toBe(allNames.length);
+	});
+
+	test("sameNameOnly filters out functions with different names", () => {
+		const body = `{
+  const result = source.fetch(url);
+  const data = result.json();
+  return data;
+}`;
+		const fn1 = makeFunction("fetchData", body, "a.ts");
+		const fn2 = makeFunction("fetchData", body, "b.ts");
+		const fn3 = makeFunction("loadConfig", body, "c.ts");
+
+		const groups = findSimilarGroups([fn1, fn2, fn3], {
+			threshold: 0.7,
+			sameNameOnly: true,
+		});
+		expect(groups).toHaveLength(1);
+		expect(groups[0]?.functions).toHaveLength(2);
+		expect(groups[0]?.functions.map((f) => f.name)).toEqual([
+			"fetchData",
+			"fetchData",
+		]);
+	});
+
+	test("nameThreshold filters out functions with dissimilar names", () => {
+		const body = `{
+  const result = source.fetch(url);
+  const data = result.json();
+  return data;
+}`;
+		const fn1 = makeFunction("makeTempDir", body, "a.ts");
+		const fn2 = makeFunction("createTempDir", body, "b.ts");
+		const fn3 = makeFunction("isShellTool", body, "c.ts");
+
+		const groups = findSimilarGroups([fn1, fn2, fn3], {
+			threshold: 0.7,
+			nameThreshold: 0.4,
+		});
+		expect(groups).toHaveLength(1);
+		expect(groups[0]?.functions.map((f) => f.name)).toEqual(
+			expect.arrayContaining(["makeTempDir", "createTempDir"])
+		);
+		// isShellTool should not be in the group
+		const names = groups[0]?.functions.map((f) => f.name) ?? [];
+		expect(names).not.toContain("isShellTool");
+	});
+});
+
+describe("camelCaseTokenize", () => {
+	test("splits camelCase", () => {
+		expect(camelCaseTokenize("makeTempDir")).toEqual(["make", "temp", "dir"]);
+	});
+
+	test("splits PascalCase", () => {
+		expect(camelCaseTokenize("XMLParser")).toEqual(["xml", "parser"]);
+	});
+
+	test("handles single word", () => {
+		expect(camelCaseTokenize("fetch")).toEqual(["fetch"]);
+	});
+
+	test("handles snake_case", () => {
+		expect(camelCaseTokenize("make_temp_dir")).toEqual(["make", "temp", "dir"]);
+	});
+
+	test("handles consecutive uppercase", () => {
+		expect(camelCaseTokenize("parseHTMLDocument")).toEqual([
+			"parse",
+			"html",
+			"document",
+		]);
+	});
+});
+
+describe("nameSimilarity", () => {
+	test("returns 1.0 for identical names", () => {
+		expect(nameSimilarity("fetchData", "fetchData")).toBe(1);
+	});
+
+	test("returns high score for similar camelCase names", () => {
+		const score = nameSimilarity("makeTempDir", "createTempDir");
+		// Shares "temp" and "dir" tokens
+		expect(score).toBeGreaterThan(0.4);
+	});
+
+	test("returns low score for dissimilar names", () => {
+		const score = nameSimilarity("isShellTool", "createTempDir");
+		expect(score).toBeLessThan(0.2);
+	});
+
+	test("returns 0 for completely different names", () => {
+		const score = nameSimilarity("alpha", "beta");
+		expect(score).toBe(0);
 	});
 });

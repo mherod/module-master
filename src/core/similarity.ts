@@ -135,6 +135,34 @@ export function jaccardSimilarity(a: string[], b: string[]): number {
 	return union === 0 ? 1 : intersection / union;
 }
 
+/**
+ * Split a camelCase or PascalCase identifier into lowercase tokens.
+ * E.g., "makeTempDir" → ["make", "temp", "dir"],
+ *       "XMLParser" → ["xml", "parser"].
+ */
+export function camelCaseTokenize(name: string): string[] {
+	return name
+		.replace(/([a-z])([A-Z])/g, "$1 $2")
+		.replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+		.toLowerCase()
+		.split(/[\s_]+/)
+		.filter(Boolean);
+}
+
+/**
+ * Compute name similarity between two function names using Jaccard on
+ * camelCase tokens. Returns 1.0 for identical names, 0.0 for completely
+ * different names.
+ */
+export function nameSimilarity(a: string, b: string): number {
+	if (a === b) {
+		return 1;
+	}
+	const tokensA = camelCaseTokenize(a);
+	const tokensB = camelCaseTokenize(b);
+	return jaccardSimilarity(tokensA, tokensB);
+}
+
 function scoreToBucket(score: number): SimilarityBucket | null {
 	if (score >= 0.999) {
 		return "exact";
@@ -224,10 +252,23 @@ export function collectFunctions(
  *
  * Each function appears in at most one group (greedy assignment).
  */
+export interface SimilarityFilterOptions {
+	threshold?: number;
+	nameThreshold?: number;
+	sameNameOnly?: boolean;
+}
+
 export function findSimilarGroups(
 	functions: FunctionInfo[],
-	threshold = 0.8
+	thresholdOrOptions: number | SimilarityFilterOptions = 0.8
 ): SimilarityGroup[] {
+	const opts =
+		typeof thresholdOrOptions === "number"
+			? { threshold: thresholdOrOptions }
+			: thresholdOrOptions;
+	const threshold = opts.threshold ?? 0.8;
+	const nameThresholdValue = opts.nameThreshold;
+	const sameNameOnly = opts.sameNameOnly ?? false;
 	const groups: SimilarityGroup[] = [];
 	const assigned = new Set<number>();
 
@@ -288,6 +329,17 @@ export function findSimilarGroups(
 			}
 
 			if (score >= threshold) {
+				// Apply name filtering when enabled
+				if (sameNameOnly && fnI.name !== fnJ.name) {
+					continue;
+				}
+				if (
+					nameThresholdValue !== undefined &&
+					nameSimilarity(fnI.name, fnJ.name) < nameThresholdValue
+				) {
+					continue;
+				}
+
 				group.push(fnJ);
 				assigned.add(j);
 				minScore = Math.min(minScore, score);
@@ -436,15 +488,38 @@ export async function scanWorkspaceFunctions(directory: string): Promise<{
  * @param projectRoot - Optional project root containing tsconfig.json
  * @param workspace - When true, scan across all workspace packages
  */
+export interface AnalyzeSimilarityOptions {
+	directory: string;
+	threshold?: number;
+	projectRoot?: string;
+	workspace?: boolean;
+	nameThreshold?: number;
+	sameNameOnly?: boolean;
+}
+
 export async function analyzeSimilarity(
-	directory: string,
+	directoryOrOpts: string | AnalyzeSimilarityOptions,
 	threshold = 0.8,
 	projectRoot?: string,
 	workspace = false
 ): Promise<SimilarityReport & { packageCount?: number }> {
-	if (workspace) {
-		const result = await scanWorkspaceFunctions(directory);
-		const groups = findSimilarGroups(result.functions, threshold);
+	const opts: AnalyzeSimilarityOptions =
+		typeof directoryOrOpts === "string"
+			? { directory: directoryOrOpts, threshold, projectRoot, workspace }
+			: directoryOrOpts;
+	const dir = opts.directory;
+	const th = opts.threshold ?? threshold;
+	const pr = opts.projectRoot ?? projectRoot;
+	const ws = opts.workspace ?? workspace;
+	const filterOpts: SimilarityFilterOptions = {
+		threshold: th,
+		nameThreshold: opts.nameThreshold,
+		sameNameOnly: opts.sameNameOnly,
+	};
+
+	if (ws) {
+		const result = await scanWorkspaceFunctions(dir);
+		const groups = findSimilarGroups(result.functions, filterOpts);
 		return {
 			groups,
 			totalFunctions: result.functions.length,
@@ -453,10 +528,7 @@ export async function analyzeSimilarity(
 		};
 	}
 
-	const { functions, totalFiles } = await scanProjectFunctions(
-		directory,
-		projectRoot
-	);
-	const groups = findSimilarGroups(functions, threshold);
+	const { functions, totalFiles } = await scanProjectFunctions(dir, pr);
+	const groups = findSimilarGroups(functions, filterOpts);
 	return { groups, totalFunctions: functions.length, totalFiles };
 }
