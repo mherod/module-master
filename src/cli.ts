@@ -392,6 +392,7 @@ async function main() {
 				project: values.project,
 				type: findType,
 				verbose: values.verbose,
+				workspace: values.workspace,
 			});
 			break;
 		}

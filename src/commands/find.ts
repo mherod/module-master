@@ -3,6 +3,7 @@ import ts from "typescript";
 import { logger } from "../cli-logger.ts";
 import { scanExports } from "../core/scanner.ts";
 import { discoverProject } from "../core/tsconfig-discovery.ts";
+import { discoverWorkspace } from "../core/workspace.ts";
 import type { ExportInfo } from "../types.ts";
 
 export interface FindOptions {
@@ -10,6 +11,7 @@ export interface FindOptions {
 	project: string;
 	type?: "file" | "export" | "all";
 	verbose?: boolean;
+	workspace?: boolean;
 }
 
 export interface FindResult {
@@ -30,8 +32,33 @@ export interface ExportMatch {
 }
 
 export async function findCommand(options: FindOptions): Promise<void> {
-	const { query, project, type = "all", verbose } = options;
+	const { query, project, type = "all", verbose, workspace = false } = options;
 	const absoluteProject = path.resolve(project);
+
+	if (workspace) {
+		const wsInfo = await discoverWorkspace(absoluteProject);
+		if (!wsInfo || wsInfo.packages.length === 0) {
+			logger.error("No workspace packages found.");
+			process.exit(1);
+		}
+
+		logger.info(
+			`\n🔍 Searching for "${query}" across ${wsInfo.packages.length} workspace package(s)\n`
+		);
+
+		const allFiles = new Map<string, unknown>();
+		for (const pkg of wsInfo.packages) {
+			const scanDir = pkg.srcDir ? path.join(pkg.path, pkg.srcDir) : pkg.path;
+			const discovery = discoverProject(scanDir);
+			for (const [filePath, owner] of discovery.fileOwnership) {
+				allFiles.set(filePath, owner);
+			}
+		}
+
+		const result = search(query, allFiles, absoluteProject, type);
+		printResults(result, absoluteProject, verbose);
+		return;
+	}
 
 	logger.info(`\n🔍 Searching for "${query}" in ${absoluteProject}\n`);
 
