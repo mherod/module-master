@@ -170,4 +170,38 @@ describe("extract-common", () => {
 
 		await rm(dir, { recursive: true, force: true });
 	});
+
+	test("--output writes function to specified file and rewrites all sources", async () => {
+		const dir = nextFixtureDir();
+		await setupFixtures(dir);
+		const outputFile = path.join(dir, "shared.ts");
+
+		await extractCommonCommand({
+			directory: dir,
+			threshold: 0.95,
+			dryRun: false,
+			output: outputFile,
+		});
+
+		const sharedContent = await Bun.file(outputFile).text();
+		const aContent = await Bun.file(path.join(dir, "a.ts")).text();
+		const bContent = await Bun.file(path.join(dir, "b.ts")).text();
+
+		// shared.ts should contain the exported function
+		expect(sharedContent).toContain("export function formatDate");
+
+		// a.ts should no longer contain the function definition
+		expect(aContent).not.toContain("function formatDate(input: Date)");
+		// a.ts should import from shared (was exported, so re-export)
+		expect(aContent).toContain('export { formatDate } from "./shared"');
+		// a.ts should still have its own function
+		expect(aContent).toContain("export function otherA");
+
+		// b.ts should import from shared (was not exported, so plain import)
+		expect(bContent).not.toContain("function formatDate(input: Date)");
+		expect(bContent).toContain('import { formatDate } from "./shared"');
+		expect(bContent).toContain("export function otherB");
+
+		await rm(dir, { recursive: true, force: true });
+	});
 });

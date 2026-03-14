@@ -15,6 +15,8 @@ export interface ExtractCommonOptions {
 	workspace?: boolean;
 	nameThreshold?: number;
 	sameNameOnly?: boolean;
+	/** Write the canonical function to this file instead of keeping it in place */
+	output?: string;
 }
 
 interface FunctionNode {
@@ -286,6 +288,82 @@ async function applyPlan(plan: ExtractionPlan): Promise<{
 }
 
 /**
+ * Apply an extraction plan by writing the canonical function to a specified
+ * output file and replacing ALL copies (including the original canonical) with
+ * imports from the output file.
+ */
+async function applyPlanToOutput(
+	plan: ExtractionPlan,
+	outputFile: string
+): Promise<{ filesModified: string[]; functionsRemoved: number }> {
+	const filesModified: string[] = [];
+	const absOutput = path.resolve(outputFile);
+
+	// Step 1: Build the function text to write (ensure it's exported)
+	let fnText = plan.canonical.text.trimStart();
+	if (!plan.canonical.exported) {
+		// Prepend export keyword if the canonical wasn't already exported
+		fnText = `export ${fnText}`;
+	}
+
+	// Step 2: Append to or create the output file
+	let existingContent = "";
+	try {
+		existingContent = await Bun.file(absOutput).text();
+	} catch {
+		// File doesn't exist yet — will be created
+	}
+	const separator = existingContent.length > 0 ? "\n\n" : "";
+	await Bun.write(absOutput, `${existingContent}${separator}${fnText}\n`);
+	filesModified.push(absOutput);
+
+	// Step 3: Remove function from ALL files (canonical + duplicates)
+	const allNodes = [plan.canonical, ...plan.duplicates];
+	const byFile = new Map<string, FunctionNode[]>();
+	for (const node of allNodes) {
+		const existing = byFile.get(node.info.file) ?? [];
+		existing.push(node);
+		byFile.set(node.info.file, existing);
+	}
+
+	for (const [filePath, nodes] of byFile) {
+		const content = await Bun.file(filePath).text();
+		const changes: TextChange[] = [];
+		const imports: string[] = [];
+
+		for (const node of nodes) {
+			changes.push({ start: node.start, end: node.end, newText: "" });
+			const specifier = calculateRelativeSpecifier(filePath, absOutput);
+			const stmt = node.exported
+				? `export { ${node.info.name} } from "${specifier}";`
+				: `import { ${node.info.name} } from "${specifier}";`;
+			imports.push(stmt);
+		}
+
+		let newContent = applyTextChanges(content, changes);
+		const importBlock = imports.join("\n");
+		const lastImportIdx = findLastImportEnd(newContent);
+		if (lastImportIdx > 0) {
+			newContent =
+				newContent.slice(0, lastImportIdx) +
+				"\n" +
+				importBlock +
+				newContent.slice(lastImportIdx);
+		} else {
+			newContent = `${importBlock}\n${newContent}`;
+		}
+		newContent = newContent.replace(/\n{3,}/g, "\n\n");
+		await Bun.write(filePath, newContent);
+		filesModified.push(filePath);
+	}
+
+	return {
+		filesModified: [...new Set(filesModified)],
+		functionsRemoved: allNodes.length,
+	};
+}
+
+/**
  * Find the byte offset of the end of the last import statement in the content.
  */
 function findLastImportEnd(content: string): number {
@@ -318,6 +396,7 @@ export async function extractCommonCommand(
 		workspace = false,
 		nameThreshold,
 		sameNameOnly,
+		output,
 	} = options;
 	const absoluteDir = path.resolve(directory);
 
@@ -369,28 +448,48 @@ export async function extractCommonCommand(
 	let totalRemoved = 0;
 	const allModified: string[] = [];
 
+	const absOutput = output ? path.resolve(output) : undefined;
+
 	for (let i = 0; i < plans.length; i++) {
 		const plan = plans[i];
 		if (!plan) {
 			continue;
 		}
-		const canonicalRel = path.relative(absoluteDir, plan.canonical.info.file);
 
 		logger.info(
 			`📦 Group ${targetGroup ?? i + 1}: ${plan.canonical.info.name}`
 		);
-		logger.info(`   Keep in: ${canonicalRel}:${plan.canonical.info.line}`);
 
-		for (const dup of plan.duplicates) {
-			const dupRel = path.relative(absoluteDir, dup.info.file);
-			logger.info(
-				`   ${dryRun ? "Would remove from" : "Remove from"}: ${dupRel}:${dup.info.line}`
-			);
+		if (absOutput) {
+			const outputRel = path.relative(absoluteDir, absOutput);
+			logger.info(`   ${dryRun ? "Would write to" : "Write to"}: ${outputRel}`);
+			const allSources = [plan.canonical, ...plan.duplicates];
+			for (const node of allSources) {
+				const rel = path.relative(absoluteDir, node.info.file);
+				logger.info(
+					`   ${dryRun ? "Would remove from" : "Remove from"}: ${rel}:${node.info.line}`
+				);
+			}
+		} else {
+			const canonicalRel = path.relative(absoluteDir, plan.canonical.info.file);
+			logger.info(`   Keep in: ${canonicalRel}:${plan.canonical.info.line}`);
+			for (const dup of plan.duplicates) {
+				const dupRel = path.relative(absoluteDir, dup.info.file);
+				logger.info(
+					`   ${dryRun ? "Would remove from" : "Remove from"}: ${dupRel}:${dup.info.line}`
+				);
+			}
 		}
 		logger.empty();
 
 		if (dryRun) {
-			totalRemoved += plan.duplicates.length;
+			totalRemoved += absOutput
+				? plan.duplicates.length + 1
+				: plan.duplicates.length;
+		} else if (absOutput) {
+			const result = await applyPlanToOutput(plan, absOutput);
+			totalRemoved += result.functionsRemoved;
+			allModified.push(...result.filesModified);
 		} else {
 			const result = await applyPlan(plan);
 			totalRemoved += result.functionsRemoved;

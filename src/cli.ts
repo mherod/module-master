@@ -30,6 +30,7 @@ const { values, positionals } = parseArgs({
 		"name-threshold": { type: "string" },
 		"same-name-only": { type: "boolean" },
 		group: { type: "string" },
+		output: { type: "string", short: "o" },
 		workspace: { type: "boolean" },
 	},
 	allowPositionals: true,
@@ -300,14 +301,19 @@ Arguments:
 Options:
   --threshold       Minimum similarity score 0.0–1.0 (default: 0.95)
   --group           Target a specific group number (from 'similar' output)
+  -o, --output      Write extracted functions to this file (consolidate into one location)
   -n, --dry-run     Preview changes without modifying files
   --workspace       Scan across all workspace packages
   -p, --project     Path to project directory or tsconfig.json
+
+Without --output, keeps one canonical copy in place and removes others.
+With --output, writes the function to the specified file and removes from all sources.
 
 Examples:
   ${name} extract-common src --dry-run
   ${name} extract-common . --threshold=1.0
   ${name} extract-common src --group=1
+  ${name} extract-common src --output=src/shared/utils.ts
 `);
 			break;
 		default:
@@ -549,6 +555,7 @@ async function main() {
 				dryRun: values["dry-run"],
 				group,
 				workspace: values.workspace,
+				output: values.output,
 			});
 			break;
 		}
