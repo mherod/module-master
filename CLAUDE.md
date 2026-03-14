@@ -442,5 +442,6 @@ Plan the full scope of a fix before writing code. Map all edge cases into the ta
 
 DO: Use TaskCreate to list every edge case (additions, removals, mixed scenarios) before the first Edit.
 DO: Commit all related changes together as one scope rather than fragmenting across multiple commits.
+DO: When adding a CLI-wide feature (e.g., `--workspace` flag), scan all command files in `src/commands/*.ts` upfront and plan one commit covering every applicable command. Adding to `similar.ts` alone, then `find.ts`, then `analyze.ts`, then `move.ts`/`rename.ts` in separate commits is 4x the work and 4 fragmented commits.
 DON'T: Ship three commits for what is logically one fix. If offset-correction, documentation, and comments all address the same concern, plan them as one scope.
 DON'T: Declare a fix "done" without checking whether the same pattern applies to neighbouring code paths.
