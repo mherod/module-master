@@ -357,8 +357,14 @@ export async function scanWorkspaceFunctions(directory: string): Promise<{
 	const { discoverWorkspace, filterToWorkspaceBoundary } = await import(
 		"./workspace.ts"
 	);
-	const workspace = await discoverWorkspace(path.resolve(directory));
+	const absDir = path.resolve(directory);
+	const workspace = await discoverWorkspace(absDir);
 	if (!workspace || workspace.packages.length === 0) {
+		return { functions: [], totalFiles: 0, packageCount: 0 };
+	}
+
+	// Guard: reject if directory is outside workspace root
+	if (filterToWorkspaceBoundary([absDir], workspace.root).length === 0) {
 		return { functions: [], totalFiles: 0, packageCount: 0 };
 	}
 

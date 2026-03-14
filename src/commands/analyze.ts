@@ -56,6 +56,11 @@ export async function analyzeCommand(options: AnalyzeOptions): Promise<void> {
 			: path.dirname(tsconfigPath);
 		const wsInfo = await discoverWorkspace(wsDir);
 		if (wsInfo && wsInfo.packages.length > 0) {
+			// Guard: reject if file is outside workspace root
+			if (filterToWorkspaceBoundary([absolutePath], wsInfo.root).length === 0) {
+				logger.error(`File is outside workspace root: ${wsInfo.root}`);
+				process.exit(1);
+			}
 			const crossRefs: ModuleReference[] = [];
 			for (const pkg of wsInfo.packages) {
 				const pkgTsconfig = pkg.tsconfigPath;
