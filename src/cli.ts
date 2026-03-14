@@ -163,8 +163,9 @@ Arguments:
   file    Path to the file to analyze
 
 Options:
-  --verbose       Show detailed reference information
-  --workspace     Scan across all workspace packages
+  --verbose          Show detailed reference information
+  --workspace        Scan across all workspace packages
+  --only-related-to  Filter referencedBy results to a file, folder, or glob pattern
 
 Output includes:
   • All exports from the file
@@ -187,8 +188,9 @@ Arguments:
   directory    Path to the project directory to scan
 
 Options:
-  --verbose      Show detailed file ownership and path aliases
-  --workspace    Scan across all workspace packages
+  --verbose          Show detailed file ownership and path aliases
+  --workspace        Scan across all workspace packages
+  --only-related-to  Filter file ownership output to a file, folder, or glob pattern
 
 Output includes:
   • All tsconfig.json files found
@@ -212,10 +214,11 @@ Arguments:
   query    Name to search for (case-insensitive, partial match)
 
 Options:
-  -p, --project   Path to project directory (required)
-  -t, --type      Filter: file, export, or all (default: all)
-  --verbose       Show helpful tips for next steps
-  --workspace     Scan across all workspace packages
+  -p, --project      Path to project directory (required)
+  -t, --type         Filter: file, export, or all (default: all)
+  --verbose          Show helpful tips for next steps
+  --workspace        Scan across all workspace packages
+  --only-related-to  Limit searched files to a file, folder, or glob pattern
 
 Output includes:
   • Files matching the query by filename
