@@ -16,6 +16,7 @@ export interface ExtractCommonOptions {
 	nameThreshold?: number;
 	sameNameOnly?: boolean;
 	skipSameFile?: boolean;
+	onlyRelatedTo?: string;
 	/** Write the canonical function to this file instead of keeping it in place */
 	output?: string;
 }
@@ -398,6 +399,7 @@ export async function extractCommonCommand(
 		nameThreshold,
 		sameNameOnly,
 		skipSameFile,
+		onlyRelatedTo,
 		output,
 	} = options;
 	const absoluteDir = path.resolve(directory);
@@ -415,6 +417,7 @@ export async function extractCommonCommand(
 		nameThreshold,
 		sameNameOnly,
 		skipSameFile,
+		onlyRelatedTo,
 	});
 
 	if (report.groups.length === 0) {

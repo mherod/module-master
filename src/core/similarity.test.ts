@@ -6,6 +6,7 @@ import {
 	collectFunctions,
 	findSimilarGroups,
 	jaccardSimilarity,
+	matchesRelatedPath,
 	nameSimilarity,
 	normalizeBody,
 	scanWorkspaceFunctions,
@@ -558,5 +559,109 @@ describe("nameSimilarity", () => {
 	test("returns 0 for completely different names", () => {
 		const score = nameSimilarity("alpha", "beta");
 		expect(score).toBe(0);
+	});
+});
+
+describe("matchesRelatedPath", () => {
+	test("matches exact file path", () => {
+		expect(matchesRelatedPath("/abs/src/foo.ts", "/abs/src/foo.ts")).toBe(true);
+	});
+
+	test("matches directory prefix", () => {
+		expect(matchesRelatedPath("/abs/src/utils/foo.ts", "/abs/src/utils")).toBe(
+			true
+		);
+	});
+
+	test("does not match unrelated path", () => {
+		expect(matchesRelatedPath("/abs/src/foo.ts", "/abs/src/bar.ts")).toBe(
+			false
+		);
+	});
+
+	test("matches glob pattern with *", () => {
+		expect(matchesRelatedPath("src/utils/foo.ts", "src/utils/*.ts")).toBe(true);
+	});
+
+	test("matches glob pattern with **", () => {
+		expect(
+			matchesRelatedPath("src/core/deep/file.ts", "src/core/**/*.ts")
+		).toBe(true);
+	});
+
+	test("does not match glob for different directory", () => {
+		expect(matchesRelatedPath("src/commands/foo.ts", "src/core/*.ts")).toBe(
+			false
+		);
+	});
+});
+
+describe("findSimilarGroups onlyRelatedTo", () => {
+	const filePath = "test.ts";
+
+	function makeFunction(
+		fnName: string,
+		body: string,
+		file = filePath
+	): ReturnType<typeof collectFunctions>[number] {
+		const sf = makeSourceFile(`function ${fnName}() ${body}`);
+		const fns = collectFunctions(sf, file);
+		const fn = fns[0];
+		if (!fn) {
+			const normalized = normalizeBody(body);
+			const tokens = tokenize(normalized);
+			return {
+				file,
+				name: fnName,
+				line: 1,
+				column: 0,
+				normalizedBody: normalized,
+				tokenCount: tokens.length,
+				bodyLength: body.length,
+			};
+		}
+		return { ...fn, name: fnName };
+	}
+
+	test("filters to groups containing the related file", () => {
+		const body = `{
+  const result = source.fetch(url);
+  const data = result.json();
+  return data;
+}`;
+		const fn1 = makeFunction("fetchA", body, "/abs/src/utils/a.ts");
+		const fn2 = makeFunction("fetchB", body, "/abs/src/utils/b.ts");
+		const fn3 = makeFunction("fetchC", body, "/abs/src/core/c.ts");
+		const fn4 = makeFunction("fetchD", body, "/abs/src/core/d.ts");
+
+		// Without filter — 1 big group
+		const allGroups = findSimilarGroups([fn1, fn2, fn3, fn4], 0.7);
+		expect(allGroups.length).toBeGreaterThanOrEqual(1);
+
+		// With filter — only groups that include a function from /abs/src/utils/a.ts
+		const filtered = findSimilarGroups([fn1, fn2, fn3, fn4], {
+			threshold: 0.7,
+			onlyRelatedTo: "/abs/src/utils/a.ts",
+		});
+		expect(filtered.length).toBeGreaterThanOrEqual(1);
+		// The group must contain fn1 (from /abs/src/utils/a.ts)
+		const relatedFns = filtered.flatMap((g) => g.functions);
+		expect(relatedFns.some((f) => f.file === "/abs/src/utils/a.ts")).toBe(true);
+	});
+
+	test("returns empty when no groups match the related path", () => {
+		const body = `{
+  const result = source.fetch(url);
+  const data = result.json();
+  return data;
+}`;
+		const fn1 = makeFunction("fetchA", body, "/abs/src/core/a.ts");
+		const fn2 = makeFunction("fetchB", body, "/abs/src/core/b.ts");
+
+		const filtered = findSimilarGroups([fn1, fn2], {
+			threshold: 0.7,
+			onlyRelatedTo: "/abs/src/utils/nonexistent.ts",
+		});
+		expect(filtered).toHaveLength(0);
 	});
 });

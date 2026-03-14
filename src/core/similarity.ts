@@ -252,12 +252,42 @@ export function collectFunctions(
  *
  * Each function appears in at most one group (greedy assignment).
  */
+/**
+ * Check if a file path matches a related-path pattern.
+ * Supports: exact file path, directory prefix, and glob patterns with *.
+ */
+export function matchesRelatedPath(filePath: string, pattern: string): boolean {
+	const absFile = path.resolve(filePath);
+	const absPattern = path.resolve(pattern);
+
+	// Exact file match
+	if (absFile === absPattern) {
+		return true;
+	}
+
+	// Directory prefix match (pattern is a folder path)
+	if (absFile.startsWith(`${absPattern}/`)) {
+		return true;
+	}
+
+	// Glob pattern (contains * or ?)
+	if (pattern.includes("*") || pattern.includes("?")) {
+		const glob = new Bun.Glob(pattern);
+		// Match against both absolute and the original relative path
+		return glob.match(filePath) || glob.match(absFile);
+	}
+
+	return false;
+}
+
 export interface SimilarityFilterOptions {
 	threshold?: number;
 	nameThreshold?: number;
 	sameNameOnly?: boolean;
 	/** Discard groups where every function lives in the same file */
 	skipSameFile?: boolean;
+	/** Only include groups containing at least one function from a matching path */
+	onlyRelatedTo?: string;
 }
 
 export function findSimilarGroups(
@@ -360,15 +390,25 @@ export function findSimilarGroups(
 	// Sort by score descending (best matches first)
 	groups.sort((a, b) => b.score - a.score);
 
+	let filtered = groups;
+
 	// Filter out same-file groups when requested
 	if (opts.skipSameFile) {
-		return groups.filter((g) => {
+		filtered = filtered.filter((g) => {
 			const files = new Set(g.functions.map((f) => f.file));
 			return files.size > 1;
 		});
 	}
 
-	return groups;
+	// Filter to groups related to a specific path/glob
+	if (opts.onlyRelatedTo) {
+		const pattern = opts.onlyRelatedTo;
+		filtered = filtered.filter((g) =>
+			g.functions.some((f) => matchesRelatedPath(f.file, pattern))
+		);
+	}
+
+	return filtered;
 }
 
 /**
@@ -507,6 +547,7 @@ export interface AnalyzeSimilarityOptions {
 	nameThreshold?: number;
 	sameNameOnly?: boolean;
 	skipSameFile?: boolean;
+	onlyRelatedTo?: string;
 }
 
 export async function analyzeSimilarity(
@@ -528,6 +569,7 @@ export async function analyzeSimilarity(
 		nameThreshold: opts.nameThreshold,
 		sameNameOnly: opts.sameNameOnly,
 		skipSameFile: opts.skipSameFile,
+		onlyRelatedTo: opts.onlyRelatedTo,
 	};
 
 	if (ws) {

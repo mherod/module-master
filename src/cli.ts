@@ -30,6 +30,7 @@ const { values, positionals } = parseArgs({
 		"name-threshold": { type: "string" },
 		"same-name-only": { type: "boolean" },
 		"skip-same-file": { type: "boolean" },
+		"only-related-to": { type: "string" },
 		group: { type: "string" },
 		output: { type: "string", short: "o" },
 		workspace: { type: "boolean" },
@@ -73,6 +74,7 @@ Options:
   --name-threshold  Name similarity threshold for similar command (0.0–1.0)
   --same-name-only  Only group functions with identical names (similar command)
   --skip-same-file  Skip groups where all functions are in the same file
+  --only-related-to Only show groups related to a file or folder path/glob
   --workspace       Scan across all workspace packages (similar command)
 
 Examples:
@@ -267,6 +269,7 @@ Options:
   --name-threshold  Only group functions whose names also meet this similarity (0.0–1.0)
   --same-name-only  Only group functions with identical names
   --skip-same-file  Skip groups where all functions are in the same file
+  --only-related-to Only show groups related to a file or folder (path or glob)
   --workspace       Scan across all workspace packages
   -p, --project     Path to project directory or tsconfig.json
 
@@ -289,6 +292,7 @@ Examples:
   ${name} similar src --strict              # fail if duplicates found
   ${name} similar src --name-threshold=0.5  # require similar names
   ${name} similar src --same-name-only      # only identical names
+  ${name} similar src --only-related-to=src/utils/helpers.ts
 `);
 			break;
 		case "extract-common":
@@ -307,6 +311,7 @@ Options:
   -o, --output      Write extracted functions to this file (consolidate into one location)
   -n, --dry-run     Preview changes without modifying files
   --skip-same-file  Skip groups where all functions are in the same file
+  --only-related-to Only process groups related to a file or folder (path or glob)
   --workspace       Scan across all workspace packages
   -p, --project     Path to project directory or tsconfig.json
 
@@ -318,7 +323,7 @@ Examples:
   ${name} extract-common . --threshold=1.0
   ${name} extract-common src --group=1
   ${name} extract-common src --output=src/shared/utils.ts
-  ${name} extract-common src --skip-same-file
+  ${name} extract-common src --only-related-to=src/utils/helpers.ts
 `);
 			break;
 		default:
@@ -531,6 +536,7 @@ async function main() {
 				nameThreshold,
 				sameNameOnly: values["same-name-only"],
 				skipSameFile: values["skip-same-file"],
+				onlyRelatedTo: values["only-related-to"],
 			});
 			break;
 		}
@@ -563,6 +569,7 @@ async function main() {
 				workspace: values.workspace,
 				output: values.output,
 				skipSameFile: values["skip-same-file"],
+				onlyRelatedTo: values["only-related-to"],
 			});
 			break;
 		}
