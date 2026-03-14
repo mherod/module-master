@@ -281,4 +281,8 @@ pnpm run build       # Compile to standalone binary
 
 ## License
 
-MIT
+PolyForm Noncommercial 1.0.0.
+
+Commercial use, resale, or repurposing for commercial gain requires prior
+written permission from Matthew Herod. Commercial licensing inquiries:
+matthew.herod@gmail.com.
