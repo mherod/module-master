@@ -45,6 +45,14 @@ export async function findCommand(options: FindOptions): Promise<void> {
 			process.exit(1);
 		}
 
+		// Guard: reject if project path is outside workspace root
+		if (
+			filterToWorkspaceBoundary([absoluteProject], wsInfo.root).length === 0
+		) {
+			logger.error(`Project path is outside workspace root: ${wsInfo.root}`);
+			process.exit(1);
+		}
+
 		logger.info(
 			`\n🔍 Searching for "${query}" across ${wsInfo.packages.length} workspace package(s)\n`
 		);

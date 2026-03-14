@@ -5,7 +5,10 @@ import {
 	type ProjectDiscovery,
 	type TsConfigInfo,
 } from "../core/tsconfig-discovery.ts";
-import { discoverWorkspace } from "../core/workspace.ts";
+import {
+	discoverWorkspace,
+	filterToWorkspaceBoundary,
+} from "../core/workspace.ts";
 
 export interface DiscoverOptions {
 	directory: string;
@@ -21,6 +24,12 @@ export async function discoverCommand(options: DiscoverOptions): Promise<void> {
 		const wsInfo = await discoverWorkspace(absoluteDir);
 		if (!wsInfo || wsInfo.packages.length === 0) {
 			logger.error("No workspace packages found.");
+			process.exit(1);
+		}
+
+		// Guard: reject if directory is outside workspace root
+		if (filterToWorkspaceBoundary([absoluteDir], wsInfo.root).length === 0) {
+			logger.error(`Directory is outside workspace root: ${wsInfo.root}`);
 			process.exit(1);
 		}
 
