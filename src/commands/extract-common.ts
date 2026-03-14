@@ -409,8 +409,9 @@ export async function extractCommonCommand(
 	} = options;
 	const absoluteDir = path.resolve(directory);
 
+	const scope = workspace ? "across workspace packages in" : "in";
 	logger.info(
-		`\n${dryRun ? "🔍 Dry run:" : "🔧"} Extracting common functions in ${absoluteDir}\n`
+		`\n${dryRun ? "🔍 Dry run:" : "🔧"} Extracting common functions ${scope} ${absoluteDir}\n`
 	);
 
 	// Step 1: Find similar groups
