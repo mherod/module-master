@@ -320,7 +320,7 @@ function findExport(
 	return result;
 }
 
-function renameInSourceFile(
+export function renameInSourceFile(
 	sourceFile: ts.SourceFile,
 	oldName: string,
 	newName: string
@@ -332,7 +332,72 @@ function renameInSourceFile(
 	const changes: TextChange[] = [];
 	const updates: Omit<UpdatedReference, "file">[] = [];
 
-	function visit(node: ts.Node) {
+	// Returns true if a binding pattern (parameter name, destructuring) introduces `name`
+	function bindingContainsName(binding: ts.BindingName): boolean {
+		if (ts.isIdentifier(binding)) {
+			return binding.text === oldName;
+		}
+		if (
+			ts.isObjectBindingPattern(binding) ||
+			ts.isArrayBindingPattern(binding)
+		) {
+			return binding.elements.some(
+				(el) => !ts.isOmittedExpression(el) && bindingContainsName(el.name)
+			);
+		}
+		return false;
+	}
+
+	// Returns true if this identifier is declaring a new (inner-scope) binding,
+	// rather than referencing the exported symbol.
+	function isDeclaringIdentifier(node: ts.Identifier): boolean {
+		const { parent } = node;
+		if (!parent) {
+			return false;
+		}
+		if (ts.isParameter(parent) && parent.name === node) {
+			return true;
+		}
+		if (ts.isVariableDeclaration(parent) && parent.name === node) {
+			return true;
+		}
+		if (ts.isBindingElement(parent) && parent.name === node) {
+			return true;
+		}
+		if (ts.isFunctionDeclaration(parent) && parent.name === node) {
+			return true;
+		}
+		if (ts.isClassDeclaration(parent) && parent.name === node) {
+			return true;
+		}
+		return false;
+	}
+
+	// Returns true if a function-like node introduces a parameter that shadows oldName.
+	function nodeIntroducesShadow(node: ts.Node): boolean {
+		if (
+			ts.isFunctionDeclaration(node) ||
+			ts.isFunctionExpression(node) ||
+			ts.isArrowFunction(node) ||
+			ts.isMethodDeclaration(node) ||
+			ts.isConstructorDeclaration(node) ||
+			ts.isGetAccessorDeclaration(node) ||
+			ts.isSetAccessorDeclaration(node)
+		) {
+			return (node as ts.FunctionLikeDeclaration).parameters.some((p) =>
+				bindingContainsName(p.name)
+			);
+		}
+		return false;
+	}
+
+	function visit(node: ts.Node, isShadowed = false) {
+		// Inside a scope where oldName is shadowed — skip all renames, recurse only
+		if (isShadowed) {
+			ts.forEachChild(node, (child) => visit(child, true));
+			return;
+		}
+
 		// Rename in declaration: export class OldName / export function oldName / export const oldName
 		if (hasExportModifier(node)) {
 			const nameNode = getNameNode(node);
@@ -432,6 +497,11 @@ function renameInSourceFile(
 			) {
 				return;
 			}
+			// Skip if this identifier is declaring a new binding in an inner scope
+			// (parameter name, variable declaration, destructuring element, inner function/class name)
+			if (isDeclaringIdentifier(node)) {
+				return;
+			}
 
 			const { line } = sourceFile.getLineAndCharacterOfPosition(
 				node.getStart(sourceFile)
@@ -448,7 +518,9 @@ function renameInSourceFile(
 			});
 		}
 
-		ts.forEachChild(node, visit);
+		// Propagate shadow into function scopes whose parameters introduce a new binding for oldName
+		const childIsShadowed = nodeIntroducesShadow(node);
+		ts.forEachChild(node, (child) => visit(child, childIsShadowed));
 	}
 
 	visit(sourceFile);
