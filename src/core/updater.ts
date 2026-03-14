@@ -95,19 +95,21 @@ export function updateFileReferences(
 					: ref.specifier;
 
 				const splitChange =
-					createImportSplit(
+					createSplit(
 						sourceFile,
 						ref,
 						movedBindings,
 						remainingBindings,
-						newSpecifier
+						newSpecifier,
+						"import"
 					) ??
-					createExportSplit(
+					createSplit(
 						sourceFile,
 						ref,
 						movedBindings,
 						remainingBindings,
-						newSpecifier
+						newSpecifier,
+						"export"
 					);
 
 				if (splitChange) {
@@ -282,16 +284,21 @@ interface ImportSplitChange {
 }
 
 /**
- * Create an import split change that replaces a single import with two imports
+ * Create a split change that replaces a single import or re-export declaration with two.
+ * `kind` controls whether to match and emit `import` or `export` statements.
+ *
+ * Examples:
+ *   import { a, b } from './mod'  →  import { a } from '@pkg/new'; import { b } from './mod';
+ *   export { a, b } from './mod'  →  export { a } from '@pkg/new'; export { b } from './mod';
  */
-function createImportSplit(
+function createSplit(
 	sourceFile: ts.SourceFile,
 	ref: ModuleReference,
 	movedBindings: ImportBinding[],
 	remainingBindings: ImportBinding[],
-	newSpecifier: string
+	newSpecifier: string,
+	kind: "import" | "export"
 ): ImportSplitChange | null {
-	// Find the import declaration node position
 	let nodePosition: { start: number; end: number } | null = null;
 
 	function visit(node: ts.Node) {
@@ -299,86 +306,23 @@ function createImportSplit(
 			return;
 		}
 
-		if (
-			ts.isImportDeclaration(node) &&
-			ts.isStringLiteral(node.moduleSpecifier) &&
-			node.moduleSpecifier.text === ref.specifier
-		) {
-			const start = node.getStart(sourceFile);
-			const { line } = sourceFile.getLineAndCharacterOfPosition(start);
-			if (line + 1 === ref.line) {
-				nodePosition = { start, end: node.getEnd() };
+		let specifierText: string | null = null;
+		if (kind === "import") {
+			if (
+				ts.isImportDeclaration(node) &&
+				ts.isStringLiteral(node.moduleSpecifier)
+			) {
+				specifierText = node.moduleSpecifier.text;
 			}
-		}
-
-		ts.forEachChild(node, visit);
-	}
-
-	visit(sourceFile);
-
-	if (!nodePosition) {
-		return null;
-	}
-
-	// Generate the two new import statements
-	const movedBindingStr = movedBindings
-		.map((b) => (b.alias ? `${b.name} as ${b.alias}` : b.name))
-		.join(", ");
-	const remainingBindingStr = remainingBindings
-		.map((b) => (b.alias ? `${b.name} as ${b.alias}` : b.name))
-		.join(", ");
-
-	// Determine if type-only
-	const movedTypeOnly = movedBindings.every((b) => b.isType);
-	const remainingTypeOnly = remainingBindings.every((b) => b.isType);
-
-	const movedImport = movedTypeOnly
-		? `import type { ${movedBindingStr} } from "${newSpecifier}";`
-		: `import { ${movedBindingStr} } from "${newSpecifier}";`;
-
-	const remainingImport = remainingTypeOnly
-		? `import type { ${remainingBindingStr} } from "${ref.specifier}";`
-		: `import { ${remainingBindingStr} } from "${ref.specifier}";`;
-
-	// Get the full import statement range including any leading whitespace on the line
-	const { start, end } = nodePosition;
-
-	// Preserve indentation
-	const lineStart = sourceFile.getLineAndCharacterOfPosition(start);
-	const indent = sourceFile.text.slice(start - lineStart.character, start);
-
-	return {
-		start,
-		end,
-		newText: `${movedImport}\n${indent}${remainingImport}`,
-	};
-}
-
-/**
- * Create an export split change that replaces a single re-export with two re-exports.
- * Handles: export { a, b } from './module' → export { a } from '@pkg/new'; export { b } from './module';
- * Preserves isTypeOnly on each generated export clause.
- */
-function createExportSplit(
-	sourceFile: ts.SourceFile,
-	ref: ModuleReference,
-	movedBindings: ImportBinding[],
-	remainingBindings: ImportBinding[],
-	newSpecifier: string
-): ImportSplitChange | null {
-	let nodePosition: { start: number; end: number } | null = null;
-
-	function visit(node: ts.Node) {
-		if (nodePosition) {
-			return;
-		}
-
-		if (
+		} else if (
 			ts.isExportDeclaration(node) &&
 			node.moduleSpecifier &&
-			ts.isStringLiteral(node.moduleSpecifier) &&
-			node.moduleSpecifier.text === ref.specifier
+			ts.isStringLiteral(node.moduleSpecifier)
 		) {
+			specifierText = node.moduleSpecifier.text;
+		}
+
+		if (specifierText === ref.specifier) {
 			const start = node.getStart(sourceFile);
 			const { line } = sourceFile.getLineAndCharacterOfPosition(start);
 			if (line + 1 === ref.line) {
@@ -395,33 +339,28 @@ function createExportSplit(
 		return null;
 	}
 
-	const movedBindingStr = movedBindings
-		.map((b) => (b.alias ? `${b.name} as ${b.alias}` : b.name))
-		.join(", ");
-	const remainingBindingStr = remainingBindings
-		.map((b) => (b.alias ? `${b.name} as ${b.alias}` : b.name))
-		.join(", ");
+	const bindingStr = (bindings: ImportBinding[]) =>
+		bindings
+			.map((b) => (b.alias ? `${b.name} as ${b.alias}` : b.name))
+			.join(", ");
 
 	const movedTypeOnly = movedBindings.every((b) => b.isType);
 	const remainingTypeOnly = remainingBindings.every((b) => b.isType);
+	const kw = kind;
 
-	const movedExport = movedTypeOnly
-		? `export type { ${movedBindingStr} } from "${newSpecifier}";`
-		: `export { ${movedBindingStr} } from "${newSpecifier}";`;
+	const movedStmt = movedTypeOnly
+		? `${kw} type { ${bindingStr(movedBindings)} } from "${newSpecifier}";`
+		: `${kw} { ${bindingStr(movedBindings)} } from "${newSpecifier}";`;
 
-	const remainingExport = remainingTypeOnly
-		? `export type { ${remainingBindingStr} } from "${ref.specifier}";`
-		: `export { ${remainingBindingStr} } from "${ref.specifier}";`;
+	const remainingStmt = remainingTypeOnly
+		? `${kw} type { ${bindingStr(remainingBindings)} } from "${ref.specifier}";`
+		: `${kw} { ${bindingStr(remainingBindings)} } from "${ref.specifier}";`;
 
 	const { start, end } = nodePosition;
 	const lineStart = sourceFile.getLineAndCharacterOfPosition(start);
 	const indent = sourceFile.text.slice(start - lineStart.character, start);
 
-	return {
-		start,
-		end,
-		newText: `${movedExport}\n${indent}${remainingExport}`,
-	};
+	return { start, end, newText: `${movedStmt}\n${indent}${remainingStmt}` };
 }
 
 /**
