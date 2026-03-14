@@ -426,6 +426,7 @@ async function main() {
 				verbose: values.verbose,
 				verify: !values["no-verify"],
 				project: values.project,
+				workspace: values.workspace,
 			});
 			break;
 		}
