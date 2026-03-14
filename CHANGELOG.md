@@ -2,6 +2,76 @@
 
 All notable user-facing changes to this project are documented here.
 
+## [1.3.1] - 2026-03-14
+
+### Bug Fixes
+
+- **`similar` produces fewer false positives**: Functions that share a
+  similar structure but use different constants or string literals (e.g.
+  `KEBAB_CASE_REGEX` vs `HOOK_NAMING_REGEX`) are no longer incorrectly
+  reported as duplicates. True duplicates remain at full score. (#22)
+
+### Improvements
+
+- **`--workspace` flag now shown in `--help`**: The flag was already
+  functional across all commands but was missing from their help text.
+  Running `--help` on `move`, `rename`, `analyze`, `find`, `alias`, and
+  `discover` now documents the option.
+
+## [1.3.0] - 2026-03-14
+
+### New Features
+
+- **New `extract-common` command**: Automatically consolidates duplicate
+  functions by keeping one canonical copy and replacing all other
+  occurrences with imports pointing to that copy. Supports `--dry-run`,
+  `--group` (target a specific group by index), and `--threshold`. The
+  `similar` command now suggests ready-to-run `extract-common` follow-up
+  commands for each group it finds. (#17)
+
+- **`extract-common --output`**: Write the extracted function to a
+  caller-specified destination file rather than keeping it in place.
+  All source locations are rewritten to import from that file.
+
+- **`similar --strict`**: Exit with a non-zero error code when similar
+  functions are detected, making `similar` usable as a CI or pre-commit
+  gate.
+
+- **`similar --skip-directives`**: Exclude functions that contain
+  `"use server"`, `"use client"`, `"use cache"`, or `"use strict"`
+  directives from similarity analysis. These functions cannot be safely
+  consolidated. (#20)
+
+- **`similar --min-lines`**: Exclude functions whose body is shorter
+  than a given line count. Thin one-liner wrappers are typically not
+  worth consolidating and can now be filtered out. (#21)
+
+- **`similar --skip-same-file`**: Skip groups where all matching
+  functions live in the same file, reducing noise from co-located
+  patterns that are unlikely extraction candidates.
+
+- **`similar --only-related-to`**: Restrict results to groups that
+  contain at least one function from a specified file, folder, or glob
+  pattern. Also available in the `extract-common` command. (#19)
+
+- **`--only-related-to` for `find`, `analyze`, `discover`**: The
+  path-scoping filter previously added to `similar` is now available
+  in `find` (limits searched files), `analyze` (filters `referencedBy`
+  results), and `discover` (filters file ownership output).
+
+- **`similar --name-threshold` and `--same-name-only`**: Filter
+  similarity groups by function name similarity, using camelCase token
+  comparison. `--same-name-only` restricts groups to identically-named
+  functions only. Reduces noise from structurally similar but
+  semantically unrelated functions. (#18)
+
+### Bug Fixes
+
+- **`similar` detects fewer false positives**: Similarity scoring now
+  uses bigram Jaccard similarity and applies body-length and token-count
+  ratio pre-filters, eliminating spurious matches produced when
+  normalisation collapses different bodies to the same form.
+
 ## [1.2.0] - 2026-03-14
 
 ### New Features
