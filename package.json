@@ -16,7 +16,8 @@
     "dev": "bun run src/cli.ts",
     "build": "bun build src/cli.ts --compile --outfile dist/resect",
     "test": "bun test",
-    "lint": "pnpm exec biome check --write .",
+    "lint": "pnpm exec biome check --write . && pnpm run lint:eslint",
+    "lint:eslint": "eslint src --max-warnings 0",
     "typecheck": "pnpm exec tsc --noEmit",
     "prepublishOnly": "pnpm run typecheck && pnpm run lint && pnpm test",
     "git:unlock": "rm -f .git/index.lock",
@@ -59,8 +60,10 @@
   "devDependencies": {
     "@biomejs/biome": "2.3.12",
     "@types/bun": "latest",
+    "eslint": "^10.0.3",
     "husky": "^9.1.7",
     "lint-staged": "^16.2.7",
+    "typescript-eslint": "^8.57.0",
     "ultracite": "7.1.1"
   },
   "lint-staged": {

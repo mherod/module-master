@@ -4,7 +4,7 @@ import type { ProjectConfig } from "../types";
 import { scanModuleReferences } from "./scanner";
 
 // Mock resolver to avoid file system lookups
-mock.module("./resolver", () => {
+await mock.module("./resolver", () => {
 	return {
 		resolveModuleSpecifier: (specifier: string) => ({
 			kind: "resolved",

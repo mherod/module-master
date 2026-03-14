@@ -11,7 +11,7 @@ export interface DiscoverOptions {
 	verbose?: boolean;
 }
 
-export function discoverCommand(options: DiscoverOptions): void {
+export async function discoverCommand(options: DiscoverOptions): Promise<void> {
 	const { directory, verbose } = options;
 	const absoluteDir = path.resolve(directory);
 

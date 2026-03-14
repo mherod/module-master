@@ -153,7 +153,7 @@ function shouldSkipDirectory(name: string): boolean {
  * Parse a tsconfig file into TsConfigInfo
  */
 function parseTsConfig(tsconfigPath: string): TsConfigInfo | null {
-	const configFile = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+	const configFile = ts.readConfigFile(tsconfigPath, (f) => ts.sys.readFile(f));
 	if (configFile.error) {
 		return null;
 	}

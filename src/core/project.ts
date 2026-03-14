@@ -13,7 +13,7 @@ import {
 export function findTsConfig(startDir: string): string | null {
 	const configPath = ts.findConfigFile(
 		startDir,
-		ts.sys.fileExists,
+		(f) => ts.sys.fileExists(f),
 		"tsconfig.json"
 	);
 	return configPath ?? null;
@@ -65,7 +65,7 @@ export function loadProject(
  * Load project configuration directly from a tsconfig path (no discovery)
  */
 export function loadProjectDirect(tsconfigPath: string): ProjectConfig {
-	const configFile = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+	const configFile = ts.readConfigFile(tsconfigPath, (f) => ts.sys.readFile(f));
 
 	if (configFile.error) {
 		throw new Error(

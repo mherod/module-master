@@ -25,7 +25,7 @@ export interface AnalyzeOptions {
 	project?: string;
 }
 
-export function analyzeCommand(options: AnalyzeOptions): void {
+export async function analyzeCommand(options: AnalyzeOptions): Promise<void> {
 	const { file, verbose, project: projectArg } = options;
 
 	const absolutePath = path.resolve(file);
