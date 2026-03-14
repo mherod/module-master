@@ -120,7 +120,7 @@ function extractReference(
 	// Dynamic import: import('...')
 	if (ts.isCallExpression(node)) {
 		if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
-			return extractDynamicImport(node, sourceFile, project);
+			return resolveCallArgument(node, sourceFile, project, "import-dynamic");
 		}
 
 		// require('...') or require.resolve('...')
@@ -128,7 +128,7 @@ function extractReference(
 			ts.isIdentifier(node.expression) &&
 			node.expression.text === "require"
 		) {
-			return extractRequire(node, sourceFile, project, "require");
+			return resolveCallArgument(node, sourceFile, project, "require");
 		}
 
 		if (
@@ -137,7 +137,7 @@ function extractReference(
 			node.expression.expression.text === "require" &&
 			node.expression.name.text === "resolve"
 		) {
-			return extractRequire(node, sourceFile, project, "require-resolve");
+			return resolveCallArgument(node, sourceFile, project, "require-resolve");
 		}
 
 		// jest.mock('...') or vi.mock('...')
@@ -152,12 +152,47 @@ function extractReference(
 				(obj === "jest" || obj === "vi" || obj === "vitest") &&
 				(prop === "mock" || prop === "doMock" || prop === "unmock")
 			) {
-				return extractRequire(node, sourceFile, project, "jest-mock");
+				return resolveCallArgument(node, sourceFile, project, "jest-mock");
 			}
 		}
 	}
 
 	return null;
+}
+
+/**
+ * Shared helper: resolve a module specifier and compute the source position for
+ * an import/export declaration node. Returns null if the specifier is unresolvable.
+ */
+function resolveDeclarationRef(
+	specifier: string,
+	node: ts.Node,
+	sourceFile: ts.SourceFile,
+	project: ProjectConfig
+): {
+	specifier: string;
+	resolvedPath: string;
+	line: number;
+	column: number;
+} | null {
+	const resolved = resolveModuleSpecifier(
+		specifier,
+		sourceFile.fileName,
+		project
+	);
+	if (resolved.kind !== "resolved") {
+		warnIfUnresolvable(resolved);
+		return null;
+	}
+	const { line, character } = sourceFile.getLineAndCharacterOfPosition(
+		node.getStart(sourceFile)
+	);
+	return {
+		specifier,
+		resolvedPath: resolved.path,
+		line: line + 1,
+		column: character + 1,
+	};
 }
 
 function extractImportDeclaration(
@@ -169,20 +204,17 @@ function extractImportDeclaration(
 		return null;
 	}
 
-	const specifier = node.moduleSpecifier.text;
-	const resolved = resolveModuleSpecifier(
-		specifier,
-		sourceFile.fileName,
+	const base = resolveDeclarationRef(
+		node.moduleSpecifier.text,
+		node,
+		sourceFile,
 		project
 	);
-	if (resolved.kind !== "resolved") {
-		warnIfUnresolvable(resolved);
+	if (!base) {
 		return null;
 	}
 
-	const { line, character } = sourceFile.getLineAndCharacterOfPosition(
-		node.getStart(sourceFile)
-	);
+	const { specifier, resolvedPath, line, column } = base;
 	const isTypeOnly = node.importClause?.isTypeOnly ?? false;
 
 	let type: ReferenceType = "import";
@@ -221,10 +253,10 @@ function extractImportDeclaration(
 	return {
 		sourceFile: sourceFile.fileName,
 		specifier,
-		resolvedPath: resolved.path,
+		resolvedPath,
 		type,
-		line: line + 1,
-		column: character + 1,
+		line,
+		column,
 		bindings: bindings.length > 0 ? bindings : undefined,
 		isTypeOnly,
 	};
@@ -239,20 +271,17 @@ function extractExportDeclaration(
 		return null;
 	}
 
-	const specifier = node.moduleSpecifier.text;
-	const resolved = resolveModuleSpecifier(
-		specifier,
-		sourceFile.fileName,
+	const base = resolveDeclarationRef(
+		node.moduleSpecifier.text,
+		node,
+		sourceFile,
 		project
 	);
-	if (resolved.kind !== "resolved") {
-		warnIfUnresolvable(resolved);
+	if (!base) {
 		return null;
 	}
 
-	const { line, character } = sourceFile.getLineAndCharacterOfPosition(
-		node.getStart(sourceFile)
-	);
+	const { specifier, resolvedPath, line, column } = base;
 	const isTypeOnly = node.isTypeOnly;
 
 	let type: ReferenceType;
@@ -280,60 +309,28 @@ function extractExportDeclaration(
 	return {
 		sourceFile: sourceFile.fileName,
 		specifier,
-		resolvedPath: resolved.path,
+		resolvedPath,
 		type,
-		line: line + 1,
-		column: character + 1,
+		line,
+		column,
 		bindings: bindings.length > 0 ? bindings : undefined,
 		isTypeOnly,
 	};
 }
 
-function extractDynamicImport(
-	node: ts.CallExpression,
-	sourceFile: ts.SourceFile,
-	project: ProjectConfig
-): ModuleReference | null {
-	const arg = node.arguments[0];
-	if (!(arg && ts.isStringLiteral(arg))) {
-		return null; // Dynamic specifier, can't statically analyze
-	}
-
-	const specifier = arg.text;
-	const resolved = resolveModuleSpecifier(
-		specifier,
-		sourceFile.fileName,
-		project
-	);
-	if (resolved.kind !== "resolved") {
-		warnIfUnresolvable(resolved);
-		return null;
-	}
-
-	const { line, character } = sourceFile.getLineAndCharacterOfPosition(
-		node.getStart(sourceFile)
-	);
-
-	return {
-		sourceFile: sourceFile.fileName,
-		specifier,
-		resolvedPath: resolved.path,
-		type: "import-dynamic",
-		line: line + 1,
-		column: character + 1,
-		isTypeOnly: false,
-	};
-}
-
-function extractRequire(
+/**
+ * Shared helper for call-expression references (dynamic import, require, jest.mock).
+ * Extracts the first string-literal argument, resolves it, and builds a ModuleReference.
+ */
+function resolveCallArgument(
 	node: ts.CallExpression,
 	sourceFile: ts.SourceFile,
 	project: ProjectConfig,
-	type: "require" | "require-resolve" | "jest-mock"
+	type: "import-dynamic" | "require" | "require-resolve" | "jest-mock"
 ): ModuleReference | null {
 	const arg = node.arguments[0];
 	if (!(arg && ts.isStringLiteral(arg))) {
-		return null;
+		return null; // Dynamic specifier — cannot statically analyze
 	}
 
 	const specifier = arg.text;
