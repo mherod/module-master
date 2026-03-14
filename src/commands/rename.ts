@@ -15,6 +15,7 @@ import {
 	type TextChange,
 } from "../core/text-changes.ts";
 import { checkAllConflicts } from "../core/verify.ts";
+import { discoverWorkspace } from "../core/workspace.ts";
 import { getRuntime } from "../runtime/index.ts";
 import type {
 	ModuleReference,
@@ -29,6 +30,7 @@ export interface RenameOptions {
 	dryRun?: boolean;
 	verbose?: boolean;
 	project?: string;
+	workspace?: boolean;
 }
 
 export interface RenameResult {
@@ -46,6 +48,7 @@ export async function renameCommand(options: RenameOptions): Promise<void> {
 		dryRun = false,
 		verbose = false,
 		project: projectArg,
+		workspace = false,
 	} = options;
 
 	const absolutePath = path.resolve(file);
@@ -58,6 +61,32 @@ export async function renameCommand(options: RenameOptions): Promise<void> {
 
 	const project = loadProject(tsconfigPath, absolutePath);
 
+	// When workspace mode is enabled, collect cross-package projects
+	const extraProjects: ProjectConfig[] = [];
+	if (workspace) {
+		const wsDir = projectArg
+			? path.resolve(projectArg)
+			: path.dirname(tsconfigPath);
+		const wsInfo = await discoverWorkspace(wsDir);
+		if (wsInfo && wsInfo.packages.length > 0) {
+			for (const pkg of wsInfo.packages) {
+				if (!pkg.tsconfigPath || pkg.tsconfigPath === tsconfigPath) {
+					continue;
+				}
+				try {
+					extraProjects.push(loadProject(pkg.tsconfigPath));
+				} catch {
+					// Skip packages that fail to load
+				}
+			}
+			if (verbose && extraProjects.length > 0) {
+				logger.info(
+					`Workspace: scanning ${extraProjects.length} additional package(s)`
+				);
+			}
+		}
+	}
+
 	logger.info(`\n${dryRun ? "🔍 Dry run:" : "🚀"} Renaming symbol...`);
 	logger.info(`   File: ${absolutePath}`);
 	logger.info(`   ${oldName} → ${newName}\n`);
@@ -68,7 +97,8 @@ export async function renameCommand(options: RenameOptions): Promise<void> {
 		newName,
 		project,
 		dryRun,
-		verbose
+		verbose,
+		extraProjects
 	);
 
 	printResult(result, dryRun, verbose);
@@ -84,7 +114,8 @@ export async function renameSymbol(
 	newName: string,
 	project: ProjectConfig,
 	dryRun: boolean,
-	verbose: boolean
+	verbose: boolean,
+	extraProjects: ProjectConfig[] = []
 ): Promise<RenameResult> {
 	const errors: { file: string; message: string }[] = [];
 	const updatedReferences: UpdatedReference[] = [];
@@ -108,6 +139,17 @@ export async function renameSymbol(
 
 	// Find all files that import from this file
 	const references = findAllReferences(filePath, graph);
+
+	// Also find references from workspace packages
+	for (const extraProject of extraProjects) {
+		try {
+			const extraGraph = buildDependencyGraph(extraProject);
+			const extraRefs = findAllReferences(filePath, extraGraph);
+			references.push(...extraRefs);
+		} catch {
+			// Skip packages that fail to build graph
+		}
+	}
 	if (verbose) {
 		logger.info(`Found ${references.length} references to check`);
 	}

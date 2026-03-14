@@ -47,6 +47,7 @@ export interface MoveOptions {
 	verbose?: boolean;
 	verify?: boolean;
 	project?: string;
+	workspace?: boolean;
 }
 
 export async function moveCommand(options: MoveOptions): Promise<void> {
