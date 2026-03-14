@@ -4,6 +4,7 @@ import {
 	analyzeSimilarity,
 	camelCaseTokenize,
 	collectFunctions,
+	extractContentTokens,
 	findSimilarGroups,
 	jaccardSimilarity,
 	matchesRelatedPath,
@@ -16,6 +17,54 @@ import {
 function makeSourceFile(code: string, fileName = "test.ts"): ts.SourceFile {
 	return ts.createSourceFile(fileName, code, ts.ScriptTarget.Latest, true);
 }
+
+describe("extractContentTokens", () => {
+	test("extracts uppercase identifiers", () => {
+		const tokens = extractContentTokens(
+			"{ return KEBAB_CASE_REGEX.test(name); }"
+		);
+		expect(tokens).toContain("KEBAB_CASE_REGEX");
+	});
+
+	test("extracts string literal values", () => {
+		const tokens = extractContentTokens('{ return arr.includes("md5"); }');
+		expect(tokens).toContain("md5");
+	});
+
+	test("extracts both uppercase identifiers and string literals", () => {
+		const tokens = extractContentTokens(
+			'{ return node.type === AST_NODE_TYPES.CallExpression && node.name === "useState"; }'
+		);
+		expect(tokens).toContain("AST_NODE_TYPES");
+		expect(tokens).toContain("CallExpression");
+		expect(tokens).toContain("useState");
+	});
+
+	test("does not include lowercase identifiers", () => {
+		const tokens = extractContentTokens(
+			"{ const result = source.fetch(url); return result; }"
+		);
+		expect(tokens).not.toContain("result");
+		expect(tokens).not.toContain("source");
+		expect(tokens).not.toContain("fetch");
+	});
+
+	test("returns empty for bodies with no uppercase ids or string literals", () => {
+		const tokens = extractContentTokens(
+			"{ const x = a + b; const y = x * 2; return y; }"
+		);
+		expect(tokens).toHaveLength(0);
+	});
+
+	test("strips comments before extraction", () => {
+		const tokens = extractContentTokens(
+			"{ /* IGNORE_THIS */ return REAL_CONST.test(x); // USE_THIS }"
+		);
+		expect(tokens).toContain("REAL_CONST");
+		// comment contents are stripped, so IGNORE_THIS won't appear
+		expect(tokens).not.toContain("IGNORE_THIS");
+	});
+});
 
 describe("scanWorkspaceFunctions", () => {
 	test("returns empty result for non-workspace directory", async () => {
@@ -294,6 +343,7 @@ describe("findSimilarGroups", () => {
 				bodyLength: body.length,
 				bodyLines: body.split("\n").length,
 				hasDirective: false,
+				contentTokens: extractContentTokens(body),
 			};
 		}
 		return { ...fn, name };
@@ -402,6 +452,7 @@ describe("findSimilarGroups", () => {
 			bodyLength: 100,
 			bodyLines: 5,
 			hasDirective: false,
+			contentTokens: [],
 		};
 		const fnE2: ReturnType<typeof collectFunctions>[number] = {
 			file: "b.ts",
@@ -413,6 +464,7 @@ describe("findSimilarGroups", () => {
 			bodyLength: 100,
 			bodyLines: 5,
 			hasDirective: false,
+			contentTokens: [],
 		};
 
 		// Medium pair: share most tokens but differ on one clause
@@ -430,6 +482,7 @@ describe("findSimilarGroups", () => {
 			bodyLength: 120,
 			bodyLines: 5,
 			hasDirective: false,
+			contentTokens: [],
 		};
 		const fnL2: ReturnType<typeof collectFunctions>[number] = {
 			file: "d.ts",
@@ -441,6 +494,7 @@ describe("findSimilarGroups", () => {
 			bodyLength: 130,
 			bodyLines: 5,
 			hasDirective: false,
+			contentTokens: [],
 		};
 
 		// Verify cross-pair similarity is below threshold 0.7 so groups stay separate
@@ -521,6 +575,86 @@ describe("findSimilarGroups", () => {
 		// isShellTool should not be in the group
 		const names = groups[0]?.functions.map((f) => f.name) ?? [];
 		expect(names).not.toContain("isShellTool");
+	});
+
+	test("downscores structurally identical functions with different constants (false positive reduction)", () => {
+		// Regex-test pattern: same AST skeleton, different external constant references.
+		// isKebabCase and isHookNaming both reduce to `{ return $I.$I($I); }` after
+		// normalization, but they reference completely different regex constants.
+		const sf1 = makeSourceFile(`
+function isKebabCase(name: string): boolean {
+  const matched = KEBAB_CASE_REGEX.test(name);
+  const valid = matched && name.length > 0;
+  return valid;
+}`);
+		const sf2 = makeSourceFile(`
+function isHookNaming(name: string): boolean {
+  const matched = HOOK_NAMING_REGEX.test(name);
+  const valid = matched && name.length > 0;
+  return valid;
+}`);
+		const fn1 = collectFunctions(sf1, "a.ts")[0];
+		const fn2 = collectFunctions(sf2, "b.ts")[0];
+
+		if (!(fn1 && fn2)) {
+			throw new Error("Expected functions to be collected");
+		}
+
+		// Normalized bodies are identical — the old code would score these 1.0
+		expect(fn1.normalizedBody).toBe(fn2.normalizedBody);
+
+		// Content tokens differ (KEBAB_CASE_REGEX vs HOOK_NAMING_REGEX)
+		expect(fn1.contentTokens).toContain("KEBAB_CASE_REGEX");
+		expect(fn2.contentTokens).toContain("HOOK_NAMING_REGEX");
+
+		// At the default threshold (0.8), these should NOT be grouped together
+		const groups = findSimilarGroups([fn1, fn2], 0.8);
+		expect(groups).toHaveLength(0);
+	});
+
+	test("downscores array-includes pattern with different string literal contents (false positive reduction)", () => {
+		// Array-includes pattern: same structure, completely different string values
+		const sf1 = makeSourceFile(`
+function isWeakCryptoFunction(functionName: string): boolean {
+  const weakFunctions = ["md5", "sha1", "des", "rc4", "crc32"];
+  return weakFunctions.includes(functionName.toLowerCase());
+}`);
+		const sf2 = makeSourceFile(`
+function isSqlFunction(functionName: string): boolean {
+  const sqlFunctions = ["query", "execute", "raw", "sql", "exec"];
+  return sqlFunctions.includes(functionName.toLowerCase());
+}`);
+		const fn1 = collectFunctions(sf1, "security.ts")[0];
+		const fn2 = collectFunctions(sf2, "security.ts")[0];
+
+		if (!(fn1 && fn2)) {
+			throw new Error("Expected functions to be collected");
+		}
+
+		expect(fn1.normalizedBody).toBe(fn2.normalizedBody);
+
+		const groups = findSimilarGroups([fn1, fn2], 0.8);
+		expect(groups).toHaveLength(0);
+	});
+
+	test("preserves exact-duplicate grouping when content tokens are identical", () => {
+		// True duplicate: same structure AND same content (string literal "T")
+		const bodyA = `{
+  const date = input.toISOString();
+  const formatted = date.split("T")[0];
+  return formatted;
+}`;
+		const bodyB = `{
+  const ts = value.toISOString();
+  const result = ts.split("T")[0];
+  return result;
+}`;
+		const fnA = makeFunction("formatDate", bodyA, "a.ts");
+		const fnB = makeFunction("formatTimestamp", bodyB, "b.ts");
+
+		const groups = findSimilarGroups([fnA, fnB], 0.8);
+		expect(groups).toHaveLength(1);
+		expect(groups[0]?.bucket).toBe("exact");
 	});
 });
 
@@ -630,6 +764,7 @@ describe("findSimilarGroups onlyRelatedTo", () => {
 				bodyLength: body.length,
 				bodyLines: body.split("\n").length,
 				hasDirective: false,
+				contentTokens: extractContentTokens(body),
 			};
 		}
 		return { ...fn, name: fnName };
@@ -700,6 +835,7 @@ describe("directive detection", () => {
 				bodyLength: body.length,
 				bodyLines: body.split("\n").length,
 				hasDirective: false,
+				contentTokens: extractContentTokens(body),
 			};
 		}
 		return { ...fn, name: fnName };

@@ -71,6 +71,42 @@ const JS_KEYWORDS = new Set([
 ]);
 
 /**
+ * Extract semantic content tokens from a function body: uppercase identifiers
+ * (constants, types, enum members) and string literal values. These carry
+ * domain-specific meaning that normalization strips away.
+ *
+ * Used to detect structural coincidences: two functions with identical
+ * normalized bodies but different content tokens are unlikely to be genuine
+ * duplicates (e.g. `KEBAB_CASE_REGEX.test(s)` vs `HOOK_NAMING_REGEX.test(s)`).
+ */
+export function extractContentTokens(bodyText: string): string[] {
+	// Remove comments
+	let s = bodyText.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+
+	const tokens: string[] = [];
+
+	// Extract string and template literal values (strip surrounding quotes)
+	for (const m of s.matchAll(
+		/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g
+	)) {
+		tokens.push(m[0].slice(1, -1));
+	}
+
+	// Remove literals before extracting identifiers to avoid matching quoted text
+	s = s
+		.replace(/`(?:[^`\\]|\\.)*`/g, " ")
+		.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, " ");
+
+	// Extract identifiers starting with an uppercase letter (constants, types,
+	// enum members — these carry semantic intent unlike local camelCase vars)
+	for (const m of s.matchAll(/\b[A-Z][a-zA-Z0-9_$]*\b/g)) {
+		tokens.push(m[0]);
+	}
+
+	return tokens;
+}
+
+/**
  * Normalize a function body text by replacing identifiers, string literals,
  * and numeric literals with stable placeholders. Structural tokens (keywords,
  * punctuation) are preserved so that the shape of the body is captured.
@@ -210,6 +246,7 @@ export function collectFunctions(
 					bodyLength: bodyText.length,
 					bodyLines: bodyText.split("\n").length,
 					hasDirective: DIRECTIVE_PATTERN.test(bodyText),
+					contentTokens: extractContentTokens(bodyText),
 				});
 			}
 		}
@@ -243,6 +280,7 @@ export function collectFunctions(
 							bodyLength: bodyText.length,
 							bodyLines: bodyText.split("\n").length,
 							hasDirective: DIRECTIVE_PATTERN.test(bodyText),
+							contentTokens: extractContentTokens(bodyText),
 						});
 					}
 				}
@@ -375,8 +413,16 @@ export function findSimilarGroups(
 
 			let score: number;
 			if (fnI.normalizedBody === fnJ.normalizedBody) {
-				// Exact match after normalization — same structure, only name/literal differences
-				score = 1.0;
+				// Exact structural match — blend with content token similarity to detect
+				// semantic false positives. Functions with identical structure but different
+				// uppercase identifiers or string literals (e.g. KEBAB_CASE_REGEX vs
+				// HOOK_NAMING_REGEX, or ["md5",...] vs ["query",...]) score < 1.0 and may
+				// fall below the threshold, filtering structural coincidences.
+				const contentSim = jaccardSimilarity(
+					fnI.contentTokens,
+					fnJ.contentTokens
+				);
+				score = 0.5 + 0.5 * contentSim;
 			} else {
 				// Use bigrams to capture token ordering — plain set Jaccard
 				// gives misleading 1.0 for functions with the same token

@@ -146,6 +146,8 @@ export interface FunctionInfo {
 	bodyLines: number;
 	/** Whether the function body contains a compile-time directive */
 	hasDirective: boolean;
+	/** Semantic content tokens: uppercase identifiers and string literal values from the original body */
+	contentTokens: string[];
 }
 
 export type SimilarityBucket = "exact" | "high" | "medium";
