@@ -69,7 +69,7 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 	}
 	logger.empty();
 
-	const result = await normalizeImports(absoluteTarget, prefer, project);
+	const result = normalizeImports(absoluteTarget, prefer, project);
 
 	if (result.changes.length === 0) {
 		logger.info(
@@ -106,17 +106,18 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 	}
 }
 
-async function normalizeImports(
+function normalizeImports(
 	target: string,
 	prefer: "alias" | "relative" | "shortest",
 	project: ProjectConfig
-): Promise<AliasResult> {
+): AliasResult {
 	const changes: AliasChange[] = [];
 	const skipped: AliasChange[] = [];
 	const filesToProcess = getFilesToProcess(target, project);
+	const program = createProgram(project, filesToProcess);
 
 	for (const file of filesToProcess) {
-		const references = await getFileReferences(file, project);
+		const references = getFileReferences(file, program, project);
 
 		// Build a set of existing specifiers and their bindings in this file
 		const existingSpecifiers = new Map<string, Set<string>>();
@@ -246,11 +247,11 @@ function getFilesToProcess(target: string, project: ProjectConfig): string[] {
 	return [];
 }
 
-async function getFileReferences(
+function getFileReferences(
 	filePath: string,
+	program: ts.Program,
 	project: ProjectConfig
-): Promise<ModuleReference[]> {
-	const program = createProgram(project, [filePath]);
+): ModuleReference[] {
 	const sourceFile = program.getSourceFile(filePath);
 
 	if (!sourceFile) {
