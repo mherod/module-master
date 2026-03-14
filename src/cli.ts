@@ -354,6 +354,7 @@ async function main() {
 			await discoverCommand({
 				directory,
 				verbose: values.verbose,
+				workspace: values.workspace,
 			});
 			break;
 		}

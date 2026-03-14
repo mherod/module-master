@@ -5,15 +5,37 @@ import {
 	type ProjectDiscovery,
 	type TsConfigInfo,
 } from "../core/tsconfig-discovery.ts";
+import { discoverWorkspace } from "../core/workspace.ts";
 
 export interface DiscoverOptions {
 	directory: string;
 	verbose?: boolean;
+	workspace?: boolean;
 }
 
 export async function discoverCommand(options: DiscoverOptions): Promise<void> {
-	const { directory, verbose } = options;
+	const { directory, verbose, workspace = false } = options;
 	const absoluteDir = path.resolve(directory);
+
+	if (workspace) {
+		const wsInfo = await discoverWorkspace(absoluteDir);
+		if (!wsInfo || wsInfo.packages.length === 0) {
+			logger.error("No workspace packages found.");
+			process.exit(1);
+		}
+
+		logger.info(
+			`\n🔍 Discovering tsconfig files across ${wsInfo.packages.length} workspace package(s)\n`
+		);
+
+		for (const pkg of wsInfo.packages) {
+			logger.info(`📦 ${pkg.name} (${path.relative(absoluteDir, pkg.path)})`);
+			const scanDir = pkg.srcDir ? path.join(pkg.path, pkg.srcDir) : pkg.path;
+			const discovery = discoverProject(scanDir);
+			printDiscovery(discovery, absoluteDir, verbose);
+		}
+		return;
+	}
 
 	logger.info(`\n🔍 Discovering tsconfig files in ${absoluteDir}\n`);
 
