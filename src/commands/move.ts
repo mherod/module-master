@@ -276,8 +276,19 @@ export async function moveModule(
 	}
 	const graph = buildDependencyGraph(project);
 
-	// Find all files that reference the source file
-	const references = findAllReferences(sourcePath, graph);
+	// Determine if this is a cross-package move early (needed for ref collection strategy)
+	const crossPackage = workspace
+		? isCrossPackageMove(sourcePath, targetPath, workspace)
+		: false;
+
+	// Find all files that reference the source file.
+	// For cross-package moves: include indirect barrel consumers because the source
+	// barrel's re-export is removed, so consumers need their package imports updated.
+	// For same-package moves: use only direct references so barrel consumers are NOT
+	// rewritten — the barrel's updated re-export keeps consumers working unchanged.
+	const references = crossPackage
+		? findAllReferences(sourcePath, graph)
+		: (graph.importedBy.get(normalizePath(sourcePath)) ?? []);
 	if (verbose) {
 		logger.info(`Found ${references.length} references to update`);
 	}
