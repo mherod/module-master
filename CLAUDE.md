@@ -362,7 +362,25 @@ DON'T: Use inline regex like `/\.[tj]sx?$/` or `": error TS"` strings. Import fr
 
 DON'T: Use `TS_JS_EXTENSION_PATTERN` for extension stripping in new code — it misses `.mts/.cts/.mjs/.cjs`. Use `TS_JS_EXTENSIONS` or `removeExtension()` instead.
 
-## Biome Linter Behavior
+## Biome Configuration
+
+### Excluding Directories
+
+To exclude a directory from Biome scanning (e.g., `.swiz/`, `dist/`), use `files.includes` with a double-bang force-exclude pattern in `biome.json`:
+
+```json
+{
+  "files": {
+    "includes": ["!!**/.swiz"]
+  }
+}
+```
+
+DON'T: Use `files.ignore` — it doesn't exist in Biome and causes a parse error.
+DON'T: Use `files.experimentalScannerIgnores` — it's deprecated; Biome will warn and suggest `files.includes` instead.
+DON'T: Use `files.includes: ["**", "!!**/.swiz"]` — Biome's formatter removes `"**"` since the base includes are inherited from `extends`. Just the `!!` entry is sufficient.
+
+### Linter Behavior
 
 Biome runs as a PostToolUse hook after every file edit and auto-removes unused imports. This has one important implication when adding new imports:
 
@@ -385,6 +403,14 @@ const alias = findAliasForPath(toFile, project);
 ```
 
 DON'T: Add an import in one Edit and its usage in a subsequent Edit. Biome will strip the import before the usage lands.
+
+## npm Publish — pnpm v10 and .npmignore
+
+When `package.json` has a `files` field, pnpm v10 includes those paths as a whitelist and does **not** apply `.npmignore` exclusions within them during `pnpm publish` or `pnpm pack --dry-run`. Test files and other patterns in `.npmignore` will still appear in the tarball listing.
+
+This is cosmetic (source test files contain no secrets), but if exclusion is required, remove test patterns from the `files` whitelist at the `package.json` level instead of relying on `.npmignore`.
+
+DON'T: Expect `.npmignore` glob patterns like `**/*.test.ts` to filter files that are explicitly whitelisted via the `files` field when using pnpm v10.
 
 ## Async Function Guidelines
 
