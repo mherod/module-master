@@ -29,6 +29,7 @@ const { values, positionals } = parseArgs({
 		strict: { type: "boolean" },
 		"name-threshold": { type: "string" },
 		"same-name-only": { type: "boolean" },
+		group: { type: "string" },
 		workspace: { type: "boolean" },
 	},
 	allowPositionals: true,
@@ -52,6 +53,7 @@ Commands:
   move <source> <target>              Move a module and update all references
   rename <file> <oldName> <newName>   Rename an export and update all imports
   similar <directory>                 Find similar or duplicate functions for consolidation
+  extract-common <directory>           Extract duplicate functions into shared modules
 
 Options:
   -h, --help        Show this help message
@@ -285,6 +287,29 @@ Examples:
   ${name} similar src --same-name-only      # only identical names
 `);
 			break;
+		case "extract-common":
+			logger.info(`
+Usage: ${name} extract-common <directory> [options]
+
+Extract duplicate functions found by 'similar' into shared modules.
+Keeps one canonical copy and replaces all others with imports.
+
+Arguments:
+  directory    Path to the project directory to scan
+
+Options:
+  --threshold       Minimum similarity score 0.0–1.0 (default: 0.95)
+  --group           Target a specific group number (from 'similar' output)
+  -n, --dry-run     Preview changes without modifying files
+  --workspace       Scan across all workspace packages
+  -p, --project     Path to project directory or tsconfig.json
+
+Examples:
+  ${name} extract-common src --dry-run
+  ${name} extract-common . --threshold=1.0
+  ${name} extract-common src --group=1
+`);
+			break;
 		default:
 			showHelp();
 	}
@@ -494,6 +519,36 @@ async function main() {
 				workspace: values.workspace,
 				nameThreshold,
 				sameNameOnly: values["same-name-only"],
+			});
+			break;
+		}
+
+		case "extract-common": {
+			const [directory] = args;
+			if (!directory) {
+				logger.error("Error: extract-common requires a <directory> argument");
+				logger.error(`Run '${name} extract-common --help' for usage`);
+				process.exit(1);
+			}
+			const rawThreshold = values.threshold;
+			const threshold =
+				rawThreshold === undefined ? 0.95 : Number(rawThreshold);
+			if (Number.isNaN(threshold) || threshold < 0 || threshold > 1) {
+				logger.error("Error: --threshold must be a number between 0.0 and 1.0");
+				process.exit(1);
+			}
+			const rawGroup = values.group;
+			const group = rawGroup === undefined ? undefined : Number(rawGroup);
+			const { extractCommonCommand } = await import(
+				"./commands/extract-common.ts"
+			);
+			await extractCommonCommand({
+				directory,
+				project: values.project,
+				threshold,
+				dryRun: values["dry-run"],
+				group,
+				workspace: values.workspace,
 			});
 			break;
 		}

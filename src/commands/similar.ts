@@ -130,4 +130,15 @@ function printReport(
 			`… ${totalGroups - maxGroups} more group(s) not shown. Use --max-groups=0 to show all.\n`
 		);
 	}
+
+	// Suggest extract-common commands
+	const dir = path.relative(process.cwd(), baseDir) || ".";
+	logger.info("💡 To extract duplicates, run:");
+	logger.info(`   resect extract-common ${dir} --dry-run`);
+	if (totalGroups > 1) {
+		logger.info(
+			`   resect extract-common ${dir} --group=1 --dry-run  # target a specific group`
+		);
+	}
+	logger.empty();
 }
