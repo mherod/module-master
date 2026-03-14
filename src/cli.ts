@@ -29,6 +29,7 @@ const { values, positionals } = parseArgs({
 		strict: { type: "boolean" },
 		"name-threshold": { type: "string" },
 		"same-name-only": { type: "boolean" },
+		"skip-same-file": { type: "boolean" },
 		group: { type: "string" },
 		output: { type: "string", short: "o" },
 		workspace: { type: "boolean" },
@@ -71,6 +72,7 @@ Options:
   --strict          Exit with error if similar functions are found (for CI/hooks)
   --name-threshold  Name similarity threshold for similar command (0.0–1.0)
   --same-name-only  Only group functions with identical names (similar command)
+  --skip-same-file  Skip groups where all functions are in the same file
   --workspace       Scan across all workspace packages (similar command)
 
 Examples:
@@ -264,6 +266,7 @@ Options:
   --strict          Exit with error code 1 if similar functions are found (for CI/hooks)
   --name-threshold  Only group functions whose names also meet this similarity (0.0–1.0)
   --same-name-only  Only group functions with identical names
+  --skip-same-file  Skip groups where all functions are in the same file
   --workspace       Scan across all workspace packages
   -p, --project     Path to project directory or tsconfig.json
 
@@ -303,6 +306,7 @@ Options:
   --group           Target a specific group number (from 'similar' output)
   -o, --output      Write extracted functions to this file (consolidate into one location)
   -n, --dry-run     Preview changes without modifying files
+  --skip-same-file  Skip groups where all functions are in the same file
   --workspace       Scan across all workspace packages
   -p, --project     Path to project directory or tsconfig.json
 
@@ -314,6 +318,7 @@ Examples:
   ${name} extract-common . --threshold=1.0
   ${name} extract-common src --group=1
   ${name} extract-common src --output=src/shared/utils.ts
+  ${name} extract-common src --skip-same-file
 `);
 			break;
 		default:
@@ -525,6 +530,7 @@ async function main() {
 				workspace: values.workspace,
 				nameThreshold,
 				sameNameOnly: values["same-name-only"],
+				skipSameFile: values["skip-same-file"],
 			});
 			break;
 		}
@@ -556,6 +562,7 @@ async function main() {
 				group,
 				workspace: values.workspace,
 				output: values.output,
+				skipSameFile: values["skip-same-file"],
 			});
 			break;
 		}

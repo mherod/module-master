@@ -15,6 +15,7 @@ export interface ExtractCommonOptions {
 	workspace?: boolean;
 	nameThreshold?: number;
 	sameNameOnly?: boolean;
+	skipSameFile?: boolean;
 	/** Write the canonical function to this file instead of keeping it in place */
 	output?: string;
 }
@@ -396,6 +397,7 @@ export async function extractCommonCommand(
 		workspace = false,
 		nameThreshold,
 		sameNameOnly,
+		skipSameFile,
 		output,
 	} = options;
 	const absoluteDir = path.resolve(directory);
@@ -412,6 +414,7 @@ export async function extractCommonCommand(
 		workspace,
 		nameThreshold,
 		sameNameOnly,
+		skipSameFile,
 	});
 
 	if (report.groups.length === 0) {

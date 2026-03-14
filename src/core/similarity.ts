@@ -256,6 +256,8 @@ export interface SimilarityFilterOptions {
 	threshold?: number;
 	nameThreshold?: number;
 	sameNameOnly?: boolean;
+	/** Discard groups where every function lives in the same file */
+	skipSameFile?: boolean;
 }
 
 export function findSimilarGroups(
@@ -357,6 +359,15 @@ export function findSimilarGroups(
 
 	// Sort by score descending (best matches first)
 	groups.sort((a, b) => b.score - a.score);
+
+	// Filter out same-file groups when requested
+	if (opts.skipSameFile) {
+		return groups.filter((g) => {
+			const files = new Set(g.functions.map((f) => f.file));
+			return files.size > 1;
+		});
+	}
+
 	return groups;
 }
 
@@ -495,6 +506,7 @@ export interface AnalyzeSimilarityOptions {
 	workspace?: boolean;
 	nameThreshold?: number;
 	sameNameOnly?: boolean;
+	skipSameFile?: boolean;
 }
 
 export async function analyzeSimilarity(
@@ -515,6 +527,7 @@ export async function analyzeSimilarity(
 		threshold: th,
 		nameThreshold: opts.nameThreshold,
 		sameNameOnly: opts.sameNameOnly,
+		skipSameFile: opts.skipSameFile,
 	};
 
 	if (ws) {

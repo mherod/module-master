@@ -13,6 +13,7 @@ export interface SimilarOptions {
 	workspace?: boolean;
 	nameThreshold?: number;
 	sameNameOnly?: boolean;
+	skipSameFile?: boolean;
 }
 
 export async function similarCommand(options: SimilarOptions): Promise<void> {
@@ -26,6 +27,7 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 		workspace = false,
 		nameThreshold,
 		sameNameOnly = false,
+		skipSameFile = false,
 	} = options;
 	const absoluteDir = path.resolve(directory);
 
@@ -41,6 +43,7 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 		workspace,
 		nameThreshold,
 		sameNameOnly,
+		skipSameFile,
 	});
 
 	if (json) {
