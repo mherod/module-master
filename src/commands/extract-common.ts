@@ -1,11 +1,35 @@
 import path from "node:path";
 import ts from "typescript";
 import { logger } from "../cli-logger.ts";
-import { calculateRelativeSpecifier } from "../core/resolver.ts";
+import {
+	calculateRelativeSpecifier,
+	findCrossPackageImport,
+	isCrossPackageMove,
+} from "../core/resolver.ts";
 import { parseSourceFile } from "../core/scanner.ts";
 import { analyzeSimilarity } from "../core/similarity.ts";
 import { applyTextChanges, type TextChange } from "../core/text-changes.ts";
+import type { WorkspaceInfo } from "../core/workspace.ts";
 import type { FunctionInfo, SimilarityGroup } from "../types.ts";
+
+/**
+ * Compute the import specifier for a file importing from importTarget.
+ * When workspace info is available and the files are in different packages,
+ * uses the package name instead of a relative path.
+ */
+function computeSpecifier(
+	filePath: string,
+	importTarget: string,
+	ws?: WorkspaceInfo
+): string {
+	if (ws && isCrossPackageMove(filePath, importTarget, ws)) {
+		const pkgImport = findCrossPackageImport(importTarget, ws);
+		if (pkgImport) {
+			return pkgImport;
+		}
+	}
+	return calculateRelativeSpecifier(filePath, importTarget);
+}
 
 export interface ExtractCommonOptions {
 	directory: string;
@@ -200,7 +224,8 @@ function ensureExported(node: FunctionNode): TextChange | null {
  */
 async function replaceNodesWithImports(
 	nodes: FunctionNode[],
-	importTarget: string
+	importTarget: string,
+	ws?: WorkspaceInfo
 ): Promise<string[]> {
 	const filesModified: string[] = [];
 	const byFile = new Map<string, FunctionNode[]>();
@@ -217,7 +242,7 @@ async function replaceNodesWithImports(
 
 		for (const node of fileNodes) {
 			changes.push({ start: node.start, end: node.end, newText: "" });
-			const specifier = calculateRelativeSpecifier(filePath, importTarget);
+			const specifier = computeSpecifier(filePath, importTarget, ws);
 			const stmt = node.exported
 				? `export { ${node.info.name} } from "${specifier}";`
 				: `import { ${node.info.name} } from "${specifier}";`;
@@ -247,7 +272,10 @@ async function replaceNodesWithImports(
 /**
  * Apply an extraction plan to the filesystem.
  */
-async function applyPlan(plan: ExtractionPlan): Promise<{
+async function applyPlan(
+	plan: ExtractionPlan,
+	ws?: WorkspaceInfo
+): Promise<{
 	filesModified: string[];
 	functionsRemoved: number;
 }> {
@@ -265,7 +293,8 @@ async function applyPlan(plan: ExtractionPlan): Promise<{
 	// Step 2: Replace duplicates with imports from the canonical file
 	const modified = await replaceNodesWithImports(
 		plan.duplicates,
-		plan.canonical.info.file
+		plan.canonical.info.file,
+		ws
 	);
 	filesModified.push(...modified);
 
@@ -282,7 +311,8 @@ async function applyPlan(plan: ExtractionPlan): Promise<{
  */
 async function applyPlanToOutput(
 	plan: ExtractionPlan,
-	outputFile: string
+	outputFile: string,
+	ws?: WorkspaceInfo
 ): Promise<{ filesModified: string[]; functionsRemoved: number }> {
 	const filesModified: string[] = [];
 	const absOutput = path.resolve(outputFile);
@@ -306,7 +336,7 @@ async function applyPlanToOutput(
 
 	// Step 3: Remove function from ALL files and replace with imports
 	const allNodes = [plan.canonical, ...plan.duplicates];
-	const modified = await replaceNodesWithImports(allNodes, absOutput);
+	const modified = await replaceNodesWithImports(allNodes, absOutput, ws);
 	filesModified.push(...modified);
 
 	return {
@@ -360,6 +390,10 @@ export async function extractCommonCommand(
 	logger.info(
 		`\n${dryRun ? "🔍 Dry run:" : "🔧"} Extracting common functions ${scope} ${absoluteDir}\n`
 	);
+
+	// Step 0: Discover workspace if --workspace is enabled
+	const { discoverWorkspace } = await import("../core/workspace.ts");
+	const ws = workspace ? await discoverWorkspace(absoluteDir) : undefined;
 
 	// Step 1: Find similar groups
 	const report = await analyzeSimilarity({
@@ -448,11 +482,11 @@ export async function extractCommonCommand(
 				? plan.duplicates.length + 1
 				: plan.duplicates.length;
 		} else if (absOutput) {
-			const result = await applyPlanToOutput(plan, absOutput);
+			const result = await applyPlanToOutput(plan, absOutput, ws ?? undefined);
 			totalRemoved += result.functionsRemoved;
 			allModified.push(...result.filesModified);
 		} else {
-			const result = await applyPlan(plan);
+			const result = await applyPlan(plan, ws ?? undefined);
 			totalRemoved += result.functionsRemoved;
 			allModified.push(...result.filesModified);
 		}
