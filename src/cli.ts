@@ -79,7 +79,7 @@ Options:
   --only-related-to Only show groups related to a file or folder path/glob
   --min-lines       Exclude functions with fewer body lines (filters thin wrappers)
   --skip-directives Skip functions with compile-time directives (use server, etc.)
-  --workspace       Scan across all workspace packages (similar command)
+  --workspace       Scan across all workspace packages (discover, similar, and other commands)
 
 Examples:
   ${name} find Entity -p /path/to/project
@@ -184,7 +184,8 @@ Arguments:
   directory    Path to the project directory to scan
 
 Options:
-  --verbose    Show detailed file ownership and path aliases
+  --verbose      Show detailed file ownership and path aliases
+  --workspace    Scan across all workspace packages
 
 Output includes:
   • All tsconfig.json files found
@@ -195,6 +196,7 @@ Output includes:
 Examples:
   ${name} discover .
   ${name} discover /path/to/project --verbose
+  ${name} discover . --workspace
 `);
 			break;
 		case "find":
