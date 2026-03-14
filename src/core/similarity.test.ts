@@ -554,6 +554,49 @@ describe("findSimilarGroups", () => {
 		]);
 	});
 
+	test("sameNameOnly produces no groups when all names differ (issue #23)", () => {
+		// Reproduction case from issue #23: structurally identical functions
+		// with different names should never be grouped with --same-name-only.
+		const body = `{
+  const normalized = filePath.toLowerCase().trim();
+  const result = isExcludedSourcePath(normalized, TEST_FILE_RE, INFRA_FILE_RE);
+  return result;
+}`;
+		const fn1 = makeFunction("getHookContext", body, "hooks/a.ts");
+		const fn2 = makeFunction("runHook", body, "hooks/b.ts");
+		const fn3 = makeFunction("main", body, "hooks/c.ts");
+
+		const groups = findSimilarGroups([fn1, fn2, fn3], {
+			threshold: 0.5,
+			sameNameOnly: true,
+		});
+		expect(groups).toHaveLength(0);
+	});
+
+	test("sameNameOnly groups same-named functions across multiple files (issue #23)", () => {
+		// When some functions share a name and others don't, only the
+		// same-named functions should be grouped.
+		const body = `{
+  const normalized = filePath.toLowerCase().trim();
+  const result = isExcludedSourcePath(normalized, TEST_FILE_RE, INFRA_FILE_RE);
+  return result;
+}`;
+		const fn1 = makeFunction("checkFile", body, "hooks/a.ts");
+		const fn2 = makeFunction("runHook", body, "hooks/b.ts");
+		const fn3 = makeFunction("checkFile", body, "hooks/c.ts");
+		const fn4 = makeFunction("main", body, "hooks/d.ts");
+
+		const groups = findSimilarGroups([fn1, fn2, fn3, fn4], {
+			threshold: 0.5,
+			sameNameOnly: true,
+		});
+		expect(groups).toHaveLength(1);
+		expect(groups[0]?.functions).toHaveLength(2);
+		expect(groups[0]?.functions.every((f) => f.name === "checkFile")).toBe(
+			true
+		);
+	});
+
 	test("nameThreshold filters out functions with dissimilar names", () => {
 		const body = `{
   const result = source.fetch(url);

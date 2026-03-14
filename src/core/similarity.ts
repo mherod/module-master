@@ -389,6 +389,19 @@ export function findSimilarGroups(
 				continue;
 			}
 
+			// Apply name filtering early — skip before expensive score
+			// computation so that differently-named functions are never
+			// candidates for grouping when sameNameOnly is active.
+			if (sameNameOnly && fnI.name !== fnJ.name) {
+				continue;
+			}
+			if (
+				nameThresholdValue !== undefined &&
+				nameSimilarity(fnI.name, fnJ.name) < nameThresholdValue
+			) {
+				continue;
+			}
+
 			// Skip if original body sizes are very different — avoids false
 			// positives where normalization collapses large and small functions
 			// to the same token set (e.g. a 40-line template vs a 1-liner).
@@ -431,17 +444,6 @@ export function findSimilarGroups(
 			}
 
 			if (score >= threshold) {
-				// Apply name filtering when enabled
-				if (sameNameOnly && fnI.name !== fnJ.name) {
-					continue;
-				}
-				if (
-					nameThresholdValue !== undefined &&
-					nameSimilarity(fnI.name, fnJ.name) < nameThresholdValue
-				) {
-					continue;
-				}
-
 				group.push(fnJ);
 				assigned.add(j);
 				minScore = Math.min(minScore, score);
