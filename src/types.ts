@@ -142,6 +142,8 @@ export interface FunctionInfo {
 	tokenCount: number;
 	/** Length of the original (pre-normalization) body text */
 	bodyLength: number;
+	/** Number of lines in the original function body */
+	bodyLines: number;
 }
 
 export type SimilarityBucket = "exact" | "high" | "medium";

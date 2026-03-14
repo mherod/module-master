@@ -204,6 +204,7 @@ export function collectFunctions(
 					normalizedBody: normalized,
 					tokenCount: tokens.length,
 					bodyLength: bodyText.length,
+					bodyLines: bodyText.split("\n").length,
 				});
 			}
 		}
@@ -235,6 +236,7 @@ export function collectFunctions(
 							normalizedBody: normalized,
 							tokenCount: tokens.length,
 							bodyLength: bodyText.length,
+							bodyLines: bodyText.split("\n").length,
 						});
 					}
 				}
@@ -288,6 +290,8 @@ export interface SimilarityFilterOptions {
 	skipSameFile?: boolean;
 	/** Only include groups containing at least one function from a matching path */
 	onlyRelatedTo?: string;
+	/** Exclude functions with fewer body lines than this threshold */
+	minLines?: number;
 }
 
 export function findSimilarGroups(
@@ -301,15 +305,22 @@ export function findSimilarGroups(
 	const threshold = opts.threshold ?? 0.8;
 	const nameThresholdValue = opts.nameThreshold;
 	const sameNameOnly = opts.sameNameOnly ?? false;
+
+	// Pre-filter: exclude functions below minimum line count
+	const candidates =
+		opts.minLines === undefined
+			? functions
+			: functions.filter((f) => f.bodyLines >= (opts.minLines as number));
+
 	const groups: SimilarityGroup[] = [];
 	const assigned = new Set<number>();
 
-	for (let i = 0; i < functions.length; i++) {
+	for (let i = 0; i < candidates.length; i++) {
 		if (assigned.has(i)) {
 			continue;
 		}
 
-		const fnI = functions[i];
+		const fnI = candidates[i];
 		if (!fnI) {
 			continue;
 		}
@@ -317,12 +328,12 @@ export function findSimilarGroups(
 		const group: FunctionInfo[] = [fnI];
 		let minScore = 1.0;
 
-		for (let j = i + 1; j < functions.length; j++) {
+		for (let j = i + 1; j < candidates.length; j++) {
 			if (assigned.has(j)) {
 				continue;
 			}
 
-			const fnJ = functions[j];
+			const fnJ = candidates[j];
 			if (!fnJ) {
 				continue;
 			}
@@ -548,6 +559,7 @@ export interface AnalyzeSimilarityOptions {
 	sameNameOnly?: boolean;
 	skipSameFile?: boolean;
 	onlyRelatedTo?: string;
+	minLines?: number;
 }
 
 export async function analyzeSimilarity(
@@ -570,6 +582,7 @@ export async function analyzeSimilarity(
 		sameNameOnly: opts.sameNameOnly,
 		skipSameFile: opts.skipSameFile,
 		onlyRelatedTo: opts.onlyRelatedTo,
+		minLines: opts.minLines,
 	};
 
 	if (ws) {

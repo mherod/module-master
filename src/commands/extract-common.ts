@@ -17,6 +17,7 @@ export interface ExtractCommonOptions {
 	sameNameOnly?: boolean;
 	skipSameFile?: boolean;
 	onlyRelatedTo?: string;
+	minLines?: number;
 	/** Write the canonical function to this file instead of keeping it in place */
 	output?: string;
 }
@@ -73,6 +74,7 @@ function findFunctionNode(
 						normalizedBody: "",
 						tokenCount: 0,
 						bodyLength: 0,
+						bodyLines: 0,
 					},
 					start: fullStart,
 					end,
@@ -108,6 +110,7 @@ function findFunctionNode(
 							normalizedBody: "",
 							tokenCount: 0,
 							bodyLength: 0,
+							bodyLines: 0,
 						},
 						start: fullStart,
 						end: actualEnd,
@@ -400,6 +403,7 @@ export async function extractCommonCommand(
 		sameNameOnly,
 		skipSameFile,
 		onlyRelatedTo,
+		minLines,
 		output,
 	} = options;
 	const absoluteDir = path.resolve(directory);
@@ -418,6 +422,7 @@ export async function extractCommonCommand(
 		sameNameOnly,
 		skipSameFile,
 		onlyRelatedTo,
+		minLines,
 	});
 
 	if (report.groups.length === 0) {

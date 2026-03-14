@@ -31,6 +31,7 @@ const { values, positionals } = parseArgs({
 		"same-name-only": { type: "boolean" },
 		"skip-same-file": { type: "boolean" },
 		"only-related-to": { type: "string" },
+		"min-lines": { type: "string" },
 		group: { type: "string" },
 		output: { type: "string", short: "o" },
 		workspace: { type: "boolean" },
@@ -75,6 +76,7 @@ Options:
   --same-name-only  Only group functions with identical names (similar command)
   --skip-same-file  Skip groups where all functions are in the same file
   --only-related-to Only show groups related to a file or folder path/glob
+  --min-lines       Exclude functions with fewer body lines (filters thin wrappers)
   --workspace       Scan across all workspace packages (similar command)
 
 Examples:
@@ -270,6 +272,7 @@ Options:
   --same-name-only  Only group functions with identical names
   --skip-same-file  Skip groups where all functions are in the same file
   --only-related-to Only show groups related to a file or folder (path or glob)
+  --min-lines       Exclude functions with fewer body lines (filters thin wrappers)
   --workspace       Scan across all workspace packages
   -p, --project     Path to project directory or tsconfig.json
 
@@ -312,6 +315,7 @@ Options:
   -n, --dry-run     Preview changes without modifying files
   --skip-same-file  Skip groups where all functions are in the same file
   --only-related-to Only process groups related to a file or folder (path or glob)
+  --min-lines       Exclude functions with fewer body lines (filters thin wrappers)
   --workspace       Scan across all workspace packages
   -p, --project     Path to project directory or tsconfig.json
 
@@ -540,6 +544,7 @@ async function main() {
 				sameNameOnly: values["same-name-only"],
 				skipSameFile: values["skip-same-file"],
 				onlyRelatedTo: values["only-related-to"],
+				minLines: values["min-lines"] ? Number(values["min-lines"]) : undefined,
 			});
 			break;
 		}
@@ -573,6 +578,7 @@ async function main() {
 				output: values.output,
 				skipSameFile: values["skip-same-file"],
 				onlyRelatedTo: values["only-related-to"],
+				minLines: values["min-lines"] ? Number(values["min-lines"]) : undefined,
 			});
 			break;
 		}
