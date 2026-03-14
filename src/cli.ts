@@ -110,6 +110,7 @@ Arguments:
 Options:
   -n, --dry-run   Preview changes without modifying files
   --verbose       Show detailed information about each change
+  --workspace     Scan across all workspace packages
 
 Features:
   • Updates all import statements referencing the moved file
@@ -137,6 +138,7 @@ Arguments:
 Options:
   -n, --dry-run   Preview changes without modifying files
   --verbose       Show detailed information about each change
+  --workspace     Scan across all workspace packages
 
 Features:
   • Renames the export in the source file
@@ -161,7 +163,8 @@ Arguments:
   file    Path to the file to analyze
 
 Options:
-  --verbose    Show detailed reference information
+  --verbose       Show detailed reference information
+  --workspace     Scan across all workspace packages
 
 Output includes:
   • All exports from the file
@@ -212,6 +215,7 @@ Options:
   -p, --project   Path to project directory (required)
   -t, --type      Filter: file, export, or all (default: all)
   --verbose       Show helpful tips for next steps
+  --workspace     Scan across all workspace packages
 
 Output includes:
   • Files matching the query by filename
@@ -239,6 +243,7 @@ Options:
   -n, --dry-run   Preview changes without modifying files
   --no-verify     Disable type checking verification (enabled by default)
   --verbose       Show detailed changes
+  --workspace     Scan across all workspace packages
 
 Strategies:
   alias      Convert to tsconfig path aliases where possible
