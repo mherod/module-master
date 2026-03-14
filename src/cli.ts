@@ -319,16 +319,18 @@ Arguments:
   directory    Path to the project directory to scan
 
 Options:
-  --threshold       Minimum similarity score 0.0–1.0 (default: 0.95)
-  --group           Target a specific group number (from 'similar' output)
-  -o, --output      Write extracted functions to this file (consolidate into one location)
-  -n, --dry-run     Preview changes without modifying files
-  --skip-same-file  Skip groups where all functions are in the same file
-  --only-related-to Only process groups related to a file or folder (path or glob)
-  --min-lines       Exclude functions with fewer body lines (filters thin wrappers)
-  --skip-directives Skip functions containing compile-time directives
-  --workspace       Scan across all workspace packages
-  -p, --project     Path to project directory or tsconfig.json
+  --threshold        Minimum similarity score 0.0–1.0 (default: 0.95)
+  --group            Target a specific group number (from 'similar' output)
+  -o, --output       Write extracted functions to this file (consolidate into one location)
+  -n, --dry-run      Preview changes without modifying files
+  --skip-same-file   Skip groups where all functions are in the same file
+  --only-related-to  Only process groups related to a file or folder (path or glob)
+  --min-lines        Exclude functions with fewer body lines (filters thin wrappers)
+  --skip-directives  Skip functions containing compile-time directives
+  --name-threshold   Name similarity threshold 0.0–1.0 for filtering groups by function name
+  --same-name-only   Only group functions with identical names
+  --workspace        Scan across all workspace packages
+  -p, --project      Path to project directory or tsconfig.json
 
 Without --output, keeps one canonical copy in place and removes others.
 With --output, writes the function to the specified file and removes from all sources.
@@ -592,6 +594,10 @@ async function main() {
 				onlyRelatedTo: values["only-related-to"],
 				minLines: values["min-lines"] ? Number(values["min-lines"]) : undefined,
 				skipDirectives: values["skip-directives"],
+				nameThreshold: values["name-threshold"]
+					? Number(values["name-threshold"])
+					: undefined,
+				sameNameOnly: values["same-name-only"],
 			});
 			break;
 		}
