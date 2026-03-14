@@ -8,6 +8,7 @@ export interface SimilarOptions {
 	project?: string;
 	json?: boolean;
 	threshold?: number;
+	maxGroups?: number;
 	workspace?: boolean;
 }
 
@@ -16,7 +17,8 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 		directory,
 		project,
 		json,
-		threshold = 0.7,
+		threshold = 0.8,
+		maxGroups = 10,
 		workspace = false,
 	} = options;
 	const absoluteDir = path.resolve(directory);
@@ -38,7 +40,7 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 		return;
 	}
 
-	printReport(report, absoluteDir);
+	printReport(report, absoluteDir, maxGroups);
 }
 
 function bucketLabel(group: SimilarityGroup): string {
@@ -67,7 +69,11 @@ function bucketIcon(group: SimilarityGroup): string {
 	}
 }
 
-function printReport(report: SimilarityReport, baseDir: string): void {
+function printReport(
+	report: SimilarityReport,
+	baseDir: string,
+	maxGroups: number
+): void {
 	logger.info(
 		`📊 Scanned ${report.totalFunctions} function(s) across ${report.totalFiles} file(s)\n`
 	);
@@ -78,12 +84,14 @@ function printReport(report: SimilarityReport, baseDir: string): void {
 		return;
 	}
 
-	logger.info(
-		`Found ${report.groups.length} candidate group(s) for consolidation:\n`
-	);
+	const totalGroups = report.groups.length;
+	const groups =
+		maxGroups > 0 ? report.groups.slice(0, maxGroups) : report.groups;
 
-	for (let i = 0; i < report.groups.length; i++) {
-		const group = report.groups[i];
+	logger.info(`Found ${totalGroups} candidate group(s) for consolidation:\n`);
+
+	for (let i = 0; i < groups.length; i++) {
+		const group = groups[i];
 		if (!group) {
 			continue;
 		}
@@ -98,5 +106,11 @@ function printReport(report: SimilarityReport, baseDir: string): void {
 		}
 
 		logger.empty();
+	}
+
+	if (maxGroups > 0 && totalGroups > maxGroups) {
+		logger.info(
+			`… ${totalGroups - maxGroups} more group(s) not shown. Use --max-groups=0 to show all.\n`
+		);
 	}
 }

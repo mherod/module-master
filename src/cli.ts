@@ -25,6 +25,7 @@ const { values, positionals } = parseArgs({
 		"no-verify": { type: "boolean" },
 		json: { type: "boolean" },
 		threshold: { type: "string" },
+		"max-groups": { type: "string" },
 		workspace: { type: "boolean" },
 	},
 	allowPositionals: true,
@@ -59,7 +60,8 @@ Options:
   --no-verify       Disable type checking verification (enabled by default)
   --verbose         Enable verbose output
   --json            Output results as JSON
-  --threshold       Similarity threshold for similar command (0.0–1.0, default 0.7)
+  --threshold       Similarity threshold for similar command (0.0–1.0, default 0.8)
+  --max-groups      Maximum number of groups to display (default: 10)
   --workspace       Scan across all workspace packages (similar command)
 
 Examples:
@@ -248,20 +250,22 @@ Arguments:
 
 Options:
   --json            Output results as JSON
-  --threshold       Minimum similarity score 0.0–1.0 (default: 0.7)
+  --threshold       Minimum similarity score 0.0–1.0 (default: 0.8)
+  --max-groups      Maximum number of groups to display (default: 10, 0 for unlimited)
   --workspace       Scan across all workspace packages
   -p, --project     Path to project directory or tsconfig.json
 
 Similarity buckets:
   exact   Identical after normalization (renamed identifiers or literal differences)
   high    ≥85% token overlap
-  medium  ≥70% token overlap
+  medium  ≥80% token overlap
 
 Examples:
   ${name} similar src
   ${name} similar . --threshold=0.85
   ${name} similar src --json
   ${name} similar . --workspace
+  ${name} similar src --max-groups=20
 `);
 			break;
 		default:
@@ -440,9 +444,15 @@ async function main() {
 				process.exit(1);
 			}
 			const rawThreshold = values.threshold;
-			const threshold = rawThreshold === undefined ? 0.7 : Number(rawThreshold);
+			const threshold = rawThreshold === undefined ? 0.8 : Number(rawThreshold);
 			if (Number.isNaN(threshold) || threshold < 0 || threshold > 1) {
 				logger.error("Error: --threshold must be a number between 0.0 and 1.0");
+				process.exit(1);
+			}
+			const rawMaxGroups = values["max-groups"];
+			const maxGroups = rawMaxGroups === undefined ? 10 : Number(rawMaxGroups);
+			if (Number.isNaN(maxGroups) || maxGroups < 0) {
+				logger.error("Error: --max-groups must be a non-negative integer");
 				process.exit(1);
 			}
 			await similarCommand({
@@ -450,6 +460,7 @@ async function main() {
 				project: values.project,
 				json: values.json,
 				threshold,
+				maxGroups,
 				workspace: values.workspace,
 			});
 			break;

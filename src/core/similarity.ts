@@ -211,7 +211,7 @@ export function collectFunctions(
  */
 export function findSimilarGroups(
 	functions: FunctionInfo[],
-	threshold = 0.7
+	threshold = 0.8
 ): SimilarityGroup[] {
 	const groups: SimilarityGroup[] = [];
 	const assigned = new Set<number>();
@@ -393,13 +393,13 @@ export async function scanWorkspaceFunctions(directory: string): Promise<{
  * When workspace is true, scans across all workspace packages.
  *
  * @param directory - Directory to scan
- * @param threshold - Similarity threshold (0–1, default 0.7)
+ * @param threshold - Similarity threshold (0–1, default 0.8)
  * @param projectRoot - Optional project root containing tsconfig.json
  * @param workspace - When true, scan across all workspace packages
  */
 export async function analyzeSimilarity(
 	directory: string,
-	threshold = 0.7,
+	threshold = 0.8,
 	projectRoot?: string,
 	workspace = false
 ): Promise<SimilarityReport & { packageCount?: number }> {
