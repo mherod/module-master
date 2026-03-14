@@ -29,6 +29,7 @@ import {
 import { checkAllConflicts, runTypeCheck } from "../core/verify.ts";
 import {
 	discoverWorkspace,
+	filterToWorkspaceBoundary,
 	findBuildScript,
 	type WorkspaceInfo,
 } from "../core/workspace.ts";
@@ -81,6 +82,26 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 		logger.info(
 			`Found workspace: ${workspace.type} with ${workspace.packages.length} packages`
 		);
+	}
+
+	// Enforce workspace boundary: reject moves outside the workspace root
+	if (workspace) {
+		const [sourceInBounds] = filterToWorkspaceBoundary(
+			[absoluteSource],
+			workspace.root
+		);
+		const [targetInBounds] = filterToWorkspaceBoundary(
+			[absoluteTarget],
+			workspace.root
+		);
+		if (!sourceInBounds) {
+			logger.error(`Source file is outside workspace root: ${workspace.root}`);
+			process.exit(1);
+		}
+		if (!targetInBounds) {
+			logger.error(`Target path is outside workspace root: ${workspace.root}`);
+			process.exit(1);
+		}
 	}
 
 	logger.info(`\n${dryRun ? "🔍 Dry run:" : "🚀"} Moving module...`);
