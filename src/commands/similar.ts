@@ -36,7 +36,16 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 	);
 
 	if (json) {
-		process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+		const output =
+			maxGroups > 0
+				? {
+						...report,
+						groups: report.groups.slice(0, maxGroups),
+						totalGroups: report.groups.length,
+						truncated: report.groups.length > maxGroups,
+					}
+				: { ...report, totalGroups: report.groups.length, truncated: false };
+		process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
 		return;
 	}
 
