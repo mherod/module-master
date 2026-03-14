@@ -354,7 +354,9 @@ export async function scanWorkspaceFunctions(directory: string): Promise<{
 	totalFiles: number;
 	packageCount: number;
 }> {
-	const { discoverWorkspace } = await import("./workspace.ts");
+	const { discoverWorkspace, filterToWorkspaceBoundary } = await import(
+		"./workspace.ts"
+	);
 	const workspace = await discoverWorkspace(path.resolve(directory));
 	if (!workspace || workspace.packages.length === 0) {
 		return { functions: [], totalFiles: 0, packageCount: 0 };
@@ -375,7 +377,8 @@ export async function scanWorkspaceFunctions(directory: string): Promise<{
 		}
 	}
 
-	const result = collectFunctionsFromFiles(allFiles);
+	const bounded = filterToWorkspaceBoundary(allFiles, workspace.root);
+	const result = collectFunctionsFromFiles(bounded);
 	return { ...result, packageCount: workspace.packages.length };
 }
 

@@ -17,7 +17,10 @@ import {
 	scanUnresolvableImports,
 } from "../core/scanner.ts";
 import { collectUnresolvableDiagnostics } from "../core/verify.ts";
-import { discoverWorkspace } from "../core/workspace.ts";
+import {
+	discoverWorkspace,
+	filterToWorkspaceBoundary,
+} from "../core/workspace.ts";
 import type {
 	AnalysisResult,
 	ModuleReference,
@@ -63,7 +66,12 @@ export async function analyzeCommand(options: AnalyzeOptions): Promise<void> {
 					const pkgProject = loadProject(pkgTsconfig);
 					const pkgGraph = buildDependencyGraph(pkgProject);
 					const refs = findAllReferences(absolutePath, pkgGraph);
-					crossRefs.push(...refs);
+					// Filter refs to workspace boundary
+					const boundedRefs = refs.filter(
+						(r) =>
+							filterToWorkspaceBoundary([r.sourceFile], wsInfo.root).length > 0
+					);
+					crossRefs.push(...boundedRefs);
 				} catch {
 					// Skip packages that fail to load
 				}
