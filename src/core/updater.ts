@@ -230,8 +230,23 @@ export function updateFileReferences(
 			newContent.slice(split.end);
 	}
 
+	// After applying each split, adjust positions of pending specifier changes
+	// whose start is higher than the split's insertion point. Each split may
+	// insert or remove bytes; changes at higher positions must be shifted by the
+	// same delta so they still point to the correct content.
+	for (const split of importSplits) {
+		const splitDelta = split.newText.length - (split.end - split.start);
+		if (splitDelta !== 0) {
+			for (const change of changes) {
+				if (change.start > split.start) {
+					change.start += splitDelta;
+					change.end += splitDelta;
+				}
+			}
+		}
+	}
+
 	// Apply specifier changes in reverse order to maintain positions
-	// Adjust positions if import splits were applied
 	changes.sort((a, b) => b.start - a.start);
 
 	for (const change of changes) {
