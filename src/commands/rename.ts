@@ -15,6 +15,7 @@ import {
 	type TextChange,
 } from "../core/text-changes.ts";
 import { checkAllConflicts } from "../core/verify.ts";
+import { getRuntime } from "../runtime/index.ts";
 import type {
 	ModuleReference,
 	ProjectConfig,
@@ -87,10 +88,10 @@ export async function renameSymbol(
 ): Promise<RenameResult> {
 	const errors: { file: string; message: string }[] = [];
 	const updatedReferences: UpdatedReference[] = [];
+	const rt = getRuntime();
 
 	// Validate file exists
-	const sourceFile = Bun.file(filePath);
-	if (!(await sourceFile.exists())) {
+	if (!(await rt.fs.exists(filePath))) {
 		return {
 			success: false,
 			renamedSymbol: { file: filePath, oldName, newName },
@@ -192,7 +193,7 @@ export async function renameSymbol(
 			...sourceResult.updates.map((u) => ({ ...u, file: filePath }))
 		);
 		if (!dryRun) {
-			await Bun.write(filePath, sourceResult.newContent);
+			await rt.fs.writeFile(filePath, sourceResult.newContent);
 		}
 	}
 
@@ -227,7 +228,7 @@ export async function renameSymbol(
 					...result.updates.map((u) => ({ ...u, file: importingFile }))
 				);
 				if (!dryRun) {
-					await Bun.write(importingFile, result.newContent);
+					await rt.fs.writeFile(importingFile, result.newContent);
 				}
 			}
 		} catch (error) {

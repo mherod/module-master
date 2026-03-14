@@ -14,7 +14,8 @@
         "noExcessiveCognitiveComplexity": "off"
       },
       "performance": {
-        "useTopLevelRegex": "off"
+        "useTopLevelRegex": "off",
+        "noBarrelFile": "off"
       },
       "suspicious": {
         "useAwait": "off"

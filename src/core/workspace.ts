@@ -1,6 +1,6 @@
 import path from "node:path";
-import { Glob } from "bun";
 import { logger } from "../cli-logger.ts";
+import { getRuntime } from "../runtime/index.ts";
 import { EXPORT_STATEMENT_PATTERN, removeExtension } from "./constants.ts";
 
 export interface WorkspacePackage {
@@ -113,21 +113,23 @@ async function findWorkspaceRoot(startDir: string): Promise<{
 	while (currentDir !== path.dirname(currentDir)) {
 		// Check for pnpm-workspace.yaml
 		const pnpmWorkspace = path.join(currentDir, "pnpm-workspace.yaml");
-		if (await fileExists(pnpmWorkspace)) {
+		if (await getRuntime().fs.exists(pnpmWorkspace)) {
 			const patterns = await parsePnpmWorkspace(pnpmWorkspace);
 			return { root: currentDir, type: "pnpm", patterns };
 		}
 
 		// Check for package.json with workspaces field (yarn/npm)
 		const packageJson = path.join(currentDir, "package.json");
-		if (await fileExists(packageJson)) {
+		if (await getRuntime().fs.exists(packageJson)) {
 			const pkg = await readPackageJson(packageJson);
 			if (pkg?.workspaces) {
 				const workspaces = pkg.workspaces as string[] | { packages?: string[] };
 				const patterns = Array.isArray(workspaces)
 					? workspaces
 					: (workspaces.packages ?? []);
-				const type = (await fileExists(path.join(currentDir, "yarn.lock")))
+				const type = (await getRuntime().fs.exists(
+					path.join(currentDir, "yarn.lock")
+				))
 					? "yarn"
 					: "npm";
 				return { root: currentDir, type, patterns };
@@ -145,7 +147,7 @@ async function findWorkspaceRoot(startDir: string): Promise<{
  */
 async function parsePnpmWorkspace(filePath: string): Promise<string[]> {
 	try {
-		const content = await Bun.file(filePath).text();
+		const content = await getRuntime().fs.readFile(filePath);
 		// Simple YAML parsing for packages array
 		const packagesMatch = content.match(/packages:\s*\n((?:\s+-\s+.+\n?)+)/);
 		if (packagesMatch?.[1]) {
@@ -175,13 +177,13 @@ async function findWorkspacePackages(
 
 	for (const pattern of patterns) {
 		// Convert workspace pattern to glob for package.json files
-		const globPattern = pattern.includes("*")
-			? path.join(pattern, "package.json")
-			: path.join(pattern, "package.json");
+		const globPattern = path.join(pattern, "package.json");
 
 		try {
-			const glob = new Glob(globPattern);
-			for await (const match of glob.scan({ cwd: root, absolute: true })) {
+			for await (const match of getRuntime().glob.glob(globPattern, {
+				cwd: root,
+				absolute: true,
+			})) {
 				// Skip node_modules
 				if (match.includes("node_modules")) {
 					continue;
@@ -226,7 +228,7 @@ async function parsePackage(
 	let srcDir: string | undefined;
 	for (const candidate of ["src", "lib", "source"]) {
 		const candidatePath = path.join(pkgDir, candidate);
-		if (await fileExists(candidatePath)) {
+		if (await getRuntime().fs.exists(candidatePath)) {
 			srcDir = candidate;
 			break;
 		}
@@ -253,7 +255,7 @@ async function parsePackage(
 	let tsconfigPath: string | undefined;
 	for (const tsconfigName of ["tsconfig.json", "tsconfig.build.json"]) {
 		const candidatePath = path.join(pkgDir, tsconfigName);
-		if (await fileExists(candidatePath)) {
+		if (await getRuntime().fs.exists(candidatePath)) {
 			tsconfigPath = candidatePath;
 			break;
 		}
@@ -305,29 +307,10 @@ async function readPackageJson(
 	filePath: string
 ): Promise<Record<string, unknown> | null> {
 	try {
-		const content = await Bun.file(filePath).text();
+		const content = await getRuntime().fs.readFile(filePath);
 		return JSON.parse(content);
 	} catch {
 		return null;
-	}
-}
-
-/**
- * Check if a file or directory exists
- */
-async function fileExists(filePath: string): Promise<boolean> {
-	try {
-		const file = Bun.file(filePath);
-		// Bun.file().exists() works for files
-		if (await file.exists()) {
-			return true;
-		}
-		// For directories, we need to use stat
-		const { stat } = await import("node:fs/promises");
-		await stat(filePath);
-		return true;
-	} catch {
-		return false;
 	}
 }
 
@@ -336,11 +319,10 @@ async function fileExists(filePath: string): Promise<boolean> {
  */
 async function isBarrelFile(filePath: string): Promise<boolean> {
 	try {
-		const file = Bun.file(filePath);
-		if (!(await file.exists())) {
+		if (!(await getRuntime().fs.exists(filePath))) {
 			return false;
 		}
-		const content = await file.text();
+		const content = await getRuntime().fs.readFile(filePath);
 		// Check for export statements (export *, export {, export default, export const/function/class)
 		return EXPORT_STATEMENT_PATTERN.test(content);
 	} catch {

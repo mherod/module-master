@@ -6,6 +6,12 @@
   "bin": {
     "resect": "./bin/resect.js"
   },
+  "exports": {
+    ".": "./src/index.ts",
+    "./bun": "./src/runtime/bun.ts",
+    "./node": "./src/runtime/node.ts",
+    "./runtime": "./src/runtime/index.ts"
+  },
   "files": [
     "bin",
     "src",

@@ -32,6 +32,7 @@ import {
 	findBuildScript,
 	type WorkspaceInfo,
 } from "../core/workspace.ts";
+import { getRuntime } from "../runtime/index.ts";
 import type {
 	MoveError,
 	MoveResult,
@@ -235,10 +236,10 @@ export async function moveModule(
 ): Promise<MoveResult> {
 	const errors: MoveError[] = [];
 	const updatedReferences: UpdatedReference[] = [];
+	const rt = getRuntime();
 
 	// Validate source exists
-	const sourceFile = Bun.file(sourcePath);
-	if (!(await sourceFile.exists())) {
+	if (!(await rt.fs.exists(sourcePath))) {
 		return {
 			success: false,
 			movedFile: { from: sourcePath, to: targetPath },
@@ -254,8 +255,7 @@ export async function moveModule(
 	}
 
 	// Check target doesn't exist
-	const targetFile = Bun.file(targetPath);
-	if (await targetFile.exists()) {
+	if (await rt.fs.exists(targetPath)) {
 		return {
 			success: false,
 			movedFile: { from: sourcePath, to: targetPath },
@@ -325,17 +325,14 @@ export async function moveModule(
 		let targetBarrelAst: ts.SourceFile | undefined;
 		if (workspace) {
 			const destBarrelPath = findDestinationBarrel(targetPath, workspace);
-			if (destBarrelPath) {
-				const destBarrelFile = Bun.file(destBarrelPath);
-				if (await destBarrelFile.exists()) {
-					const barrelContent = await destBarrelFile.text();
-					targetBarrelAst = ts.createSourceFile(
-						destBarrelPath,
-						barrelContent,
-						ts.ScriptTarget.Latest,
-						true
-					);
-				}
+			if (destBarrelPath && (await rt.fs.exists(destBarrelPath))) {
+				const barrelContent = await rt.fs.readFile(destBarrelPath);
+				targetBarrelAst = ts.createSourceFile(
+					destBarrelPath,
+					barrelContent,
+					ts.ScriptTarget.Latest,
+					true
+				);
 			}
 		}
 
@@ -401,15 +398,15 @@ export async function moveModule(
 				updatedReferences.push(...updates);
 				if (!dryRun) {
 					// We'll write this as part of the move
-					await Bun.write(targetPath, newContent);
-					await Bun.file(sourcePath).delete();
+					await rt.fs.writeFile(targetPath, newContent);
+					await rt.fs.deleteFile(sourcePath);
 					fileMoved = true;
 				}
 			} else if (!dryRun) {
 				// No internal changes, just copy
-				const content = await sourceFile.text();
-				await Bun.write(targetPath, content);
-				await Bun.file(sourcePath).delete();
+				const content = await rt.fs.readFile(sourcePath);
+				await rt.fs.writeFile(targetPath, content);
+				await rt.fs.deleteFile(sourcePath);
 				fileMoved = true;
 			}
 		}
@@ -417,9 +414,9 @@ export async function moveModule(
 
 	// If file wasn't moved yet (no internal refs or couldn't parse), copy as-is
 	if (!(fileMoved || dryRun)) {
-		const content = await sourceFile.text();
-		await Bun.write(targetPath, content);
-		await Bun.file(sourcePath).delete();
+		const content = await rt.fs.readFile(sourcePath);
+		await rt.fs.writeFile(targetPath, content);
+		await rt.fs.deleteFile(sourcePath);
 	}
 
 	// Update all referencing files
@@ -453,7 +450,7 @@ export async function moveModule(
 			if (updates.length > 0) {
 				updatedReferences.push(...updates);
 				if (!dryRun) {
-					await Bun.write(filePath, newContent);
+					await rt.fs.writeFile(filePath, newContent);
 				}
 			}
 		} catch (error) {
@@ -494,7 +491,7 @@ export async function moveModule(
 			if (updates.length > 0) {
 				updatedReferences.push(...updates);
 				if (!dryRun) {
-					await Bun.write(barrelPath, newContent);
+					await rt.fs.writeFile(barrelPath, newContent);
 				}
 			}
 		} catch (error) {
@@ -511,9 +508,8 @@ export async function moveModule(
 		const destBarrelPath = findDestinationBarrel(targetPath, workspace);
 		if (destBarrelPath) {
 			try {
-				const destBarrelFile = Bun.file(destBarrelPath);
-				if (await destBarrelFile.exists()) {
-					const barrelContent = await destBarrelFile.text();
+				if (await rt.fs.exists(destBarrelPath)) {
+					const barrelContent = await rt.fs.readFile(destBarrelPath);
 					const { newContent, update } = addExportToDestinationBarrel(
 						barrelContent,
 						targetPath,
@@ -523,7 +519,7 @@ export async function moveModule(
 					if (newContent !== barrelContent) {
 						updatedReferences.push(update);
 						if (!dryRun) {
-							await Bun.write(destBarrelPath, newContent);
+							await rt.fs.writeFile(destBarrelPath, newContent);
 						}
 						if (verbose) {
 							logger.info(
