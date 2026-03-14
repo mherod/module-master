@@ -151,9 +151,11 @@ The `alias` command (`src/commands/alias.ts`) normalizes import specifiers:
 
 - **Three strategies**: `--prefer=alias` (use tsconfig paths), `--prefer=relative` (use ./... paths), `--prefer=shortest` (pick shorter option)
 - **Batch processing**: Works on single files or entire directories
-- **External package filtering**: Automatically skips node_modules and external imports
+- **External package filtering**: Skips node_modules and any import that resolves outside the project root
+- **Processes all in-project imports**: Normalizes both relative (`./foo`) and alias (`@/foo`) imports — does not require the specifier to start with `.`
 - **Verification enabled by default**: Runs `tsc --noEmit` before and after to catch breaking changes
 - **Simple text replacement**: Uses regex-based replacement on file contents
+- **Delegates to resolver.ts**: Uses `calculateRelativeSpecifier()` and `findAliasForPath()` from `src/core/resolver.ts` rather than private copies
 
 DON'T: Apply alias command to files with complex dynamic imports or computed module paths—verification will catch issues but manual review may be needed.
 
@@ -171,7 +173,11 @@ Verification spawns `tsc` as a subprocess using `spawnSync` and parses error out
 
 `runTypeCheck(project)` is exported from `verify.ts` and reused by `move.ts`.
 
+`collectUnresolvableDiagnostics(project)` scans all project files for unresolvable imports and returns `UnresolvableDiagnosticWithFile[]` (each entry has `file`, `specifier`, `line`, `diagnostic`). Use this for project-wide unresolvable import reporting. `VerificationResult.unresolvableDiagnostics` exposes these after a verify pass.
+
 DON'T: Duplicate `runTypeCheck` logic in command files. Import from `verify.ts`.
+
+DON'T: Duplicate unresolvable-import scanning across command files. Call `collectUnresolvableDiagnostics(project)` from `verify.ts`.
 
 ## Conflict Detection
 
@@ -348,10 +354,37 @@ Use shared constants instead of inline patterns:
 
 - `TSC_ERROR_PATTERN` - String `": error TS"` for detecting TypeScript errors
 - `EXPORT_STATEMENT_PATTERN` - Regex for detecting export statements in barrel files
-- `removeExtension()` - Strips `.ts`, `.tsx`, `.js`, `.jsx` extensions from paths
-- `TS_JS_EXTENSION_PATTERN` - Regex `/\.[tj]sx?$/` for matching TS/JS extensions
+- `removeExtension()` - Strips `.ts`, `.tsx`, `.js`, `.jsx`, `.mts`, `.cts`, `.mjs`, `.cjs` extensions from paths
+- `TS_JS_EXTENSIONS` - Regex `/\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/` — the full extension pattern including modern variants
+- `TS_JS_EXTENSION_PATTERN` - Narrow legacy regex `/\.[tj]sx?$/` that misses `.mts/.cts/.mjs/.cjs`
 
 DON'T: Use inline regex like `/\.[tj]sx?$/` or `": error TS"` strings. Import from `constants.ts`.
+
+DON'T: Use `TS_JS_EXTENSION_PATTERN` for extension stripping in new code — it misses `.mts/.cts/.mjs/.cjs`. Use `TS_JS_EXTENSIONS` or `removeExtension()` instead.
+
+## Biome Linter Behavior
+
+Biome runs as a PostToolUse hook after every file edit and auto-removes unused imports. This has one important implication when adding new imports:
+
+**When adding a new import to a file, include its first usage site in the same Edit call.** If you add an import in one Edit and its usage in a separate Edit, Biome will strip the import between the two calls, causing a type error on the next Edit.
+
+```typescript
+// WRONG: two separate Edits
+// Edit 1: adds import — Biome strips it because not yet used
+import { findAliasForPath } from "../core/resolver.ts";
+
+// Edit 2: adds usage — finds import missing, type error
+const alias = findAliasForPath(toFile, project);
+```
+
+```typescript
+// CORRECT: one Edit covering both import and first usage
+import { findAliasForPath } from "../core/resolver.ts";
+// ... other code ...
+const alias = findAliasForPath(toFile, project);
+```
+
+DON'T: Add an import in one Edit and its usage in a subsequent Edit. Biome will strip the import before the usage lands.
 
 ## Async Function Guidelines
 
