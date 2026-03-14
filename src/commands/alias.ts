@@ -15,7 +15,10 @@ import {
 	printVerificationResults,
 	verifyTypeChecking,
 } from "../core/verify.ts";
-import { discoverWorkspace } from "../core/workspace.ts";
+import {
+	discoverWorkspace,
+	filterToWorkspaceBoundary,
+} from "../core/workspace.ts";
 import { getRuntime } from "../runtime/index.ts";
 import type { ModuleReference, ProjectConfig } from "../types.ts";
 
@@ -81,7 +84,11 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 				const pkgProject = loadProject(pkg.tsconfigPath);
 				const pkgDir = pkg.srcDir ? path.join(pkg.path, pkg.srcDir) : pkg.path;
 				const pkgResult = normalizeImports(pkgDir, prefer, pkgProject);
-				allChanges.push(...pkgResult.changes);
+				// Filter changes to workspace boundary
+				const bounded = pkgResult.changes.filter(
+					(c) => filterToWorkspaceBoundary([c.file], wsInfo.root).length > 0
+				);
+				allChanges.push(...bounded);
 				totalFiles += pkgResult.filesProcessed;
 			} catch {
 				if (verbose) {

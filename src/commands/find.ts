@@ -3,7 +3,10 @@ import ts from "typescript";
 import { logger } from "../cli-logger.ts";
 import { scanExports } from "../core/scanner.ts";
 import { discoverProject } from "../core/tsconfig-discovery.ts";
-import { discoverWorkspace } from "../core/workspace.ts";
+import {
+	discoverWorkspace,
+	filterToWorkspaceBoundary,
+} from "../core/workspace.ts";
 import type { ExportInfo } from "../types.ts";
 
 export interface FindOptions {
@@ -55,7 +58,17 @@ export async function findCommand(options: FindOptions): Promise<void> {
 			}
 		}
 
-		const result = search(query, allFiles, absoluteProject, type);
+		// Filter to workspace boundary
+		const boundedPaths = filterToWorkspaceBoundary(
+			Array.from(allFiles.keys()),
+			wsInfo.root
+		);
+		const boundedFiles = new Map<string, unknown>();
+		for (const fp of boundedPaths) {
+			boundedFiles.set(fp, allFiles.get(fp));
+		}
+
+		const result = search(query, boundedFiles, absoluteProject, type);
 		printResults(result, absoluteProject, verbose);
 		return;
 	}

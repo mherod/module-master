@@ -417,6 +417,20 @@ function findMatchingExport(
 }
 
 /**
+ * Filter file paths to only include files within the workspace root boundary.
+ * Ensures that workspace-scoped operations do not leak outside the workspace.
+ */
+export function filterToWorkspaceBoundary(
+	filePaths: string[],
+	workspaceRoot: string
+): string[] {
+	const normalizedRoot = path.resolve(workspaceRoot) + path.sep;
+	return filePaths.filter(
+		(f) => f.startsWith(normalizedRoot) || f === path.resolve(workspaceRoot)
+	);
+}
+
+/**
  * Print workspace info to console
  */
 export function printWorkspaceInfo(workspace: WorkspaceInfo): void {
