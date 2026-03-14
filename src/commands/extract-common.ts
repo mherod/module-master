@@ -195,150 +195,29 @@ function ensureExported(node: FunctionNode): TextChange | null {
 }
 
 /**
- * Remove a function from a file and add an import from the canonical file.
+ * Replace function nodes in their files with import/re-export statements.
+ * Groups nodes by file so multiple removals in the same file are batched.
  */
-function buildChangesForDuplicate(
-	duplicate: FunctionNode,
-	canonical: FunctionNode
-): { removal: TextChange; importText: string } {
-	// Remove the function (replace with empty string, trimming surrounding blank lines)
-	const removal: TextChange = {
-		start: duplicate.start,
-		end: duplicate.end,
-		newText: "",
-	};
-
-	// Calculate the import specifier
-	const specifier = calculateRelativeSpecifier(
-		duplicate.info.file,
-		canonical.info.file
-	);
-
-	// Build import statement
-	const importText = duplicate.exported
-		? `export { ${duplicate.info.name} } from "${specifier}";`
-		: `import { ${duplicate.info.name} } from "${specifier}";`;
-
-	return { removal, importText };
-}
-
-/**
- * Apply an extraction plan to the filesystem.
- */
-async function applyPlan(plan: ExtractionPlan): Promise<{
-	filesModified: string[];
-	functionsRemoved: number;
-}> {
+async function replaceNodesWithImports(
+	nodes: FunctionNode[],
+	importTarget: string
+): Promise<string[]> {
 	const filesModified: string[] = [];
-
-	// Step 1: Ensure canonical is exported
-	const exportChange = ensureExported(plan.canonical);
-	if (exportChange) {
-		const content = await Bun.file(plan.canonical.info.file).text();
-		const newContent = applyTextChanges(content, [exportChange]);
-		await Bun.write(plan.canonical.info.file, newContent);
-		filesModified.push(plan.canonical.info.file);
-	}
-
-	// Step 2: Process each duplicate
-	// Group duplicates by file (multiple duplicates might be in the same file)
 	const byFile = new Map<string, FunctionNode[]>();
-	for (const dup of plan.duplicates) {
-		const existing = byFile.get(dup.info.file) ?? [];
-		existing.push(dup);
-		byFile.set(dup.info.file, existing);
-	}
-
-	for (const [filePath, dups] of byFile) {
-		const content = await Bun.file(filePath).text();
-		const changes: TextChange[] = [];
-		const imports: string[] = [];
-
-		for (const dup of dups) {
-			const { removal, importText } = buildChangesForDuplicate(
-				dup,
-				plan.canonical
-			);
-			changes.push(removal);
-			imports.push(importText);
-		}
-
-		// Apply removals
-		let newContent = applyTextChanges(content, changes);
-
-		// Add imports at the top (after any existing imports)
-		const importBlock = imports.join("\n");
-		const lastImportIdx = findLastImportEnd(newContent);
-		if (lastImportIdx > 0) {
-			newContent =
-				newContent.slice(0, lastImportIdx) +
-				"\n" +
-				importBlock +
-				newContent.slice(lastImportIdx);
-		} else {
-			newContent = `${importBlock}\n${newContent}`;
-		}
-
-		// Clean up excessive blank lines
-		newContent = newContent.replace(/\n{3,}/g, "\n\n");
-
-		await Bun.write(filePath, newContent);
-		filesModified.push(filePath);
-	}
-
-	return {
-		filesModified: [...new Set(filesModified)],
-		functionsRemoved: plan.duplicates.length,
-	};
-}
-
-/**
- * Apply an extraction plan by writing the canonical function to a specified
- * output file and replacing ALL copies (including the original canonical) with
- * imports from the output file.
- */
-async function applyPlanToOutput(
-	plan: ExtractionPlan,
-	outputFile: string
-): Promise<{ filesModified: string[]; functionsRemoved: number }> {
-	const filesModified: string[] = [];
-	const absOutput = path.resolve(outputFile);
-
-	// Step 1: Build the function text to write (ensure it's exported)
-	let fnText = plan.canonical.text.trimStart();
-	if (!plan.canonical.exported) {
-		// Prepend export keyword if the canonical wasn't already exported
-		fnText = `export ${fnText}`;
-	}
-
-	// Step 2: Append to or create the output file
-	let existingContent = "";
-	try {
-		existingContent = await Bun.file(absOutput).text();
-	} catch {
-		// File doesn't exist yet — will be created
-	}
-	const separator = existingContent.length > 0 ? "\n\n" : "";
-	await Bun.write(absOutput, `${existingContent}${separator}${fnText}\n`);
-	filesModified.push(absOutput);
-
-	// Step 3: Remove function from ALL files (canonical + duplicates)
-	const allNodes = [plan.canonical, ...plan.duplicates];
-	const byFile = new Map<string, FunctionNode[]>();
-	for (const node of allNodes) {
+	for (const node of nodes) {
 		const existing = byFile.get(node.info.file) ?? [];
 		existing.push(node);
 		byFile.set(node.info.file, existing);
 	}
 
-	for (const [filePath, nodes] of byFile) {
+	for (const [filePath, fileNodes] of byFile) {
 		const content = await Bun.file(filePath).text();
 		const changes: TextChange[] = [];
 		const imports: string[] = [];
 
-		for (const node of nodes) {
+		for (const node of fileNodes) {
 			changes.push({ start: node.start, end: node.end, newText: "" });
-			const specifier = calculateRelativeSpecifier(filePath, absOutput);
+			const specifier = calculateRelativeSpecifier(filePath, importTarget);
 			const stmt = node.exported
 				? `export { ${node.info.name} } from "${specifier}";`
 				: `import { ${node.info.name} } from "${specifier}";`;
@@ -361,6 +240,74 @@ async function applyPlanToOutput(
 		await Bun.write(filePath, newContent);
 		filesModified.push(filePath);
 	}
+
+	return filesModified;
+}
+
+/**
+ * Apply an extraction plan to the filesystem.
+ */
+async function applyPlan(plan: ExtractionPlan): Promise<{
+	filesModified: string[];
+	functionsRemoved: number;
+}> {
+	const filesModified: string[] = [];
+
+	// Step 1: Ensure canonical is exported
+	const exportChange = ensureExported(plan.canonical);
+	if (exportChange) {
+		const content = await Bun.file(plan.canonical.info.file).text();
+		const newContent = applyTextChanges(content, [exportChange]);
+		await Bun.write(plan.canonical.info.file, newContent);
+		filesModified.push(plan.canonical.info.file);
+	}
+
+	// Step 2: Replace duplicates with imports from the canonical file
+	const modified = await replaceNodesWithImports(
+		plan.duplicates,
+		plan.canonical.info.file
+	);
+	filesModified.push(...modified);
+
+	return {
+		filesModified: [...new Set(filesModified)],
+		functionsRemoved: plan.duplicates.length,
+	};
+}
+
+/**
+ * Apply an extraction plan by writing the canonical function to a specified
+ * output file and replacing ALL copies (including the original canonical) with
+ * imports from the output file.
+ */
+async function applyPlanToOutput(
+	plan: ExtractionPlan,
+	outputFile: string
+): Promise<{ filesModified: string[]; functionsRemoved: number }> {
+	const filesModified: string[] = [];
+	const absOutput = path.resolve(outputFile);
+
+	// Step 1: Build the function text to write (ensure it's exported)
+	let fnText = plan.canonical.text.trimStart();
+	if (!plan.canonical.exported) {
+		fnText = `export ${fnText}`;
+	}
+
+	// Step 2: Append to or create the output file
+	let existingContent = "";
+	try {
+		existingContent = await Bun.file(absOutput).text();
+	} catch {
+		// File doesn't exist yet — will be created
+	}
+	const separator = existingContent.length > 0 ? "\n\n" : "";
+	await Bun.write(absOutput, `${existingContent}${separator}${fnText}\n`);
+	filesModified.push(absOutput);
+
+	// Step 3: Remove function from ALL files and replace with imports
+	const allNodes = [plan.canonical, ...plan.duplicates];
+	const modified = await replaceNodesWithImports(allNodes, absOutput);
+	filesModified.push(...modified);
 
 	return {
 		filesModified: [...new Set(filesModified)],
