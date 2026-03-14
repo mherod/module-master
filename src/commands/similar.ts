@@ -11,14 +11,14 @@ export interface SimilarOptions {
 }
 
 export async function similarCommand(options: SimilarOptions): Promise<void> {
-	const { directory, json, threshold = 0.7 } = options;
+	const { directory, project, json, threshold = 0.7 } = options;
 	const absoluteDir = path.resolve(directory);
 
 	if (!json) {
 		logger.info(`\n🔍 Scanning for similar functions in ${absoluteDir}\n`);
 	}
 
-	const report = await analyzeSimilarity(absoluteDir, threshold);
+	const report = await analyzeSimilarity(absoluteDir, threshold, project);
 
 	if (json) {
 		process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

@@ -270,15 +270,44 @@ export function findSimilarGroups(
 }
 
 /**
+ * Walk up from `dir` to find the nearest ancestor directory that contains a
+ * tsconfig.json. Returns `dir` itself if none is found (graceful fallback).
+ */
+function findProjectRoot(dir: string): string {
+	let current = path.resolve(dir);
+	while (true) {
+		if (ts.sys.fileExists(path.join(current, "tsconfig.json"))) {
+			return current;
+		}
+		const parent = path.dirname(current);
+		if (parent === current) {
+			// Reached filesystem root without finding a tsconfig — fall back to original dir
+			return path.resolve(dir);
+		}
+		current = parent;
+	}
+}
+
+/**
  * Scan all TypeScript/JavaScript files in a project directory and collect
  * top-level function declarations and named const function expressions.
+ *
+ * @param directory - Directory to scan (results are filtered to files under this path)
+ * @param projectRoot - Optional explicit project root containing tsconfig.json.
+ *   When omitted, the nearest tsconfig.json ancestor of `directory` is used.
  */
 export async function scanProjectFunctions(
-	directory: string
+	directory: string,
+	projectRoot?: string
 ): Promise<{ functions: FunctionInfo[]; totalFiles: number }> {
-	const discovery = discoverProject(path.resolve(directory));
-	const allFiles = Array.from(discovery.fileOwnership.keys()).filter((f) =>
-		TS_JS_EXTENSIONS.test(f)
+	const absoluteDir = path.resolve(directory);
+	const rootDir = projectRoot
+		? path.resolve(projectRoot)
+		: findProjectRoot(absoluteDir);
+
+	const discovery = discoverProject(rootDir);
+	const allFiles = Array.from(discovery.fileOwnership.keys()).filter(
+		(f) => TS_JS_EXTENSIONS.test(f) && f.startsWith(absoluteDir)
 	);
 
 	const functions: FunctionInfo[] = [];
@@ -307,12 +336,20 @@ export async function scanProjectFunctions(
 
 /**
  * Run the full similarity analysis on a project directory.
+ *
+ * @param directory - Directory to scan
+ * @param threshold - Similarity threshold (0–1, default 0.7)
+ * @param projectRoot - Optional project root containing tsconfig.json
  */
 export async function analyzeSimilarity(
 	directory: string,
-	threshold = 0.7
+	threshold = 0.7,
+	projectRoot?: string
 ): Promise<SimilarityReport> {
-	const { functions, totalFiles } = await scanProjectFunctions(directory);
+	const { functions, totalFiles } = await scanProjectFunctions(
+		directory,
+		projectRoot
+	);
 	const groups = findSimilarGroups(functions, threshold);
 	return { groups, totalFunctions: functions.length, totalFiles };
 }
