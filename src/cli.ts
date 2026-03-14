@@ -25,6 +25,7 @@ const { values, positionals } = parseArgs({
 		"no-verify": { type: "boolean" },
 		json: { type: "boolean" },
 		threshold: { type: "string" },
+		workspace: { type: "boolean" },
 	},
 	allowPositionals: true,
 });
@@ -59,6 +60,7 @@ Options:
   --verbose         Enable verbose output
   --json            Output results as JSON
   --threshold       Similarity threshold for similar command (0.0–1.0, default 0.7)
+  --workspace       Scan across all workspace packages (similar command)
 
 Examples:
   ${name} find Entity -p /path/to/project
@@ -247,6 +249,7 @@ Arguments:
 Options:
   --json            Output results as JSON
   --threshold       Minimum similarity score 0.0–1.0 (default: 0.7)
+  --workspace       Scan across all workspace packages
   -p, --project     Path to project directory or tsconfig.json
 
 Similarity buckets:
@@ -258,6 +261,7 @@ Examples:
   ${name} similar src
   ${name} similar . --threshold=0.85
   ${name} similar src --json
+  ${name} similar . --workspace
 `);
 			break;
 		default:
@@ -440,6 +444,7 @@ async function main() {
 				project: values.project,
 				json: values.json,
 				threshold,
+				workspace: values.workspace,
 			});
 			break;
 		}

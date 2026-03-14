@@ -8,17 +8,30 @@ export interface SimilarOptions {
 	project?: string;
 	json?: boolean;
 	threshold?: number;
+	workspace?: boolean;
 }
 
 export async function similarCommand(options: SimilarOptions): Promise<void> {
-	const { directory, project, json, threshold = 0.7 } = options;
+	const {
+		directory,
+		project,
+		json,
+		threshold = 0.7,
+		workspace = false,
+	} = options;
 	const absoluteDir = path.resolve(directory);
 
 	if (!json) {
-		logger.info(`\n🔍 Scanning for similar functions in ${absoluteDir}\n`);
+		const mode = workspace ? "across workspace packages" : "in";
+		logger.info(`\n🔍 Scanning for similar functions ${mode} ${absoluteDir}\n`);
 	}
 
-	const report = await analyzeSimilarity(absoluteDir, threshold, project);
+	const report = await analyzeSimilarity(
+		absoluteDir,
+		threshold,
+		project,
+		workspace
+	);
 
 	if (json) {
 		process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

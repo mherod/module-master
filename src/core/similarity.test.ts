@@ -1,16 +1,53 @@
 import { describe, expect, test } from "bun:test";
 import ts from "typescript";
 import {
+	analyzeSimilarity,
 	collectFunctions,
 	findSimilarGroups,
 	jaccardSimilarity,
 	normalizeBody,
+	scanWorkspaceFunctions,
 	tokenize,
 } from "./similarity";
 
 function makeSourceFile(code: string, fileName = "test.ts"): ts.SourceFile {
 	return ts.createSourceFile(fileName, code, ts.ScriptTarget.Latest, true);
 }
+
+describe("scanWorkspaceFunctions", () => {
+	test("returns empty result for non-workspace directory", async () => {
+		const result = await scanWorkspaceFunctions("/tmp/nonexistent-dir-xyz");
+		expect(result.functions).toHaveLength(0);
+		expect(result.totalFiles).toBe(0);
+		expect(result.packageCount).toBe(0);
+	});
+});
+
+describe("analyzeSimilarity", () => {
+	test("accepts workspace flag and returns packageCount when true", async () => {
+		const report = await analyzeSimilarity(
+			"/tmp/nonexistent-dir-xyz",
+			0.7,
+			undefined,
+			true
+		);
+		expect(report.groups).toHaveLength(0);
+		expect(report.totalFunctions).toBe(0);
+		expect(report.totalFiles).toBe(0);
+		expect(report.packageCount).toBe(0);
+	});
+
+	test("does not return packageCount when workspace is false", async () => {
+		const report = await analyzeSimilarity(
+			"/tmp/nonexistent-dir-xyz",
+			0.7,
+			undefined,
+			false
+		);
+		expect(report.groups).toHaveLength(0);
+		expect(report.packageCount).toBeUndefined();
+	});
+});
 
 describe("normalizeBody", () => {
 	test("replaces string literals with $S", () => {

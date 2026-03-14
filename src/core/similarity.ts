@@ -281,11 +281,41 @@ function findProjectRoot(dir: string): string {
 		}
 		const parent = path.dirname(current);
 		if (parent === current) {
-			// Reached filesystem root without finding a tsconfig — fall back to original dir
 			return path.resolve(dir);
 		}
 		current = parent;
 	}
+}
+
+/**
+ * Collect functions from an array of file paths.
+ */
+function collectFunctionsFromFiles(filePaths: string[]): {
+	functions: FunctionInfo[];
+	totalFiles: number;
+} {
+	const functions: FunctionInfo[] = [];
+
+	for (const filePath of filePaths) {
+		const content = ts.sys.readFile(filePath);
+		if (!content) {
+			continue;
+		}
+		try {
+			const sourceFile = ts.createSourceFile(
+				filePath,
+				content,
+				ts.ScriptTarget.Latest,
+				true
+			);
+			const fileFunctions = collectFunctions(sourceFile, filePath);
+			functions.push(...fileFunctions);
+		} catch {
+			// Skip files that cannot be parsed
+		}
+	}
+
+	return { functions, totalFiles: filePaths.length };
 }
 
 /**
@@ -310,42 +340,71 @@ export async function scanProjectFunctions(
 		(f) => TS_JS_EXTENSIONS.test(f) && f.startsWith(absoluteDir)
 	);
 
-	const functions: FunctionInfo[] = [];
+	return collectFunctionsFromFiles(allFiles);
+}
 
-	for (const filePath of allFiles) {
-		const content = ts.sys.readFile(filePath);
-		if (!content) {
-			continue;
-		}
-		try {
-			const sourceFile = ts.createSourceFile(
-				filePath,
-				content,
-				ts.ScriptTarget.Latest,
-				true
-			);
-			const fileFunctions = collectFunctions(sourceFile, filePath);
-			functions.push(...fileFunctions);
-		} catch {
-			// Skip files that cannot be parsed
+/**
+ * Scan all TypeScript/JavaScript files across workspace packages and collect
+ * top-level function declarations and named const function expressions.
+ * Each package's tsconfig is used for file discovery when available, falling
+ * back to directory-based discovery.
+ */
+export async function scanWorkspaceFunctions(directory: string): Promise<{
+	functions: FunctionInfo[];
+	totalFiles: number;
+	packageCount: number;
+}> {
+	const { discoverWorkspace } = await import("./workspace.ts");
+	const workspace = await discoverWorkspace(path.resolve(directory));
+	if (!workspace || workspace.packages.length === 0) {
+		return { functions: [], totalFiles: 0, packageCount: 0 };
+	}
+
+	const allFiles: string[] = [];
+	const seen = new Set<string>();
+
+	for (const pkg of workspace.packages) {
+		const scanDir = pkg.srcDir ? path.join(pkg.path, pkg.srcDir) : pkg.path;
+
+		const discovery = discoverProject(scanDir);
+		for (const filePath of discovery.fileOwnership.keys()) {
+			if (TS_JS_EXTENSIONS.test(filePath) && !seen.has(filePath)) {
+				seen.add(filePath);
+				allFiles.push(filePath);
+			}
 		}
 	}
 
-	return { functions, totalFiles: allFiles.length };
+	const result = collectFunctionsFromFiles(allFiles);
+	return { ...result, packageCount: workspace.packages.length };
 }
 
 /**
  * Run the full similarity analysis on a project directory.
+ * When workspace is true, scans across all workspace packages.
  *
  * @param directory - Directory to scan
  * @param threshold - Similarity threshold (0–1, default 0.7)
  * @param projectRoot - Optional project root containing tsconfig.json
+ * @param workspace - When true, scan across all workspace packages
  */
 export async function analyzeSimilarity(
 	directory: string,
 	threshold = 0.7,
-	projectRoot?: string
-): Promise<SimilarityReport> {
+	projectRoot?: string,
+	workspace = false
+): Promise<SimilarityReport & { packageCount?: number }> {
+	if (workspace) {
+		const result = await scanWorkspaceFunctions(directory);
+		const groups = findSimilarGroups(result.functions, threshold);
+		return {
+			groups,
+			totalFunctions: result.functions.length,
+			totalFiles: result.totalFiles,
+			packageCount: result.packageCount,
+		};
+	}
+
 	const { functions, totalFiles } = await scanProjectFunctions(
 		directory,
 		projectRoot
