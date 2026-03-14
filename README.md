@@ -2,7 +2,7 @@
 
 **The surgical refactoring tool for TypeScript monorepos.** Move files between packages, rename exports, and watch every import update automatically — with zero breaking changes.
 
-Built on the TypeScript Compiler API for AST-level precision. Understands your barrel files, respects your path aliases, and handles the gnarly edge cases that break other tools.
+Built on the TypeScript Compiler API for AST-level precision. Understands your barrel files, respects your path aliases, detects unresolvable imports, and handles the gnarly edge cases that break other tools.
 
 ## Why resect?
 
@@ -24,10 +24,13 @@ That's it. Every import updated. Barrel files handled. Packages rebuilt. Type-ch
 
 ```bash
 # Global install (recommended)
-bun add -g resect
+npm install -g @mherod/resect
 
-# Or with npm
-npm install -g resect
+# Or with pnpm
+pnpm add -g @mherod/resect
+
+# Or with bun
+bun add -g @mherod/resect
 ```
 
 ## Quick Start
@@ -111,13 +114,16 @@ Understand a module's place in your codebase.
 
 ```bash
 resect analyze src/components/Button.tsx --verbose
+resect analyze src/core/resolver.ts -p .
 ```
 
 Shows:
-- All exports from the file
-- All imports used by the file
+- All exports from the file (name, type, line number)
+- All imports used by the file (specifier, bindings, resolved path with `--verbose`)
 - All files that reference this module
 - Barrel files that re-export this module
+- **Unresolvable imports** — specifiers that cannot be resolved, with line numbers and diagnostics
+- **Project-wide unresolvable imports** — all broken imports across the entire project, shown at the end
 
 ### `find <query>`
 
@@ -132,16 +138,23 @@ resect find helpers --type file
 - Case-insensitive partial matching
 - Searches filenames and export names simultaneously
 - Smart sorting: exact matches first
+- Use `--type file|export|all` to narrow results
 
 ### `alias <target>`
 
 Normalize import paths using tsconfig aliases, relative paths, or the shortest option.
 
 ```bash
-resect alias src/components --prefer=alias
-resect alias src --prefer=relative
-resect alias . --prefer=shortest
+resect alias src/components --prefer=alias    # Convert to tsconfig path aliases
+resect alias src --prefer=relative            # Convert to relative paths
+resect alias . --prefer=shortest              # Pick whichever is shorter
+resect alias src --prefer=alias --dry-run     # Preview changes
 ```
+
+- Processes both relative (`./foo`) and alias (`@/foo`) imports — normalizes in either direction
+- Handles all TypeScript/JavaScript extensions: `.ts`, `.tsx`, `.js`, `.jsx`, `.mts`, `.cts`, `.mjs`, `.cjs`
+- Detects and skips changes that would create duplicate bindings
+- Verification enabled by default; use `--no-verify` to skip
 
 ### `discover <directory>`
 
@@ -158,10 +171,12 @@ Shows tsconfig inheritance, project references, file ownership, and path aliases
 Discover monorepo workspace packages and their structure.
 
 ```bash
+resect workspace /path/to/monorepo
 resect workspace /path/to/monorepo --json
+resect workspace /path/to/monorepo --verbose
 ```
 
-Supports pnpm, yarn, and npm workspaces. Shows packages, entrypoints, barrel files, and internal dependencies.
+Supports pnpm, yarn, and npm workspaces. Shows packages, entrypoints, barrel files, exports map, and internal dependencies.
 
 ## Features
 
@@ -170,12 +185,14 @@ Supports pnpm, yarn, and npm workspaces. Shows packages, entrypoints, barrel fil
 - **Full import coverage** — Named, default, namespace, dynamic, require, require.resolve
 - **Test mock support** — jest.mock(), vi.mock(), vitest.mock()
 - **Path alias preservation** — Respects your tsconfig paths
-- **Barrel file intelligence** — recursively resolves re-export chains to find deep dependencies
+- **Barrel file intelligence** — Recursively resolves re-export chains to find deep dependencies
 - **Monorepo-native** — First-class support for pnpm, yarn, and npm workspaces
 - **Cross-package moves** — The hard problem, solved
 - **Import splitting** — Handles mixed imports from barrels correctly
 - **Auto-rebuild** — Keeps dist/ in sync after cross-package moves
 - **Dry-run mode** — Preview everything before committing
+- **Unresolvable import detection** — Surfaces broken imports with file, line, and specifier
+- **Modern extension support** — Handles `.mts`, `.cts`, `.mjs`, `.cjs` in addition to classic extensions
 
 ## Options
 
@@ -206,10 +223,11 @@ Supports pnpm, yarn, and npm workspaces. Shows packages, entrypoints, barrel fil
 ## Development
 
 ```bash
-bun test             # Run tests
-bun run lint         # Lint and format with Biome
-bun run typecheck    # Type check with tsc
-bun run build        # Compile to standalone binary
+pnpm install         # Install dependencies
+pnpm test            # Run tests
+pnpm run lint        # Lint and format with Biome
+pnpm run typecheck   # Type check with tsc
+pnpm run build       # Compile to standalone binary
 ```
 
 ## License
