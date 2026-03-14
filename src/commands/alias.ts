@@ -6,7 +6,10 @@ import {
 	loadProject,
 	resolveTsConfig,
 } from "../core/project.ts";
-import { normalizePath } from "../core/resolver.ts";
+import {
+	calculateRelativeSpecifier,
+	findAliasForPath,
+} from "../core/resolver.ts";
 import { scanModuleReferences } from "../core/scanner.ts";
 import {
 	printVerificationResults,
@@ -131,8 +134,7 @@ async function normalizeImports(
 			// Skip external packages (node_modules, built-in modules)
 			if (
 				!ref.resolvedPath.includes(project.rootDir) ||
-				ref.resolvedPath.includes("node_modules") ||
-				!ref.specifier.startsWith(".")
+				ref.resolvedPath.includes("node_modules")
 			) {
 				continue;
 			}
@@ -265,7 +267,7 @@ function calculatePreferredSpecifier(
 	project: ProjectConfig
 ): string | null {
 	const relativeSpecifier = calculateRelativeSpecifier(fromFile, toFile);
-	const aliasSpecifier = findMatchingAlias(toFile, project);
+	const aliasSpecifier = findAliasForPath(toFile, project);
 
 	if (prefer === "relative") {
 		return relativeSpecifier;
@@ -282,58 +284,6 @@ function calculatePreferredSpecifier(
 		return relativeSpecifier.length <= aliasSpecifier.length
 			? relativeSpecifier
 			: aliasSpecifier;
-	}
-
-	return null;
-}
-
-function calculateRelativeSpecifier(fromFile: string, toFile: string): string {
-	const fromDir = path.dirname(fromFile);
-	let relative = path.relative(fromDir, toFile);
-
-	// Remove extension
-	relative = relative.replace(/\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/, "");
-
-	// Ensure ./ prefix for same directory
-	if (!relative.startsWith(".")) {
-		relative = `./${relative}`;
-	}
-
-	return normalizePath(relative);
-}
-
-function findMatchingAlias(
-	targetPath: string,
-	project: ProjectConfig
-): string | null {
-	const normalizedTarget = normalizePath(targetPath);
-
-	// Remove extension for matching
-	const targetWithoutExt = normalizedTarget.replace(
-		/\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/,
-		""
-	);
-
-	for (const [alias, paths] of project.pathAliases) {
-		// Remove trailing /* from alias pattern
-		const aliasBase = alias.replace(/\/\*$/, "");
-
-		for (const aliasPath of paths) {
-			// Resolve alias path relative to rootDir
-			const resolvedAliasPath = path.resolve(
-				project.rootDir,
-				project.compilerOptions.baseUrl ?? ".",
-				aliasPath.replace(/\/\*$/, "")
-			);
-
-			const normalizedAliasPath = normalizePath(resolvedAliasPath);
-
-			// Check if target starts with this alias path
-			if (targetWithoutExt.startsWith(normalizedAliasPath)) {
-				const remainder = targetWithoutExt.slice(normalizedAliasPath.length);
-				return aliasBase + remainder;
-			}
-		}
 	}
 
 	return null;

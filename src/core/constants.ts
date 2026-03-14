@@ -22,5 +22,5 @@ export const TS_JS_EXTENSIONS = /\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/;
  * Remove TypeScript/JavaScript extension from a path
  */
 export function removeExtension(filePath: string): string {
-	return filePath.replace(TS_JS_EXTENSION_PATTERN, "");
+	return filePath.replace(TS_JS_EXTENSIONS, "");
 }

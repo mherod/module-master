@@ -122,7 +122,7 @@ export function findAliasForPath(
 				const remainder = normalizedTarget
 					.slice(absolutePattern.length)
 					.replace(/^\//, "") // strip leading slash left by path.normalize dropping trailing /
-					.replace(/\.[tj]sx?$/, "");
+					.replace(/\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/, "");
 
 				// For wildcard aliases, use them if there's a remainder
 				// For exact aliases, only use if there's NO remainder (exact match)
@@ -250,7 +250,7 @@ export function calculateRelativeSpecifier(
 	let relativePath = path.relative(fromDir, toFile);
 
 	// Remove extension
-	relativePath = relativePath.replace(/\.[tj]sx?$/, "");
+	relativePath = relativePath.replace(/\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/, "");
 
 	// Handle index files
 	if (relativePath.endsWith("/index") || relativePath === "index") {
