@@ -62,17 +62,27 @@ export interface WorkspaceInfo {
 	};
 }
 
+/** Per-invocation cache for workspace discovery, keyed by resolved start directory */
+const workspaceCache = new Map<string, WorkspaceInfo | null>();
+
 /**
- * Discover workspace configuration and all packages
+ * Discover workspace configuration and all packages.
+ * Results are cached per start directory for the lifetime of the process.
  */
 export async function discoverWorkspace(
 	startDir: string
 ): Promise<WorkspaceInfo | null> {
 	const absoluteDir = path.resolve(startDir);
 
+	const cached = workspaceCache.get(absoluteDir);
+	if (cached !== undefined) {
+		return cached;
+	}
+
 	// Find workspace root by looking for workspace config files
 	const workspaceRoot = await findWorkspaceRoot(absoluteDir);
 	if (!workspaceRoot) {
+		workspaceCache.set(absoluteDir, null);
 		return null;
 	}
 
@@ -86,7 +96,7 @@ export async function discoverWorkspace(
 		path.join(root, "package.json")
 	);
 
-	return {
+	const result: WorkspaceInfo = {
 		root,
 		type,
 		patterns,
@@ -98,6 +108,8 @@ export async function discoverWorkspace(
 				}
 			: undefined,
 	};
+	workspaceCache.set(absoluteDir, result);
+	return result;
 }
 
 /**
