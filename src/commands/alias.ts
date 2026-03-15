@@ -73,29 +73,30 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 		);
 		logger.info(`   Strategy: ${prefer}\n`);
 
-		const allChanges: AliasChange[] = [];
-		let totalFiles = 0;
-
-		for (const pkg of wsInfo.packages) {
-			if (!pkg.tsconfigPath) {
-				continue;
-			}
-			try {
-				const pkgProject = loadProject(pkg.tsconfigPath);
+		const { mapConcurrent } = await import("../core/concurrency.ts");
+		const eligiblePkgs = wsInfo.packages.filter((pkg) => pkg.tsconfigPath);
+		const pkgResults = await mapConcurrent(
+			eligiblePkgs,
+			async (pkg) => {
+				const pkgProject = loadProject(pkg.tsconfigPath as string);
 				const pkgDir = pkg.srcDir ? path.join(pkg.path, pkg.srcDir) : pkg.path;
 				const pkgResult = normalizeImports(pkgDir, prefer, pkgProject);
-				// Filter changes to workspace boundary
 				const bounded = pkgResult.changes.filter(
 					(c) => filterToWorkspaceBoundary([c.file], wsInfo.root).length > 0
 				);
-				allChanges.push(...bounded);
-				totalFiles += pkgResult.filesProcessed;
-			} catch {
-				if (verbose) {
-					logger.warn(`   Skipping ${pkg.name}: failed to load project`);
-				}
+				return { changes: bounded, filesProcessed: pkgResult.filesProcessed };
+			},
+			{
+				onError: (pkg) => {
+					if (verbose) {
+						logger.warn(`   Skipping ${pkg.name}: failed to load project`);
+					}
+					return { changes: [] as AliasChange[], filesProcessed: 0 };
+				},
 			}
-		}
+		);
+		const allChanges = pkgResults.flatMap((r) => r.changes);
+		const totalFiles = pkgResults.reduce((s, r) => s + r.filesProcessed, 0);
 
 		const result: AliasResult = {
 			filesProcessed: totalFiles,

@@ -69,14 +69,18 @@ export async function renameCommand(options: RenameOptions): Promise<void> {
 			: path.dirname(tsconfigPath);
 		const wsInfo = await discoverWorkspace(wsDir);
 		if (wsInfo && wsInfo.packages.length > 0) {
-			for (const pkg of wsInfo.packages) {
-				if (!pkg.tsconfigPath || pkg.tsconfigPath === tsconfigPath) {
-					continue;
-				}
-				try {
-					extraProjects.push(loadProject(pkg.tsconfigPath));
-				} catch {
-					// Skip packages that fail to load
+			const { mapConcurrent } = await import("../core/concurrency.ts");
+			const eligiblePkgs = wsInfo.packages.filter(
+				(pkg) => pkg.tsconfigPath && pkg.tsconfigPath !== tsconfigPath
+			);
+			const loaded = await mapConcurrent(
+				eligiblePkgs,
+				async (pkg) => loadProject(pkg.tsconfigPath as string),
+				{ onError: () => null }
+			);
+			for (const proj of loaded) {
+				if (proj) {
+					extraProjects.push(proj);
 				}
 			}
 			if (verbose && extraProjects.length > 0) {

@@ -230,33 +230,38 @@ export async function auditCommand(options: AuditOptions): Promise<void> {
 		const wsDir = projectArg ? path.resolve(projectArg) : absoluteDir;
 		const wsInfo = await discoverWorkspace(wsDir);
 		if (wsInfo && wsInfo.packages.length > 0) {
-			for (const pkg of wsInfo.packages) {
-				const pkgTsconfig = pkg.tsconfigPath;
-				if (!pkgTsconfig || pkgTsconfig === tsconfigPath) {
+			const { mapConcurrent } = await import("../core/concurrency.ts");
+			const eligiblePkgs = wsInfo.packages.filter(
+				(pkg) => pkg.tsconfigPath && pkg.tsconfigPath !== tsconfigPath
+			);
+			const pkgGraphs = await mapConcurrent(
+				eligiblePkgs,
+				async (pkg) => {
+					const pkgProject = loadProject(pkg.tsconfigPath as string);
+					return buildDependencyGraph(pkgProject);
+				},
+				{ onError: () => null }
+			);
+			// Merge graphs sequentially (shared Map mutations)
+			for (const pkgGraph of pkgGraphs) {
+				if (!pkgGraph) {
 					continue;
 				}
-				try {
-					const pkgProject = loadProject(pkgTsconfig);
-					const pkgGraph = buildDependencyGraph(pkgProject);
-					// Merge into main graph
-					for (const [file, refs] of pkgGraph.imports) {
-						if (!graph.imports.has(file)) {
-							graph.imports.set(file, refs);
-						}
+				for (const [file, refs] of pkgGraph.imports) {
+					if (!graph.imports.has(file)) {
+						graph.imports.set(file, refs);
 					}
-					for (const [file, refs] of pkgGraph.importedBy) {
-						const existing = graph.importedBy.get(file) ?? [];
-						existing.push(...refs);
-						graph.importedBy.set(file, existing);
-					}
-					for (const barrel of pkgGraph.barrelFiles) {
-						graph.barrelFiles.add(barrel);
-					}
-					for (const [barrel, files] of pkgGraph.barrelReExports) {
-						graph.barrelReExports.set(barrel, files);
-					}
-				} catch {
-					// Skip packages that fail to load
+				}
+				for (const [file, refs] of pkgGraph.importedBy) {
+					const existing = graph.importedBy.get(file) ?? [];
+					existing.push(...refs);
+					graph.importedBy.set(file, existing);
+				}
+				for (const barrel of pkgGraph.barrelFiles) {
+					graph.barrelFiles.add(barrel);
+				}
+				for (const [barrel, files] of pkgGraph.barrelReExports) {
+					graph.barrelReExports.set(barrel, files);
 				}
 			}
 		}

@@ -21,11 +21,7 @@ import {
 	discoverWorkspace,
 	filterToWorkspaceBoundary,
 } from "../core/workspace.ts";
-import type {
-	AnalysisResult,
-	ModuleReference,
-	ProjectConfig,
-} from "../types.ts";
+import type { AnalysisResult, ProjectConfig } from "../types.ts";
 
 export interface AnalyzeOptions {
 	file: string;
@@ -68,26 +64,24 @@ export async function analyzeCommand(options: AnalyzeOptions): Promise<void> {
 				logger.error(`File is outside workspace root: ${wsInfo.root}`);
 				process.exit(1);
 			}
-			const crossRefs: ModuleReference[] = [];
-			for (const pkg of wsInfo.packages) {
-				const pkgTsconfig = pkg.tsconfigPath;
-				if (!pkgTsconfig || pkgTsconfig === tsconfigPath) {
-					continue;
-				}
-				try {
-					const pkgProject = loadProject(pkgTsconfig);
+			const { mapConcurrent } = await import("../core/concurrency.ts");
+			const eligiblePkgs = wsInfo.packages.filter(
+				(pkg) => pkg.tsconfigPath && pkg.tsconfigPath !== tsconfigPath
+			);
+			const pkgResults = await mapConcurrent(
+				eligiblePkgs,
+				async (pkg) => {
+					const pkgProject = loadProject(pkg.tsconfigPath as string);
 					const pkgGraph = buildDependencyGraph(pkgProject);
 					const refs = findAllReferences(absolutePath, pkgGraph);
-					// Filter refs to workspace boundary
-					const boundedRefs = refs.filter(
+					return refs.filter(
 						(r) =>
 							filterToWorkspaceBoundary([r.sourceFile], wsInfo.root).length > 0
 					);
-					crossRefs.push(...boundedRefs);
-				} catch {
-					// Skip packages that fail to load
-				}
-			}
+				},
+				{ onError: () => [] }
+			);
+			const crossRefs = pkgResults.flat();
 			if (crossRefs.length > 0) {
 				result.referencedBy.push(...crossRefs);
 			}
