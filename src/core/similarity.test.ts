@@ -704,6 +704,63 @@ function isSqlFunction(functionName: string): boolean {
 		expect(groups).toHaveLength(1);
 		expect(groups[0]?.bucket).toBe("exact");
 	});
+
+	test("does not group cross-file object-mapper pairs with completely different names", () => {
+		// Mirrors the real false positive: buildModuleReference (scanner.ts) vs
+		// toProjectConfig (tsconfig-discovery.ts). Both are "return { $I: $I.$I, ... }"
+		// object mappers with high bigram Jaccard but zero shared name tokens.
+		const bodyA = `{
+  return {
+    sourceFile: sourceFile.fileName,
+    specifier: base.specifier,
+    resolvedPath: base.resolvedPath,
+    type,
+    line: base.line,
+    column: base.column,
+    bindings: bindings.length > 0 ? bindings : undefined,
+    isTypeOnly,
+  };
+}`;
+		const bodyB = `{
+  return {
+    rootDir: info.rootDir,
+    tsconfigPath: info.path,
+    compilerOptions: info.compilerOptions,
+    pathAliases: info.pathAliases,
+    include: info.include,
+    exclude: info.exclude,
+    files: info.files,
+    references: info.references.length > 0 ? info.references : undefined,
+  };
+}`;
+		const fnA = makeFunction("buildModuleReference", bodyA, "scanner.ts");
+		const fnB = makeFunction("toProjectConfig", bodyB, "tsconfig-discovery.ts");
+
+		// nameScore = 0 (no shared camelCase tokens) → 0.85 penalty applied cross-file
+		const groups = findSimilarGroups([fnA, fnB], 0.8);
+		expect(groups).toHaveLength(0);
+	});
+
+	test("preserves same-file pairs with zero name similarity", () => {
+		// Same-file pairs are never penalized — they aren't cross-domain false positives.
+		const body = `{
+  return {
+    a: obj.a,
+    b: obj.b,
+    c: obj.c,
+    d: obj.d,
+    e: obj.e,
+    f: obj.f,
+    g: arr.length > 0 ? arr : undefined,
+  };
+}`;
+		const fnA = makeFunction("buildAlpha", body, "same.ts");
+		const fnB = makeFunction("toBeta", body, "same.ts");
+
+		// Same file → no name penalty → exact bucket
+		const groups = findSimilarGroups([fnA, fnB], 0.8);
+		expect(groups).toHaveLength(1);
+	});
 });
 
 describe("camelCaseTokenize", () => {

@@ -485,6 +485,16 @@ export function findSimilarGroups(
 				score = jaccardSimilarity(bigramsI ?? [], preBigrams[j] ?? []);
 			}
 
+			// Soft penalty for cross-file pairs with completely dissimilar names.
+			// Pure structural similarity can be coincidental when unrelated functions
+			// from different domains share the same shape (e.g. two object-mapper
+			// functions that each map one struct to another). Blending in a name
+			// signal reduces these false positives while leaving same-file pairs
+			// and pairs with any shared name token unaffected.
+			if (fnI.file !== fnJ.file && nameSimilarity(fnI.name, fnJ.name) < 0.1) {
+				score *= 0.85;
+			}
+
 			if (score >= threshold) {
 				group.push(fnJ);
 				assigned.add(j);
