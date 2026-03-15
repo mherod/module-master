@@ -16,11 +16,14 @@ import type { FunctionInfo, SimilarityGroup } from "../types.ts";
  * Compute the import specifier for a file importing from importTarget.
  * When workspace info is available and the files are in different packages,
  * uses the package name instead of a relative path.
+ * When keepExtension is true, preserves the file extension in relative paths
+ * (needed for projects using moduleResolution: bundler with allowImportingTsExtensions).
  */
 function computeSpecifier(
 	filePath: string,
 	importTarget: string,
-	ws?: WorkspaceInfo
+	ws?: WorkspaceInfo,
+	keepExtension = false
 ): string {
 	if (ws && isCrossPackageMove(filePath, importTarget, ws)) {
 		const pkgImport = findCrossPackageImport(importTarget, ws);
@@ -28,7 +31,14 @@ function computeSpecifier(
 			return pkgImport;
 		}
 	}
-	return calculateRelativeSpecifier(filePath, importTarget);
+	const spec = calculateRelativeSpecifier(filePath, importTarget);
+	if (keepExtension) {
+		const ext = path.extname(importTarget);
+		if (ext && !spec.endsWith(ext)) {
+			return `${spec}${ext}`;
+		}
+	}
+	return spec;
 }
 
 export interface ExtractCommonOptions {
@@ -51,8 +61,10 @@ export interface ExtractCommonOptions {
 
 interface FunctionNode {
 	info: FunctionInfo;
-	/** Start byte offset of the full statement (including export, JSDoc) */
+	/** Start byte offset including leading trivia (JSDoc, comments, whitespace) — used for removal */
 	start: number;
+	/** Start byte offset after leading trivia — used for export keyword insertion */
+	actualStart: number;
 	/** End byte offset of the full statement */
 	end: number;
 	/** Full text of the statement */
@@ -67,6 +79,12 @@ interface ExtractionPlan {
 	canonical: FunctionNode;
 	/** Copies to remove and replace with imports */
 	duplicates: FunctionNode[];
+}
+
+/** Pending changes to apply to a single file */
+interface FileUpdate {
+	changes: TextChange[];
+	imports: string[];
 }
 
 /**
@@ -86,8 +104,8 @@ function findFunctionNode(
 			);
 			if (line + 1 === targetLine) {
 				const end = stmt.getEnd();
-				// Include leading trivia (JSDoc, comments) by using full start
 				const fullStart = stmt.getFullStart();
+				const actualStart = stmt.getStart(sourceFile);
 				const text = sourceFile.text.slice(fullStart, end);
 				const exported =
 					stmt.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword) ??
@@ -107,6 +125,7 @@ function findFunctionNode(
 						isWrapper: false,
 					},
 					start: fullStart,
+					actualStart,
 					end,
 					text,
 					exported,
@@ -126,6 +145,7 @@ function findFunctionNode(
 					const afterEnd = sourceFile.text.charCodeAt(end);
 					const actualEnd = afterEnd === 59 /* ; */ ? end + 1 : end;
 					const fullStart = stmt.getFullStart();
+					const actualStart = stmt.getStart(sourceFile);
 					const text = sourceFile.text.slice(fullStart, actualEnd);
 					const exported =
 						stmt.modifiers?.some(
@@ -146,6 +166,7 @@ function findFunctionNode(
 							isWrapper: false,
 						},
 						start: fullStart,
+						actualStart,
 						end: actualEnd,
 						text,
 						exported,
@@ -211,141 +232,165 @@ function planExtractions(groups: SimilarityGroup[]): ExtractionPlan[] {
 }
 
 /**
- * Ensure the canonical function is exported. If not, adds the export keyword.
+ * Get or create the FileUpdate entry for a given file path.
  */
-function ensureExported(node: FunctionNode): TextChange | null {
-	if (node.exported) {
-		return null;
+function getOrCreateUpdate(
+	updates: Map<string, FileUpdate>,
+	filePath: string
+): FileUpdate {
+	let update = updates.get(filePath);
+	if (!update) {
+		update = { changes: [], imports: [] };
+		updates.set(filePath, update);
 	}
-	// Add "export " before the function/const keyword
-	return { start: node.start, end: node.start, newText: "export " };
+	return update;
 }
 
 /**
- * Replace function nodes in their files with import/re-export statements.
- * Groups nodes by file so multiple removals in the same file are batched.
+ * Build the import/re-export statement for a duplicate being replaced.
+ * Uses the canonical name, aliasing to the duplicate's name when they differ
+ * so that existing call sites within the file continue to work.
  */
-async function replaceNodesWithImports(
-	nodes: FunctionNode[],
-	importTarget: string,
+function buildImportStatement(
+	dup: FunctionNode,
+	canonicalName: string,
+	specifier: string
+): string {
+	const dupName = dup.info.name;
+	// When names differ, alias: `import { canonical as dup }` so existing
+	// references to the duplicate's name remain valid.
+	const importedName =
+		dupName === canonicalName
+			? canonicalName
+			: `${canonicalName} as ${dupName}`;
+	return dup.exported
+		? `export { ${importedName} } from "${specifier}";`
+		: `import { ${importedName} } from "${specifier}";`;
+}
+
+/**
+ * Collect all file changes for a plan into the update map.
+ * This deferred approach lets us apply ALL changes to each file in a single
+ * pass, preventing stale-position corruption when multiple plans touch the
+ * same file.
+ *
+ * Same-file duplicates (canonical and duplicate in the same file) are handled
+ * by removing the duplicate body only — no self-import is generated.
+ */
+function collectPlanUpdates(
+	plan: ExtractionPlan,
+	updates: Map<string, FileUpdate>,
+	keepExtension: boolean,
 	ws?: WorkspaceInfo
-): Promise<string[]> {
-	const filesModified: string[] = [];
-	const byFile = new Map<string, FunctionNode[]>();
-	for (const node of nodes) {
-		const existing = byFile.get(node.info.file) ?? [];
-		existing.push(node);
-		byFile.set(node.info.file, existing);
+): void {
+	const canonicalFile = plan.canonical.info.file;
+	const canonicalName = plan.canonical.info.name;
+
+	// Ensure canonical is exported (insert "export " before its keyword)
+	if (!plan.canonical.exported) {
+		getOrCreateUpdate(updates, canonicalFile).changes.push({
+			start: plan.canonical.actualStart,
+			end: plan.canonical.actualStart,
+			newText: "export ",
+		});
 	}
 
-	for (const [filePath, fileNodes] of byFile) {
+	for (const dup of plan.duplicates) {
+		// Always remove the duplicate function body
+		getOrCreateUpdate(updates, dup.info.file).changes.push({
+			start: dup.start,
+			end: dup.end,
+			newText: "",
+		});
+
+		// Skip import generation when duplicate is in the same file as the
+		// canonical — adding `import { x } from "./sameFile"` would be circular.
+		if (dup.info.file === canonicalFile) {
+			continue;
+		}
+
+		const specifier = computeSpecifier(
+			dup.info.file,
+			canonicalFile,
+			ws,
+			keepExtension
+		);
+		getOrCreateUpdate(updates, dup.info.file).imports.push(
+			buildImportStatement(dup, canonicalName, specifier)
+		);
+	}
+}
+
+/**
+ * Collect all file changes for an --output plan into the update map.
+ * All copies (canonical + duplicates) are removed from their source files
+ * and replaced with imports from the output file.
+ */
+function collectPlanToOutputUpdates(
+	plan: ExtractionPlan,
+	absOutput: string,
+	updates: Map<string, FileUpdate>,
+	keepExtension: boolean,
+	ws?: WorkspaceInfo
+): void {
+	const canonicalName = plan.canonical.info.name;
+	const allNodes = [plan.canonical, ...plan.duplicates];
+
+	for (const node of allNodes) {
+		getOrCreateUpdate(updates, node.info.file).changes.push({
+			start: node.start,
+			end: node.end,
+			newText: "",
+		});
+
+		// No self-import for nodes already in the output file
+		if (node.info.file === absOutput) {
+			continue;
+		}
+
+		const specifier = computeSpecifier(
+			node.info.file,
+			absOutput,
+			ws,
+			keepExtension
+		);
+		getOrCreateUpdate(updates, node.info.file).imports.push(
+			buildImportStatement(node, canonicalName, specifier)
+		);
+	}
+}
+
+/**
+ * Apply all pending file updates: removals then import insertions, in one
+ * read+write per file.
+ */
+async function applyFileUpdates(
+	updates: Map<string, FileUpdate>
+): Promise<string[]> {
+	const filesModified: string[] = [];
+	for (const [filePath, update] of updates) {
 		const content = await Bun.file(filePath).text();
-		const changes: TextChange[] = [];
-		const imports: string[] = [];
+		let newContent = applyTextChanges(content, update.changes);
 
-		for (const node of fileNodes) {
-			changes.push({ start: node.start, end: node.end, newText: "" });
-			const specifier = computeSpecifier(filePath, importTarget, ws);
-			const stmt = node.exported
-				? `export { ${node.info.name} } from "${specifier}";`
-				: `import { ${node.info.name} } from "${specifier}";`;
-			imports.push(stmt);
+		if (update.imports.length > 0) {
+			const importBlock = update.imports.join("\n");
+			const lastImportIdx = findLastImportEnd(newContent);
+			if (lastImportIdx > 0) {
+				newContent =
+					newContent.slice(0, lastImportIdx) +
+					"\n" +
+					importBlock +
+					newContent.slice(lastImportIdx);
+			} else {
+				newContent = `${importBlock}\n${newContent}`;
+			}
 		}
 
-		let newContent = applyTextChanges(content, changes);
-		const importBlock = imports.join("\n");
-		const lastImportIdx = findLastImportEnd(newContent);
-		if (lastImportIdx > 0) {
-			newContent =
-				newContent.slice(0, lastImportIdx) +
-				"\n" +
-				importBlock +
-				newContent.slice(lastImportIdx);
-		} else {
-			newContent = `${importBlock}\n${newContent}`;
-		}
 		newContent = newContent.replace(/\n{3,}/g, "\n\n");
 		await Bun.write(filePath, newContent);
 		filesModified.push(filePath);
 	}
-
 	return filesModified;
-}
-
-/**
- * Apply an extraction plan to the filesystem.
- */
-async function applyPlan(
-	plan: ExtractionPlan,
-	ws?: WorkspaceInfo
-): Promise<{
-	filesModified: string[];
-	functionsRemoved: number;
-}> {
-	const filesModified: string[] = [];
-
-	// Step 1: Ensure canonical is exported
-	const exportChange = ensureExported(plan.canonical);
-	if (exportChange) {
-		const content = await Bun.file(plan.canonical.info.file).text();
-		const newContent = applyTextChanges(content, [exportChange]);
-		await Bun.write(plan.canonical.info.file, newContent);
-		filesModified.push(plan.canonical.info.file);
-	}
-
-	// Step 2: Replace duplicates with imports from the canonical file
-	const modified = await replaceNodesWithImports(
-		plan.duplicates,
-		plan.canonical.info.file,
-		ws
-	);
-	filesModified.push(...modified);
-
-	return {
-		filesModified: [...new Set(filesModified)],
-		functionsRemoved: plan.duplicates.length,
-	};
-}
-
-/**
- * Apply an extraction plan by writing the canonical function to a specified
- * output file and replacing ALL copies (including the original canonical) with
- * imports from the output file.
- */
-async function applyPlanToOutput(
-	plan: ExtractionPlan,
-	outputFile: string,
-	ws?: WorkspaceInfo
-): Promise<{ filesModified: string[]; functionsRemoved: number }> {
-	const filesModified: string[] = [];
-	const absOutput = path.resolve(outputFile);
-
-	// Step 1: Build the function text to write (ensure it's exported)
-	let fnText = plan.canonical.text.trimStart();
-	if (!plan.canonical.exported) {
-		fnText = `export ${fnText}`;
-	}
-
-	// Step 2: Append to or create the output file
-	let existingContent = "";
-	try {
-		existingContent = await Bun.file(absOutput).text();
-	} catch {
-		// File doesn't exist yet — will be created
-	}
-	const separator = existingContent.length > 0 ? "\n\n" : "";
-	await Bun.write(absOutput, `${existingContent}${separator}${fnText}\n`);
-	filesModified.push(absOutput);
-
-	// Step 3: Remove function from ALL files and replace with imports
-	const allNodes = [plan.canonical, ...plan.duplicates];
-	const modified = await replaceNodesWithImports(allNodes, absOutput, ws);
-	filesModified.push(...modified);
-
-	return {
-		filesModified: [...new Set(filesModified)],
-		functionsRemoved: allNodes.length,
-	};
 }
 
 /**
@@ -367,6 +412,33 @@ function findLastImportEnd(content: string): number {
 		}
 	}
 	return lastImportEnd;
+}
+
+/**
+ * Detect whether the project requires explicit file extensions in imports
+ * (moduleResolution: bundler + allowImportingTsExtensions).
+ * Reads tsconfig.json directly; does not follow `extends` chains.
+ */
+async function detectKeepExtension(
+	dir: string,
+	project?: string
+): Promise<boolean> {
+	const candidates = [project, dir].filter(Boolean) as string[];
+	for (const searchDir of candidates) {
+		const tsconfigPath = path.join(searchDir, "tsconfig.json");
+		try {
+			const content = await Bun.file(tsconfigPath).text();
+			const config = JSON.parse(content) as {
+				compilerOptions?: { allowImportingTsExtensions?: boolean };
+			};
+			if (config.compilerOptions?.allowImportingTsExtensions === true) {
+				return true;
+			}
+		} catch {
+			// ignore missing or unparseable tsconfig
+		}
+	}
+	return false;
 }
 
 export async function extractCommonCommand(
@@ -446,9 +518,17 @@ export async function extractCommonCommand(
 
 	// Step 4: Report / execute
 	let totalRemoved = 0;
-	const allModified: string[] = [];
-
 	const absOutput = output ? path.resolve(output) : undefined;
+
+	// Detect whether imports need explicit .ts extensions
+	const keepExtension = dryRun
+		? false
+		: await detectKeepExtension(absoluteDir, project);
+
+	// Collect all file changes across all plans before writing anything.
+	// This prevents stale-position corruption when multiple plans affect the
+	// same file (Bug 3).
+	const fileUpdates = new Map<string, FileUpdate>();
 
 	for (let i = 0; i < plans.length; i++) {
 		const plan = plans[i];
@@ -470,6 +550,7 @@ export async function extractCommonCommand(
 					`   ${dryRun ? "Would remove from" : "Remove from"}: ${rel}:${node.info.line}`
 				);
 			}
+			totalRemoved += allSources.length;
 		} else {
 			const canonicalRel = path.relative(absoluteDir, plan.canonical.info.file);
 			logger.info(`   Keep in: ${canonicalRel}:${plan.canonical.info.line}`);
@@ -479,23 +560,41 @@ export async function extractCommonCommand(
 					`   ${dryRun ? "Would remove from" : "Remove from"}: ${dupRel}:${dup.info.line}`
 				);
 			}
+			totalRemoved += plan.duplicates.length;
 		}
 		logger.empty();
 
-		if (dryRun) {
-			totalRemoved += absOutput
-				? plan.duplicates.length + 1
-				: plan.duplicates.length;
-		} else if (absOutput) {
-			const result = await applyPlanToOutput(plan, absOutput, ws ?? undefined);
-			totalRemoved += result.functionsRemoved;
-			allModified.push(...result.filesModified);
-		} else {
-			const result = await applyPlan(plan, ws ?? undefined);
-			totalRemoved += result.functionsRemoved;
-			allModified.push(...result.filesModified);
+		if (!dryRun) {
+			if (absOutput) {
+				// Write canonical function to the output file first (sequential append)
+				let fnText = plan.canonical.text.trimStart();
+				if (!plan.canonical.exported) {
+					fnText = `export ${fnText}`;
+				}
+				let existingContent = "";
+				try {
+					existingContent = await Bun.file(absOutput).text();
+				} catch {
+					// File doesn't exist yet — will be created
+				}
+				const separator = existingContent.length > 0 ? "\n\n" : "";
+				await Bun.write(absOutput, `${existingContent}${separator}${fnText}\n`);
+
+				collectPlanToOutputUpdates(
+					plan,
+					absOutput,
+					fileUpdates,
+					keepExtension,
+					ws ?? undefined
+				);
+			} else {
+				collectPlanUpdates(plan, fileUpdates, keepExtension, ws ?? undefined);
+			}
 		}
 	}
+
+	// Apply all collected file changes in one pass per file
+	const allModified = dryRun ? [] : await applyFileUpdates(fileUpdates);
 
 	// Summary
 	const uniqueFiles = [...new Set(allModified)];

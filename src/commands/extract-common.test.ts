@@ -171,6 +171,237 @@ describe("extract-common", () => {
 		await rm(dir, { recursive: true, force: true });
 	});
 
+	test("same-file duplicate: removes duplicate without generating self-import", async () => {
+		const dir = nextFixtureDir();
+		await Bun.write(
+			path.join(dir, "tsconfig.json"),
+			JSON.stringify({
+				compilerOptions: { target: "ES2020", module: "ESNext", strict: true },
+				include: ["*.ts"],
+			})
+		);
+		// Both functions are in the same file; one should be kept, the other removed,
+		// but NO self-import (`import { ... } from "./utils"`) should be generated.
+		await Bun.write(
+			path.join(dir, "utils.ts"),
+			`export function formatDate(input: Date): string {
+  const iso = input.toISOString();
+  const parts = iso.split("T");
+  return parts[0] ?? "";
+}
+
+function parseDate(input: Date): string {
+  const iso = input.toISOString();
+  const parts = iso.split("T");
+  return parts[0] ?? "";
+}
+
+export function otherUtil(): number {
+  return 1;
+}
+`
+		);
+
+		await extractCommonCommand({
+			directory: dir,
+			threshold: 0.95,
+			dryRun: false,
+		});
+
+		const content = await Bun.file(path.join(dir, "utils.ts")).text();
+
+		// The exported canonical should still be present
+		expect(content).toContain("export function formatDate");
+		// The duplicate should be removed
+		expect(content).not.toContain("function parseDate");
+		// No self-import from the same file
+		expect(content).not.toContain('from "./utils"');
+		// Other exports should be untouched
+		expect(content).toContain("export function otherUtil");
+
+		await rm(dir, { recursive: true, force: true });
+	});
+
+	test("name mismatch: generates aliased import using canonical name", async () => {
+		const dir = nextFixtureDir();
+		await Bun.write(
+			path.join(dir, "tsconfig.json"),
+			JSON.stringify({
+				compilerOptions: { target: "ES2020", module: "ESNext", strict: true },
+				include: ["*.ts"],
+			})
+		);
+		// a.ts exports formatDate; b.ts has the same function body under formatDateStr
+		await Bun.write(
+			path.join(dir, "a.ts"),
+			`export function formatDate(input: Date): string {
+  const iso = input.toISOString();
+  const parts = iso.split("T");
+  return parts[0] ?? "";
+}
+`
+		);
+		await Bun.write(
+			path.join(dir, "b.ts"),
+			`function formatDateStr(input: Date): string {
+  const iso = input.toISOString();
+  const parts = iso.split("T");
+  return parts[0] ?? "";
+}
+
+export function otherB(): number {
+  return 99;
+}
+`
+		);
+
+		await extractCommonCommand({
+			directory: dir,
+			threshold: 0.95,
+			dryRun: false,
+			sameNameOnly: false,
+		});
+
+		const bContent = await Bun.file(path.join(dir, "b.ts")).text();
+
+		// b.ts should NOT have the function body anymore
+		expect(bContent).not.toContain("function formatDateStr(input: Date)");
+		// b.ts should import using the canonical name, aliased to the duplicate name
+		expect(bContent).toContain(
+			'import { formatDate as formatDateStr } from "./a"'
+		);
+		// b.ts should still have its own function
+		expect(bContent).toContain("export function otherB");
+
+		await rm(dir, { recursive: true, force: true });
+	});
+
+	test("extension-aware: emits .ts extension when allowImportingTsExtensions is set", async () => {
+		const dir = nextFixtureDir();
+		await Bun.write(
+			path.join(dir, "tsconfig.json"),
+			JSON.stringify({
+				compilerOptions: {
+					target: "ES2020",
+					moduleResolution: "bundler",
+					allowImportingTsExtensions: true,
+					strict: true,
+				},
+				include: ["*.ts"],
+			})
+		);
+		await Bun.write(
+			path.join(dir, "a.ts"),
+			`export function formatDate(input: Date): string {
+  const iso = input.toISOString();
+  const parts = iso.split("T");
+  return parts[0] ?? "";
+}
+
+export function otherA(): number {
+  return 42;
+}
+`
+		);
+		await Bun.write(
+			path.join(dir, "b.ts"),
+			`function formatDate(input: Date): string {
+  const iso = input.toISOString();
+  const parts = iso.split("T");
+  return parts[0] ?? "";
+}
+
+export function otherB(): number {
+  return 99;
+}
+`
+		);
+
+		await extractCommonCommand({
+			directory: dir,
+			threshold: 0.95,
+			dryRun: false,
+		});
+
+		const bContent = await Bun.file(path.join(dir, "b.ts")).text();
+
+		// Import should include .ts extension
+		expect(bContent).toContain('import { formatDate } from "./a.ts"');
+		expect(bContent).not.toContain('import { formatDate } from "./a"');
+		expect(bContent).toContain("export function otherB");
+
+		await rm(dir, { recursive: true, force: true });
+	});
+
+	test("multi-plan: multiple groups modifying same file apply without corruption", async () => {
+		const dir = nextFixtureDir();
+		await Bun.write(
+			path.join(dir, "tsconfig.json"),
+			JSON.stringify({
+				compilerOptions: { target: "ES2020", module: "ESNext", strict: true },
+				include: ["*.ts"],
+			})
+		);
+		// shared.ts has two exported functions that appear as duplicates in consumer.ts
+		await Bun.write(
+			path.join(dir, "shared.ts"),
+			`export function formatDate(input: Date): string {
+  const iso = input.toISOString();
+  const parts = iso.split("T");
+  return parts[0] ?? "";
+}
+
+export function parseIso(input: Date): string {
+  const result = input.toISOString();
+  const segments = result.split("T");
+  return segments[0] ?? "";
+}
+`
+		);
+		await Bun.write(
+			path.join(dir, "consumer.ts"),
+			`function formatDate(input: Date): string {
+  const iso = input.toISOString();
+  const parts = iso.split("T");
+  return parts[0] ?? "";
+}
+
+function parseIso(input: Date): string {
+  const result = input.toISOString();
+  const segments = result.split("T");
+  return segments[0] ?? "";
+}
+
+export function run(): void {
+  console.log(formatDate(new Date()));
+  console.log(parseIso(new Date()));
+}
+`
+		);
+
+		await extractCommonCommand({
+			directory: dir,
+			threshold: 0.95,
+			dryRun: false,
+		});
+
+		const consumerContent = await Bun.file(
+			path.join(dir, "consumer.ts")
+		).text();
+
+		// Both duplicate functions should be removed
+		expect(consumerContent).not.toContain("function formatDate(input: Date)");
+		expect(consumerContent).not.toContain("function parseIso(input: Date)");
+		// Both imports should be present
+		expect(consumerContent).toContain('from "./shared"');
+		// Own function should survive uncorrupted
+		expect(consumerContent).toContain("export function run");
+		// No corruption: "async", "export", "function" keywords should not be merged
+		expect(consumerContent).not.toMatch(/\w+export\s/);
+
+		await rm(dir, { recursive: true, force: true });
+	});
+
 	test("--output writes function to specified file and rewrites all sources", async () => {
 		const dir = nextFixtureDir();
 		await setupFixtures(dir);
