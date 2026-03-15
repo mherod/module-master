@@ -600,6 +600,74 @@ export const contactsRegistry = { reAuth: async () => {} };
 		await rm(dir, { recursive: true, force: true });
 	});
 
+	test("--strict --dry-run exits 1 when extractable groups are found", async () => {
+		const dir = nextFixtureDir();
+		await setupFixtures(dir);
+
+		let exitCode: number | undefined;
+		const originalExit = process.exit.bind(process);
+		process.exit = ((code?: number) => {
+			exitCode = code ?? 0;
+		}) as typeof process.exit;
+
+		const cap = captureStdout();
+		try {
+			await extractCommonCommand({
+				directory: dir,
+				threshold: 0.95,
+				dryRun: true,
+				strict: true,
+			});
+		} finally {
+			cap.restore();
+			process.exit = originalExit;
+		}
+
+		expect(exitCode).toBe(1);
+		// Files should be unchanged (dry-run)
+		const bContent = await Bun.file(path.join(dir, "b.ts")).text();
+		expect(bContent).toContain("function formatDate");
+
+		await rm(dir, { recursive: true, force: true });
+	});
+
+	test("--strict exits 0 when no extractable groups found", async () => {
+		const dir = nextFixtureDir();
+		// Single file, no duplicates
+		await Bun.write(
+			path.join(dir, "tsconfig.json"),
+			JSON.stringify({
+				compilerOptions: { target: "ES2020", module: "ESNext", strict: true },
+				include: ["*.ts"],
+			})
+		);
+		await Bun.write(
+			path.join(dir, "a.ts"),
+			"export function onlyHere(): number { return 1; }\n"
+		);
+
+		let exitCode: number | undefined;
+		const originalExit = process.exit.bind(process);
+		process.exit = ((code?: number) => {
+			exitCode = code ?? 0;
+		}) as typeof process.exit;
+
+		try {
+			await extractCommonCommand({
+				directory: dir,
+				threshold: 0.95,
+				dryRun: true,
+				strict: true,
+			});
+		} finally {
+			process.exit = originalExit;
+		}
+
+		expect(exitCode).toBeUndefined();
+
+		await rm(dir, { recursive: true, force: true });
+	});
+
 	test("--workspace: deduplicates across packages in a workspace", async () => {
 		const dir = nextFixtureDir();
 

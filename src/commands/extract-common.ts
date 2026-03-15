@@ -47,6 +47,7 @@ export interface ExtractCommonOptions {
 	threshold?: number;
 	dryRun?: boolean;
 	json?: boolean;
+	strict?: boolean;
 	group?: number;
 	workspace?: boolean;
 	nameThreshold?: number;
@@ -748,6 +749,7 @@ export async function extractCommonCommand(
 		threshold = 0.95,
 		dryRun = false,
 		json = false,
+		strict = false,
 		group: targetGroup,
 		workspace = false,
 		nameThreshold,
@@ -951,6 +953,12 @@ export async function extractCommonCommand(
 			dryRun,
 		};
 		process.stdout.write(`${JSON.stringify(jsonOutput, null, 2)}\n`);
+		if (strict && plans.length > 0) {
+			process.stderr.write(
+				`error: ${plans.length} extractable duplicate group(s) found (threshold: ${threshold})\n`
+			);
+			process.exit(1);
+		}
 		return;
 	}
 
@@ -966,4 +974,11 @@ export async function extractCommonCommand(
 		);
 	}
 	logger.empty();
+
+	if (strict && plans.length > 0) {
+		process.stderr.write(
+			`error: ${plans.length} extractable duplicate group(s) found (threshold: ${threshold})\n`
+		);
+		process.exit(1);
+	}
 }

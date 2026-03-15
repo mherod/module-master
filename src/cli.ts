@@ -336,6 +336,7 @@ Options:
   -o, --output       Write extracted functions to this file (consolidate into one location)
   -n, --dry-run      Preview changes without modifying files
   --json             Output results as JSON
+  --strict           Exit 1 if extractable duplicate groups are found (use with --dry-run for CI)
   --skip-same-file   Skip groups where all functions are in the same file
   --only-related-to  Only process groups related to a file or folder (path or glob)
   --min-lines        Exclude functions with fewer body lines (filters thin wrappers)
@@ -356,6 +357,7 @@ Examples:
   ${name} extract-common src --only-related-to=src/utils/helpers.ts
   ${name} extract-common . --workspace
   ${name} extract-common src --dry-run --json
+  ${name} extract-common src --dry-run --strict
 `);
 			break;
 		case "audit":
@@ -634,6 +636,7 @@ async function main() {
 				threshold,
 				dryRun: values["dry-run"],
 				json: values.json,
+				strict: values.strict,
 				group,
 				workspace: values.workspace,
 				output: values.output,
