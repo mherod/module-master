@@ -402,6 +402,81 @@ export function run(): void {
 		await rm(dir, { recursive: true, force: true });
 	});
 
+	test("closed-over vars: skips functions capturing different module-scope variables", async () => {
+		const dir = nextFixtureDir();
+		await Bun.write(
+			path.join(dir, "tsconfig.json"),
+			JSON.stringify({
+				compilerOptions: { target: "ES2020", module: "ESNext", strict: true },
+				include: ["*.ts"],
+			})
+		);
+		// cal.ts and contacts.ts each have a structurally identical reAuthAndRetry
+		// that captures a different module-scope registry. After normalization the
+		// bodies are identical, but they must NOT be deduplicated.
+		await Bun.write(
+			path.join(dir, "cal.ts"),
+			`import { calRegistry } from "./registry";
+
+export async function reAuthAndRetry(fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
+  } catch (err) {
+    await calRegistry.reAuth();
+    await fn();
+  }
+}
+`
+		);
+		await Bun.write(
+			path.join(dir, "contacts.ts"),
+			`import { contactsRegistry } from "./registry";
+
+export async function reAuthAndRetry(fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
+  } catch (err) {
+    await contactsRegistry.reAuth();
+    await fn();
+  }
+}
+`
+		);
+		// Stub registry module so the project is structurally complete
+		await Bun.write(
+			path.join(dir, "registry.ts"),
+			`export const calRegistry = { reAuth: async () => {} };
+export const contactsRegistry = { reAuth: async () => {} };
+`
+		);
+
+		const cap = captureStdout();
+		try {
+			await extractCommonCommand({
+				directory: dir,
+				threshold: 0.95,
+				dryRun: false,
+				sameNameOnly: true,
+			});
+		} finally {
+			cap.restore();
+		}
+
+		const calContent = await Bun.file(path.join(dir, "cal.ts")).text();
+		const contactsContent = await Bun.file(
+			path.join(dir, "contacts.ts")
+		).text();
+
+		// Both files should be unchanged — the function captures different registries
+		expect(calContent).toContain("async function reAuthAndRetry");
+		expect(contactsContent).toContain("async function reAuthAndRetry");
+		// No cross-import should have been generated
+		expect(contactsContent).not.toContain('from "./cal"');
+		expect(calContent).not.toContain('from "./contacts"');
+
+		await rm(dir, { recursive: true, force: true });
+	});
+
 	test("--output writes function to specified file and rewrites all sources", async () => {
 		const dir = nextFixtureDir();
 		await setupFixtures(dir);
