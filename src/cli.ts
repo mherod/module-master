@@ -33,6 +33,7 @@ const { values, positionals } = parseArgs({
 		"only-related-to": { type: "string" },
 		"min-lines": { type: "string" },
 		"skip-directives": { type: "boolean" },
+		"skip-wrappers": { type: "boolean" },
 		group: { type: "string" },
 		output: { type: "string", short: "o" },
 		workspace: { type: "boolean" },
@@ -83,6 +84,7 @@ Options:
   --only-related-to Only show groups related to a file or folder path/glob
   --min-lines       Exclude functions with fewer body lines (filters thin wrappers)
   --skip-directives Skip functions with compile-time directives (use server, etc.)
+  --skip-wrappers   Skip thin wrapper functions (single return + call expression)
   --workspace       Scan across all workspace packages (discover, similar, and other commands)
   --fan-out-threshold  Flag files with more than N imports (default: 10, audit command)
   --fan-in-threshold   Flag files with more than N consumers (default: 10, audit command)
@@ -599,6 +601,7 @@ async function main() {
 				onlyRelatedTo: values["only-related-to"],
 				minLines: values["min-lines"] ? Number(values["min-lines"]) : undefined,
 				skipDirectives: values["skip-directives"],
+				skipWrappers: values["skip-wrappers"],
 			});
 			break;
 		}
@@ -638,6 +641,7 @@ async function main() {
 					? Number(values["name-threshold"])
 					: undefined,
 				sameNameOnly: values["same-name-only"],
+				skipWrappers: values["skip-wrappers"],
 			});
 			break;
 		}

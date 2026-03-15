@@ -44,6 +44,7 @@ export interface ExtractCommonOptions {
 	onlyRelatedTo?: string;
 	minLines?: number;
 	skipDirectives?: boolean;
+	skipWrappers?: boolean;
 	/** Write the canonical function to this file instead of keeping it in place */
 	output?: string;
 }
@@ -103,6 +104,7 @@ function findFunctionNode(
 						bodyLines: 0,
 						hasDirective: false,
 						contentTokens: [],
+						isWrapper: false,
 					},
 					start: fullStart,
 					end,
@@ -141,6 +143,7 @@ function findFunctionNode(
 							bodyLines: 0,
 							hasDirective: false,
 							contentTokens: [],
+							isWrapper: false,
 						},
 						start: fullStart,
 						end: actualEnd,
@@ -382,6 +385,7 @@ export async function extractCommonCommand(
 		onlyRelatedTo,
 		minLines,
 		skipDirectives,
+		skipWrappers,
 		output,
 	} = options;
 	const absoluteDir = path.resolve(directory);
@@ -407,6 +411,7 @@ export async function extractCommonCommand(
 		onlyRelatedTo,
 		minLines,
 		skipDirectives,
+		skipWrappers,
 	});
 
 	if (report.groups.length === 0) {

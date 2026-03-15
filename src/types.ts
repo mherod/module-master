@@ -148,6 +148,8 @@ export interface FunctionInfo {
 	hasDirective: boolean;
 	/** Semantic content tokens: uppercase identifiers and string literal values from the original body */
 	contentTokens: string[];
+	/** Whether the function body is a thin wrapper (single return + call expression) */
+	isWrapper: boolean;
 }
 
 export type SimilarityBucket = "exact" | "high" | "medium";

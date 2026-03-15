@@ -17,6 +17,7 @@ export interface SimilarOptions {
 	onlyRelatedTo?: string;
 	minLines?: number;
 	skipDirectives?: boolean;
+	skipWrappers?: boolean;
 }
 
 export async function similarCommand(options: SimilarOptions): Promise<void> {
@@ -34,6 +35,7 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 		onlyRelatedTo,
 		minLines,
 		skipDirectives,
+		skipWrappers,
 	} = options;
 	const absoluteDir = path.resolve(directory);
 
@@ -53,6 +55,7 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 		onlyRelatedTo,
 		minLines,
 		skipDirectives,
+		skipWrappers,
 	});
 
 	if (json) {

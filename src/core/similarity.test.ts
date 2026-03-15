@@ -343,6 +343,7 @@ describe("findSimilarGroups", () => {
 				bodyLength: body.length,
 				bodyLines: body.split("\n").length,
 				hasDirective: false,
+				isWrapper: false,
 				contentTokens: extractContentTokens(body),
 			};
 		}
@@ -452,6 +453,7 @@ describe("findSimilarGroups", () => {
 			bodyLength: 100,
 			bodyLines: 5,
 			hasDirective: false,
+			isWrapper: false,
 			contentTokens: [],
 		};
 		const fnE2: ReturnType<typeof collectFunctions>[number] = {
@@ -464,6 +466,7 @@ describe("findSimilarGroups", () => {
 			bodyLength: 100,
 			bodyLines: 5,
 			hasDirective: false,
+			isWrapper: false,
 			contentTokens: [],
 		};
 
@@ -482,6 +485,7 @@ describe("findSimilarGroups", () => {
 			bodyLength: 120,
 			bodyLines: 5,
 			hasDirective: false,
+			isWrapper: false,
 			contentTokens: [],
 		};
 		const fnL2: ReturnType<typeof collectFunctions>[number] = {
@@ -494,6 +498,7 @@ describe("findSimilarGroups", () => {
 			bodyLength: 130,
 			bodyLines: 5,
 			hasDirective: false,
+			isWrapper: false,
 			contentTokens: [],
 		};
 
@@ -807,6 +812,7 @@ describe("findSimilarGroups onlyRelatedTo", () => {
 				bodyLength: body.length,
 				bodyLines: body.split("\n").length,
 				hasDirective: false,
+				isWrapper: false,
 				contentTokens: extractContentTokens(body),
 			};
 		}
@@ -878,6 +884,7 @@ describe("directive detection", () => {
 				bodyLength: body.length,
 				bodyLines: body.split("\n").length,
 				hasDirective: false,
+				isWrapper: false,
 				contentTokens: extractContentTokens(body),
 			};
 		}

@@ -217,6 +217,30 @@ function scoreToBucket(score: number): SimilarityBucket | null {
 }
 
 /**
+ * Detect if a function block body is a thin wrapper: exactly one statement
+ * that is a return with a call expression (e.g. `return otherFn(a, b)`).
+ */
+function isWrapperBody(body: ts.Block): boolean {
+	const statements = body.statements;
+	if (statements.length !== 1) {
+		return false;
+	}
+	const stmt = statements[0];
+	if (!stmt) {
+		return false;
+	}
+	// return someFunc(...)
+	if (ts.isReturnStatement(stmt) && stmt.expression) {
+		return ts.isCallExpression(stmt.expression);
+	}
+	// Bare expression statement: someFunc(...)
+	if (ts.isExpressionStatement(stmt) && ts.isCallExpression(stmt.expression)) {
+		return true;
+	}
+	return false;
+}
+
+/**
  * Collect all top-level function declarations and named const arrow/function
  * expressions from a source file.
  */
@@ -247,6 +271,7 @@ export function collectFunctions(
 					bodyLines: bodyText.split("\n").length,
 					hasDirective: DIRECTIVE_PATTERN.test(bodyText),
 					contentTokens: extractContentTokens(bodyText),
+					isWrapper: isWrapperBody(stmt.body),
 				});
 			}
 		}
@@ -281,6 +306,7 @@ export function collectFunctions(
 							bodyLines: bodyText.split("\n").length,
 							hasDirective: DIRECTIVE_PATTERN.test(bodyText),
 							contentTokens: extractContentTokens(bodyText),
+							isWrapper: isWrapperBody(init.body),
 						});
 					}
 				}
@@ -338,6 +364,8 @@ export interface SimilarityFilterOptions {
 	minLines?: number;
 	/** Exclude functions containing compile-time directives */
 	skipDirectives?: boolean;
+	/** Exclude thin wrapper functions (single return + call expression) */
+	skipWrappers?: boolean;
 }
 
 export function findSimilarGroups(
@@ -361,6 +389,9 @@ export function findSimilarGroups(
 	}
 	if (opts.skipDirectives) {
 		candidates = candidates.filter((f) => !f.hasDirective);
+	}
+	if (opts.skipWrappers) {
+		candidates = candidates.filter((f) => !f.isWrapper);
 	}
 
 	// Precompute token artifacts for all candidates to avoid redundant
@@ -636,6 +667,7 @@ export interface AnalyzeSimilarityOptions {
 	onlyRelatedTo?: string;
 	minLines?: number;
 	skipDirectives?: boolean;
+	skipWrappers?: boolean;
 }
 
 export async function analyzeSimilarity(
@@ -660,6 +692,7 @@ export async function analyzeSimilarity(
 		onlyRelatedTo: opts.onlyRelatedTo,
 		minLines: opts.minLines,
 		skipDirectives: opts.skipDirectives,
+		skipWrappers: opts.skipWrappers,
 	};
 
 	if (ws) {
