@@ -64,10 +64,17 @@ export async function findCommand(options: FindOptions): Promise<void> {
 			`\n🔍 Searching for "${query}" across ${wsInfo.packages.length} workspace package(s)\n`
 		);
 
+		const { mapConcurrent } = await import("../core/concurrency.ts");
+		const pkgDiscoveries = await mapConcurrent(
+			wsInfo.packages,
+			async (pkg) => {
+				const scanDir = pkg.srcDir ? path.join(pkg.path, pkg.srcDir) : pkg.path;
+				return discoverProject(scanDir);
+			},
+			{ onError: () => ({ fileOwnership: new Map() }) }
+		);
 		const allFiles = new Map<string, unknown>();
-		for (const pkg of wsInfo.packages) {
-			const scanDir = pkg.srcDir ? path.join(pkg.path, pkg.srcDir) : pkg.path;
-			const discovery = discoverProject(scanDir);
+		for (const discovery of pkgDiscoveries) {
 			for (const [filePath, owner] of discovery.fileOwnership) {
 				allFiles.set(filePath, owner);
 			}

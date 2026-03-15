@@ -38,10 +38,27 @@ export async function discoverCommand(options: DiscoverOptions): Promise<void> {
 			`\n🔍 Discovering tsconfig files across ${wsInfo.packages.length} workspace package(s)\n`
 		);
 
-		for (const pkg of wsInfo.packages) {
+		const { mapConcurrent } = await import("../core/concurrency.ts");
+		interface PkgDiscovery {
+			pkg: (typeof wsInfo.packages)[number];
+			discovery: ProjectDiscovery | null;
+		}
+		const pkgDiscoveries = await mapConcurrent<
+			(typeof wsInfo.packages)[number],
+			PkgDiscovery
+		>(
+			wsInfo.packages,
+			async (pkg) => {
+				const scanDir = pkg.srcDir ? path.join(pkg.path, pkg.srcDir) : pkg.path;
+				return { pkg, discovery: discoverProject(scanDir) };
+			},
+			{ onError: (pkg) => ({ pkg, discovery: null }) }
+		);
+		for (const { pkg, discovery } of pkgDiscoveries) {
+			if (!discovery) {
+				continue;
+			}
 			logger.info(`📦 ${pkg.name} (${path.relative(absoluteDir, pkg.path)})`);
-			const scanDir = pkg.srcDir ? path.join(pkg.path, pkg.srcDir) : pkg.path;
-			const discovery = discoverProject(scanDir);
 			if (onlyRelatedTo) {
 				const { matchesRelatedPath } = await import("../core/similarity.ts");
 				const filtered = new Map(
