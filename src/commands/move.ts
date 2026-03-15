@@ -140,7 +140,7 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 
 	if (!dryRun && verify && result.success) {
 		// Run type checking to verify the move didn't break anything
-		const errors = runTypeCheck(project);
+		const errors = await runTypeCheck(project);
 		if (errors.length > 0) {
 			logger.error(
 				`\n❌ Type checking failed after move - ${errors.length} error(s):`

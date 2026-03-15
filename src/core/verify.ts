@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import path from "node:path";
 import ts from "typescript";
 import { logger } from "../cli-logger.ts";
@@ -53,7 +52,7 @@ export async function verifyTypeChecking(
 	applyChanges: () => Promise<void> | void
 ): Promise<VerificationResult> {
 	// Run type check before changes
-	const errorsBefore = runTypeCheck(project);
+	const errorsBefore = await runTypeCheck(project);
 
 	// Take snapshot if provided
 	beforeSnapshot();
@@ -62,7 +61,7 @@ export async function verifyTypeChecking(
 	await applyChanges();
 
 	// Run type check after changes
-	const errorsAfter = runTypeCheck(project);
+	const errorsAfter = await runTypeCheck(project);
 
 	// Collect unresolvable imports after changes are applied
 	const unresolvableDiagnostics = collectUnresolvableDiagnostics(project);
@@ -86,28 +85,25 @@ export async function verifyTypeChecking(
 /**
  * Run TypeScript compiler in noEmit mode and capture errors
  */
-export function runTypeCheck(project: ProjectConfig): string[] {
+export async function runTypeCheck(project: ProjectConfig): Promise<string[]> {
 	const tsconfigPath = project.tsconfigPath;
 	const cwd = path.dirname(tsconfigPath);
 
 	// Run tsc --noEmit -p <tsconfig>
-	const result = spawnSync(
-		"tsc",
-		["--noEmit", "-p", tsconfigPath, "--pretty", "false"],
-		{
-			cwd,
-			encoding: "utf-8",
-			shell: false,
-		}
+	const proc = Bun.spawn(
+		["tsc", "--noEmit", "-p", tsconfigPath, "--pretty", "false"],
+		{ cwd, stdout: "pipe", stderr: "pipe" }
 	);
+	const stdout = await new Response(proc.stdout).text();
+	const stderr = await new Response(proc.stderr).text();
+	await proc.exited;
 
-	if (result.status === 0) {
-		// No errors
+	if (proc.exitCode === 0) {
 		return [];
 	}
 
 	// Parse errors from stdout/stderr
-	const output = (result.stdout + result.stderr).trim();
+	const output = (stdout + stderr).trim();
 	if (!output) {
 		return [];
 	}
@@ -133,8 +129,8 @@ export function runTypeCheck(project: ProjectConfig): string[] {
 /**
  * Simple verification that just checks if tsc passes
  */
-export function canTypeCheck(project: ProjectConfig): boolean {
-	const errors = runTypeCheck(project);
+export async function canTypeCheck(project: ProjectConfig): Promise<boolean> {
+	const errors = await runTypeCheck(project);
 	return errors.length === 0;
 }
 
