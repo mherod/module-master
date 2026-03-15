@@ -172,8 +172,6 @@ async function runPackageBuilds(
 	workspace: WorkspaceInfo,
 	verbose: boolean
 ): Promise<void> {
-	const { spawnSync } = await import("node:child_process");
-
 	// Find source and destination packages
 	const sourcePackage = findPackageForPath(sourcePath, workspace);
 	const targetPackage = findPackageForPath(targetPath, workspace);
@@ -227,25 +225,29 @@ async function runPackageBuilds(
 
 	logger.info("\n📦 Rebuilding affected packages...");
 
-	for (const pkg of packagesToRebuild) {
-		logger.info(`   Building ${pkg.name}...`);
-
-		const result = spawnSync("pnpm", ["run", pkg.script], {
-			cwd: pkg.path,
-			encoding: "utf-8",
-			shell: false,
-			stdio: verbose ? "inherit" : "pipe",
-		});
-
-		if (result.status === 0) {
-			logger.info(`   ✅ ${pkg.name} built successfully`);
-		} else {
-			logger.error(`   ❌ Build failed for ${pkg.name}`);
-			if (!verbose && result.stderr) {
-				logger.error(`   ${result.stderr.slice(0, 200)}`);
+	const { mapConcurrent } = await import("../core/concurrency.ts");
+	await mapConcurrent(
+		packagesToRebuild,
+		async (pkg) => {
+			logger.info(`   Building ${pkg.name}...`);
+			const proc = Bun.spawn(["pnpm", "run", pkg.script], {
+				cwd: pkg.path,
+				stdout: verbose ? "inherit" : "pipe",
+				stderr: "pipe",
+			});
+			const stderr = await new Response(proc.stderr).text();
+			await proc.exited;
+			if (proc.exitCode === 0) {
+				logger.info(`   ✅ ${pkg.name} built successfully`);
+			} else {
+				logger.error(`   ❌ Build failed for ${pkg.name}`);
+				if (!verbose && stderr) {
+					logger.error(`   ${stderr.slice(0, 200)}`);
+				}
 			}
-		}
-	}
+		},
+		{ onError: () => undefined }
+	);
 }
 
 export async function moveModule(

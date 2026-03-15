@@ -593,15 +593,23 @@ export async function scanWorkspaceFunctions(directory: string): Promise<{
 		return { functions: [], totalFiles: 0, packageCount: 0 };
 	}
 
-	const allFiles: string[] = [];
+	const { mapConcurrent } = await import("./concurrency.ts");
+	const pkgFiles = await mapConcurrent(
+		workspace.packages,
+		async (pkg) => {
+			const scanDir = pkg.srcDir ? path.join(pkg.path, pkg.srcDir) : pkg.path;
+			const discovery = discoverProject(scanDir);
+			return Array.from(discovery.fileOwnership.keys()).filter((fp) =>
+				TS_JS_EXTENSIONS.test(fp)
+			);
+		},
+		{ onError: () => [] as string[] }
+	);
 	const seen = new Set<string>();
-
-	for (const pkg of workspace.packages) {
-		const scanDir = pkg.srcDir ? path.join(pkg.path, pkg.srcDir) : pkg.path;
-
-		const discovery = discoverProject(scanDir);
-		for (const filePath of discovery.fileOwnership.keys()) {
-			if (TS_JS_EXTENSIONS.test(filePath) && !seen.has(filePath)) {
+	const allFiles: string[] = [];
+	for (const files of pkgFiles) {
+		for (const filePath of files) {
+			if (!seen.has(filePath)) {
 				seen.add(filePath);
 				allFiles.push(filePath);
 			}
