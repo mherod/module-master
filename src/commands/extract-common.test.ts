@@ -511,6 +511,95 @@ export const contactsRegistry = { reAuth: async () => {} };
 		await rm(dir, { recursive: true, force: true });
 	});
 
+	test("--json emits valid JSON with expected schema", async () => {
+		const dir = nextFixtureDir();
+		await setupFixtures(dir);
+		const cap = captureStdout();
+		let output = "";
+
+		try {
+			await extractCommonCommand({
+				directory: dir,
+				threshold: 0.95,
+				dryRun: true,
+				json: true,
+			});
+		} finally {
+			cap.restore();
+			output = cap.output();
+		}
+
+		// Should be valid JSON
+		const parsed = JSON.parse(output);
+
+		// Top-level schema
+		expect(typeof parsed.totalGroups).toBe("number");
+		expect(Array.isArray(parsed.groups)).toBe(true);
+		expect(typeof parsed.dryRun).toBe("boolean");
+		expect(parsed.dryRun).toBe(true);
+
+		// At least one group (formatDate duplicate exists)
+		expect(parsed.totalGroups).toBeGreaterThan(0);
+		expect(parsed.groups.length).toBe(parsed.totalGroups);
+
+		// Per-group schema
+		const group = parsed.groups[0];
+		expect(Array.isArray(group.functions)).toBe(true);
+		expect(typeof group.canonical).toBe("object");
+		expect(Array.isArray(group.removed)).toBe(true);
+
+		// canonical has required fields
+		expect(typeof group.canonical.file).toBe("string");
+		expect(typeof group.canonical.line).toBe("number");
+		expect(typeof group.canonical.name).toBe("string");
+		expect(group.canonical.name).toBe("formatDate");
+
+		// removed entries have required fields
+		for (const removed of group.removed) {
+			expect(typeof removed.file).toBe("string");
+			expect(typeof removed.line).toBe("number");
+			expect(typeof removed.name).toBe("string");
+		}
+
+		// Files should be unchanged (dry-run)
+		const aContent = await Bun.file(path.join(dir, "a.ts")).text();
+		const bContent = await Bun.file(path.join(dir, "b.ts")).text();
+		expect(aContent).toContain("export function formatDate");
+		expect(bContent).toContain("function formatDate");
+
+		await rm(dir, { recursive: true, force: true });
+	});
+
+	test("--json without --dry-run modifies files and emits JSON with dryRun: false", async () => {
+		const dir = nextFixtureDir();
+		await setupFixtures(dir);
+		const cap = captureStdout();
+		let output = "";
+
+		try {
+			await extractCommonCommand({
+				directory: dir,
+				threshold: 0.95,
+				dryRun: false,
+				json: true,
+			});
+		} finally {
+			cap.restore();
+			output = cap.output();
+		}
+
+		const parsed = JSON.parse(output);
+		expect(parsed.dryRun).toBe(false);
+		expect(parsed.totalGroups).toBeGreaterThan(0);
+
+		// Files should be modified (not dry-run)
+		const bContent = await Bun.file(path.join(dir, "b.ts")).text();
+		expect(bContent).not.toContain("function formatDate(input: Date)");
+		expect(bContent).toContain('import { formatDate } from "./a"');
+
+		await rm(dir, { recursive: true, force: true });
+	});
+
 	test("--workspace: deduplicates across packages in a workspace", async () => {
 		const dir = nextFixtureDir();
 

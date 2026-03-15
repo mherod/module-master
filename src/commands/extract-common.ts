@@ -46,6 +46,7 @@ export interface ExtractCommonOptions {
 	project?: string;
 	threshold?: number;
 	dryRun?: boolean;
+	json?: boolean;
 	group?: number;
 	workspace?: boolean;
 	nameThreshold?: number;
@@ -57,6 +58,18 @@ export interface ExtractCommonOptions {
 	skipWrappers?: boolean;
 	/** Write the canonical function to this file instead of keeping it in place */
 	output?: string;
+}
+
+interface ExtractCommonJsonGroup {
+	functions: Array<{ file: string; line: number; name: string }>;
+	canonical: { file: string; line: number; name: string };
+	removed: Array<{ file: string; line: number; name: string }>;
+}
+
+interface ExtractCommonJsonOutput {
+	totalGroups: number;
+	groups: ExtractCommonJsonGroup[];
+	dryRun: boolean;
 }
 
 interface FunctionNode {
@@ -734,6 +747,7 @@ export async function extractCommonCommand(
 		project,
 		threshold = 0.95,
 		dryRun = false,
+		json = false,
 		group: targetGroup,
 		workspace = false,
 		nameThreshold,
@@ -747,10 +761,12 @@ export async function extractCommonCommand(
 	} = options;
 	const absoluteDir = path.resolve(directory);
 
-	const scope = workspace ? "across workspace packages in" : "in";
-	logger.info(
-		`\n${dryRun ? "🔍 Dry run:" : "🔧"} Extracting common functions ${scope} ${absoluteDir}\n`
-	);
+	if (!json) {
+		const scope = workspace ? "across workspace packages in" : "in";
+		logger.info(
+			`\n${dryRun ? "🔍 Dry run:" : "🔧"} Extracting common functions ${scope} ${absoluteDir}\n`
+		);
+	}
 
 	// Step 0: Discover workspace if --workspace is enabled
 	const { discoverWorkspace } = await import("../core/workspace.ts");
@@ -772,8 +788,17 @@ export async function extractCommonCommand(
 	});
 
 	if (report.groups.length === 0) {
-		logger.info("✅ No similar function groups found at this threshold.");
-		logger.empty();
+		if (json) {
+			const empty: ExtractCommonJsonOutput = {
+				totalGroups: 0,
+				groups: [],
+				dryRun,
+			};
+			process.stdout.write(`${JSON.stringify(empty, null, 2)}\n`);
+		} else {
+			logger.info("✅ No similar function groups found at this threshold.");
+			logger.empty();
+		}
 		return;
 	}
 
@@ -794,10 +819,19 @@ export async function extractCommonCommand(
 	const plans = planExtractions(groups);
 
 	if (plans.length === 0) {
-		logger.info(
-			"No extractable groups found (functions could not be located in AST)."
-		);
-		logger.empty();
+		if (json) {
+			const empty: ExtractCommonJsonOutput = {
+				totalGroups: 0,
+				groups: [],
+				dryRun,
+			};
+			process.stdout.write(`${JSON.stringify(empty, null, 2)}\n`);
+		} else {
+			logger.info(
+				"No extractable groups found (functions could not be located in AST)."
+			);
+			logger.empty();
+		}
 		return;
 	}
 
@@ -821,33 +855,46 @@ export async function extractCommonCommand(
 			continue;
 		}
 
-		logger.info(
-			`📦 Group ${targetGroup ?? i + 1}: ${plan.canonical.info.name}`
-		);
+		if (!json) {
+			logger.info(
+				`📦 Group ${targetGroup ?? i + 1}: ${plan.canonical.info.name}`
+			);
+		}
 
 		if (absOutput) {
-			const outputRel = path.relative(absoluteDir, absOutput);
-			logger.info(`   ${dryRun ? "Would write to" : "Write to"}: ${outputRel}`);
-			const allSources = [plan.canonical, ...plan.duplicates];
-			for (const node of allSources) {
-				const rel = path.relative(absoluteDir, node.info.file);
+			if (!json) {
+				const outputRel = path.relative(absoluteDir, absOutput);
 				logger.info(
-					`   ${dryRun ? "Would remove from" : "Remove from"}: ${rel}:${node.info.line}`
+					`   ${dryRun ? "Would write to" : "Write to"}: ${outputRel}`
 				);
+				const allSources = [plan.canonical, ...plan.duplicates];
+				for (const node of allSources) {
+					const rel = path.relative(absoluteDir, node.info.file);
+					logger.info(
+						`   ${dryRun ? "Would remove from" : "Remove from"}: ${rel}:${node.info.line}`
+					);
+				}
 			}
-			totalRemoved += allSources.length;
+			totalRemoved += [plan.canonical, ...plan.duplicates].length;
 		} else {
-			const canonicalRel = path.relative(absoluteDir, plan.canonical.info.file);
-			logger.info(`   Keep in: ${canonicalRel}:${plan.canonical.info.line}`);
-			for (const dup of plan.duplicates) {
-				const dupRel = path.relative(absoluteDir, dup.info.file);
-				logger.info(
-					`   ${dryRun ? "Would remove from" : "Remove from"}: ${dupRel}:${dup.info.line}`
+			if (!json) {
+				const canonicalRel = path.relative(
+					absoluteDir,
+					plan.canonical.info.file
 				);
+				logger.info(`   Keep in: ${canonicalRel}:${plan.canonical.info.line}`);
+				for (const dup of plan.duplicates) {
+					const dupRel = path.relative(absoluteDir, dup.info.file);
+					logger.info(
+						`   ${dryRun ? "Would remove from" : "Remove from"}: ${dupRel}:${dup.info.line}`
+					);
+				}
 			}
 			totalRemoved += plan.duplicates.length;
 		}
-		logger.empty();
+		if (!json) {
+			logger.empty();
+		}
 
 		if (!dryRun) {
 			if (absOutput) {
@@ -880,6 +927,32 @@ export async function extractCommonCommand(
 
 	// Apply all collected file changes in one pass per file
 	const allModified = dryRun ? [] : await applyFileUpdates(fileUpdates);
+
+	if (json) {
+		const jsonOutput: ExtractCommonJsonOutput = {
+			totalGroups: plans.length,
+			groups: plans.map((plan) => ({
+				functions: plan.group.functions.map((fn) => ({
+					file: fn.file,
+					line: fn.line,
+					name: fn.name,
+				})),
+				canonical: {
+					file: plan.canonical.info.file,
+					line: plan.canonical.info.line,
+					name: plan.canonical.info.name,
+				},
+				removed: plan.duplicates.map((dup) => ({
+					file: dup.info.file,
+					line: dup.info.line,
+					name: dup.info.name,
+				})),
+			})),
+			dryRun,
+		};
+		process.stdout.write(`${JSON.stringify(jsonOutput, null, 2)}\n`);
+		return;
+	}
 
 	// Summary
 	const uniqueFiles = [...new Set(allModified)];
