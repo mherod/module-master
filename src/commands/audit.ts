@@ -223,7 +223,7 @@ export async function auditCommand(options: AuditOptions): Promise<void> {
 	}
 
 	const project = loadProject(tsconfigPath);
-	const graph = buildDependencyGraph(project);
+	const graph = await buildDependencyGraph(project);
 
 	// When workspace mode is enabled, merge graphs from all packages
 	if (workspace) {
@@ -238,7 +238,7 @@ export async function auditCommand(options: AuditOptions): Promise<void> {
 				eligiblePkgs,
 				async (pkg) => {
 					const pkgProject = loadProject(pkg.tsconfigPath as string);
-					return buildDependencyGraph(pkgProject);
+					return await buildDependencyGraph(pkgProject);
 				},
 				{ onError: () => null }
 			);

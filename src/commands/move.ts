@@ -298,7 +298,7 @@ export async function moveModule(
 	if (verbose) {
 		logger.info("Building dependency graph...");
 	}
-	const graph = buildDependencyGraph(project);
+	const graph = await buildDependencyGraph(project);
 
 	// Determine if this is a cross-package move early (needed for ref collection strategy)
 	const crossPackage = workspace

@@ -139,7 +139,7 @@ export async function renameSymbol(
 	if (verbose) {
 		logger.info("Building dependency graph...");
 	}
-	const graph = buildDependencyGraph(project);
+	const graph = await buildDependencyGraph(project);
 
 	// Find all files that import from this file
 	const references = findAllReferences(filePath, graph);
@@ -147,7 +147,7 @@ export async function renameSymbol(
 	// Also find references from workspace packages
 	for (const extraProject of extraProjects) {
 		try {
-			const extraGraph = buildDependencyGraph(extraProject);
+			const extraGraph = await buildDependencyGraph(extraProject);
 			const extraRefs = findAllReferences(filePath, extraGraph);
 			references.push(...extraRefs);
 		} catch {

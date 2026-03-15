@@ -1,4 +1,5 @@
-import type { ModuleReference, ProjectConfig } from "../types.ts";
+import type { BarrelExport, ModuleReference, ProjectConfig } from "../types.ts";
+import { mapConcurrent } from "./concurrency.ts";
 import { createProgram, getProjectFiles } from "./project.ts";
 import { normalizePath } from "./resolver.ts";
 import {
@@ -18,48 +19,63 @@ export interface DependencyGraph {
 	barrelReExports: Map<string, string[]>;
 }
 
+interface FileScanResult {
+	normalizedFile: string;
+	refs: ModuleReference[];
+	barrels: BarrelExport[];
+}
+
 /**
  * Build a complete dependency graph for the project
  */
-export function buildDependencyGraph(project: ProjectConfig): DependencyGraph {
+export async function buildDependencyGraph(
+	project: ProjectConfig
+): Promise<DependencyGraph> {
 	const files = getProjectFiles(project);
 	const program = createProgram(project, files);
 
+	// Scan all files concurrently — each scan is independent
+	const scanResults = await mapConcurrent(
+		files,
+		async (file) =>
+			withSourceFile(
+				program,
+				file,
+				(sourceFile): FileScanResult => ({
+					normalizedFile: normalizePath(file),
+					refs: scanModuleReferences(sourceFile, project),
+					barrels: scanBarrelExports(sourceFile, project),
+				}),
+				null
+			),
+		{ onError: () => null }
+	);
+
+	// Merge results sequentially (shared mutable maps)
 	const imports = new Map<string, ModuleReference[]>();
 	const importedBy = new Map<string, ModuleReference[]>();
 	const barrelFiles = new Set<string>();
 	const barrelReExports = new Map<string, string[]>();
 
-	for (const file of files) {
-		withSourceFile(
-			program,
-			file,
-			(sourceFile) => {
-				const normalizedFile = normalizePath(file);
-				const refs = scanModuleReferences(sourceFile, project);
-				imports.set(normalizedFile, refs);
+	for (const result of scanResults) {
+		if (!result) {
+			continue;
+		}
+		const { normalizedFile, refs, barrels } = result;
+		imports.set(normalizedFile, refs);
 
-				// Check if this is a barrel file and track what it re-exports
-				const barrels = scanBarrelExports(sourceFile, project);
-				if (barrels.length > 0) {
-					barrelFiles.add(normalizedFile);
-					// Store the actual files this barrel re-exports
-					const reExportedFiles = barrels.map((b) =>
-						normalizePath(b.resolvedPath)
-					);
-					barrelReExports.set(normalizedFile, reExportedFiles);
-				}
+		if (barrels.length > 0) {
+			barrelFiles.add(normalizedFile);
+			const reExportedFiles = barrels.map((b) => normalizePath(b.resolvedPath));
+			barrelReExports.set(normalizedFile, reExportedFiles);
+		}
 
-				// Populate reverse mapping
-				for (const ref of refs) {
-					const normalizedResolved = normalizePath(ref.resolvedPath);
-					const existing = importedBy.get(normalizedResolved) ?? [];
-					existing.push(ref);
-					importedBy.set(normalizedResolved, existing);
-				}
-			},
-			undefined
-		);
+		for (const ref of refs) {
+			const normalizedResolved = normalizePath(ref.resolvedPath);
+			const existing = importedBy.get(normalizedResolved) ?? [];
+			existing.push(ref);
+			importedBy.set(normalizedResolved, existing);
+		}
 	}
 
 	return { imports, importedBy, barrelFiles, barrelReExports };

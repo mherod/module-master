@@ -50,7 +50,7 @@ export async function analyzeCommand(options: AnalyzeOptions): Promise<void> {
 	}
 
 	const project = loadProject(tsconfigPath, absolutePath);
-	const result = analyze(absolutePath, project);
+	const result = await analyze(absolutePath, project);
 
 	// When workspace mode is enabled, find cross-package references
 	if (workspace) {
@@ -72,7 +72,7 @@ export async function analyzeCommand(options: AnalyzeOptions): Promise<void> {
 				eligiblePkgs,
 				async (pkg) => {
 					const pkgProject = loadProject(pkg.tsconfigPath as string);
-					const pkgGraph = buildDependencyGraph(pkgProject);
+					const pkgGraph = await buildDependencyGraph(pkgProject);
 					const refs = findAllReferences(absolutePath, pkgGraph);
 					return refs.filter(
 						(r) =>
@@ -109,10 +109,10 @@ export async function analyzeCommand(options: AnalyzeOptions): Promise<void> {
 	}
 }
 
-export function analyze(
+export async function analyze(
 	filePath: string,
 	project: ProjectConfig
-): AnalysisResult {
+): Promise<AnalysisResult> {
 	const program = createProgram(project, [filePath]);
 	const sourceFile = program.getSourceFile(filePath);
 
@@ -126,7 +126,7 @@ export function analyze(
 	const unresolvable = scanUnresolvableImports(sourceFile, project);
 
 	// Build graph to find reverse references
-	const graph = buildDependencyGraph(project);
+	const graph = await buildDependencyGraph(project);
 	const referencedBy = findAllReferences(filePath, graph);
 	const barrelReExportFiles = findBarrelReExports(filePath, graph);
 
