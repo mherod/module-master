@@ -226,7 +226,10 @@ export async function auditCommand(options: AuditOptions): Promise<void> {
 	}
 
 	const project = loadProject(tsconfigPath);
-	const graph = await buildDependencyGraph(project);
+	const cachedGraph = await buildDependencyGraph(project);
+
+	// Create a shallow copy so workspace merges never mutate the cached graph
+	let graph = cachedGraph;
 
 	// When workspace mode is enabled, merge graphs from all packages
 	if (workspace) {
@@ -245,28 +248,44 @@ export async function auditCommand(options: AuditOptions): Promise<void> {
 				},
 				{ onError: () => null }
 			);
-			// Merge graphs sequentially (shared Map mutations)
+			// Build a fresh merged graph — never mutate the cached object
+			const mergedGraph = {
+				imports: new Map(cachedGraph.imports),
+				importedBy: new Map(cachedGraph.importedBy),
+				barrelFiles: new Set(cachedGraph.barrelFiles),
+				barrelReExports: new Map(cachedGraph.barrelReExports),
+				program: cachedGraph.program,
+			};
 			for (const pkgGraph of pkgGraphs) {
 				if (!pkgGraph) {
 					continue;
 				}
 				for (const [file, refs] of pkgGraph.imports) {
-					if (!graph.imports.has(file)) {
-						graph.imports.set(file, refs);
+					if (!mergedGraph.imports.has(file)) {
+						mergedGraph.imports.set(file, refs);
 					}
 				}
 				for (const [file, refs] of pkgGraph.importedBy) {
-					const existing = graph.importedBy.get(file) ?? [];
-					existing.push(...refs);
-					graph.importedBy.set(file, existing);
+					if (mergedGraph.importedBy.has(file)) {
+						// Append only refs not already present to avoid double-counting
+						const existing = mergedGraph.importedBy.get(file) as typeof refs;
+						const existingSet = new Set(existing);
+						const newRefs = refs.filter((r) => !existingSet.has(r));
+						if (newRefs.length > 0) {
+							mergedGraph.importedBy.set(file, [...existing, ...newRefs]);
+						}
+					} else {
+						mergedGraph.importedBy.set(file, refs);
+					}
 				}
 				for (const barrel of pkgGraph.barrelFiles) {
-					graph.barrelFiles.add(barrel);
+					mergedGraph.barrelFiles.add(barrel);
 				}
 				for (const [barrel, files] of pkgGraph.barrelReExports) {
-					graph.barrelReExports.set(barrel, files);
+					mergedGraph.barrelReExports.set(barrel, files);
 				}
 			}
+			graph = mergedGraph;
 		}
 	}
 
