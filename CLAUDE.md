@@ -40,6 +40,7 @@ bun src/cli.ts discover <directory>                # Discover tsconfig files and
 bun src/cli.ts alias <target> --prefer=<strategy>  # Normalize import paths
 bun src/cli.ts move <source> <target> [--dry-run]  # Move file, update all imports
 bun src/cli.ts rename <file> <old> <new> [--dry-run]  # Rename export, update all imports
+bun src/cli.ts audit <directory>                     # Module health: fan-out, fan-in, cycles
 ```
 
 Use `-p <project>` to specify a project directory for find/analyze:
@@ -77,6 +78,7 @@ The codebase uses the TypeScript Compiler API (`typescript` package) for parsing
 - **alias.ts** - Normalize import paths using aliases, relative paths, or shortest option
 - **move.ts** - Move files and update all references (supports cross-package moves)
 - **rename.ts** - Rename exports and update all imports
+- **audit.ts** - Module health metrics: fan-out, fan-in, instability, cycle detection
 
 ### Data Flow
 
@@ -205,6 +207,33 @@ Before normalizing an import specifier, `normalizeImports()` checks:
 Both `move.ts` and `rename.ts` implement `hasLocalBinding()` — an AST walker that checks if a file already declares a given name via variable/function/class/type/interface/enum declarations or import bindings (excluding the import being changed). When adding new mutating commands, include equivalent conflict detection.
 
 DON'T: Add a new mutating command without conflict detection. All commands that write files must check for export name and binding conflicts before applying changes.
+
+## Audit Command
+
+The `audit` command (`src/commands/audit.ts`) analyzes module health metrics:
+
+```bash
+bun src/cli.ts audit <directory>                        # Scan project for health metrics
+bun src/cli.ts audit . --json                           # JSON output for tooling
+bun src/cli.ts audit . --workspace                      # Scan across workspace packages
+bun src/cli.ts audit src --fan-out-threshold=8           # Custom thresholds
+```
+
+### Metrics
+
+- **Fan-out**: Number of distinct modules a file imports. High fan-out suggests a file orchestrates too many concerns (SRP violation).
+- **Fan-in**: Number of distinct files importing a module. High fan-in on a non-utility file suggests a potential God module.
+- **Instability**: `fanOut / (fanIn + fanOut)` — Robert C. Martin's metric. 0 = maximally stable, 1 = maximally unstable.
+- **Export surface**: Number of exports per file. Large export surfaces suggest the module may be doing too much (ISP violation).
+- **Circular dependencies**: DFS-based cycle detection over the import graph. Cycles indicate missing abstractions or inverted dependencies (DIP violation).
+
+### Core Functions
+
+- `computeMetrics(graph)` — Computes fan-out, fan-in, instability, and export count for every file in the `DependencyGraph`.
+- `detectCycles(graph)` — Iterative DFS cycle detection with deduplication. Returns minimal cycles.
+- `buildAuditReport(graph, options)` — Combines metrics and cycle detection, filters by configurable thresholds.
+
+The command is read-only and composes existing `DependencyGraph` infrastructure from `src/core/graph.ts`.
 
 ## Workspace Discovery
 

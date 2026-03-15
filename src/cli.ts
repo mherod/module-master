@@ -36,6 +36,9 @@ const { values, positionals } = parseArgs({
 		group: { type: "string" },
 		output: { type: "string", short: "o" },
 		workspace: { type: "boolean" },
+		"fan-out-threshold": { type: "string" },
+		"fan-in-threshold": { type: "string" },
+		"export-threshold": { type: "string" },
 	},
 	allowPositionals: true,
 });
@@ -59,6 +62,7 @@ Commands:
   rename <file> <oldName> <newName>   Rename an export and update all imports
   similar <directory>                 Find similar or duplicate functions for consolidation
   extract-common <directory>           Extract duplicate functions into shared modules
+  audit <directory>                    Analyze module health: fan-out, fan-in, cycles
 
 Options:
   -h, --help        Show this help message
@@ -80,6 +84,9 @@ Options:
   --min-lines       Exclude functions with fewer body lines (filters thin wrappers)
   --skip-directives Skip functions with compile-time directives (use server, etc.)
   --workspace       Scan across all workspace packages (discover, similar, and other commands)
+  --fan-out-threshold  Flag files with more than N imports (default: 10, audit command)
+  --fan-in-threshold   Flag files with more than N consumers (default: 10, audit command)
+  --export-threshold   Flag files with more than N exports (default: 8, audit command)
 
 Examples:
   ${name} find Entity -p /path/to/project
@@ -346,6 +353,36 @@ Examples:
   ${name} extract-common src --only-related-to=src/utils/helpers.ts
 `);
 			break;
+		case "audit":
+			logger.info(`
+Usage: ${name} audit <directory> [options]
+
+Analyze module health metrics: fan-out, fan-in, instability ratios,
+and circular dependency detection.
+
+Arguments:
+  directory    Path to the project directory to scan
+
+Options:
+  -p, --project          Path to project directory or tsconfig.json
+  --json                 Output results as JSON
+  --workspace            Scan across all workspace packages
+  --fan-out-threshold    Flag files with more than N imports (default: 10)
+  --fan-in-threshold     Flag files with more than N consumers (default: 10)
+  --export-threshold     Flag files with more than N exports (default: 8)
+
+Metrics:
+  Fan-out       Number of distinct modules a file imports
+  Fan-in        Number of distinct files that import a module
+  Instability   fan-out / (fan-in + fan-out) — 0 = maximally stable, 1 = maximally unstable
+
+Examples:
+  ${name} audit src
+  ${name} audit . --json
+  ${name} audit . --workspace
+  ${name} audit src --fan-out-threshold=8 --export-threshold=5
+`);
+			break;
 		default:
 			showHelp();
 	}
@@ -601,6 +638,32 @@ async function main() {
 					? Number(values["name-threshold"])
 					: undefined,
 				sameNameOnly: values["same-name-only"],
+			});
+			break;
+		}
+
+		case "audit": {
+			const [directory] = args;
+			if (!directory) {
+				logger.error("Error: audit requires a <directory> argument");
+				logger.error(`Run '${name} audit --help' for usage`);
+				process.exit(1);
+			}
+			const { auditCommand } = await import("./commands/audit.ts");
+			await auditCommand({
+				directory,
+				project: values.project,
+				json: values.json,
+				workspace: values.workspace,
+				fanOutThreshold: values["fan-out-threshold"]
+					? Number(values["fan-out-threshold"])
+					: undefined,
+				fanInThreshold: values["fan-in-threshold"]
+					? Number(values["fan-in-threshold"])
+					: undefined,
+				exportThreshold: values["export-threshold"]
+					? Number(values["export-threshold"])
+					: undefined,
 			});
 			break;
 		}
