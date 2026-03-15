@@ -513,34 +513,29 @@ function findProjectRoot(dir: string): string {
 }
 
 /**
- * Collect functions from an array of file paths.
+ * Collect functions from an array of file paths using bounded concurrency.
  */
-function collectFunctionsFromFiles(filePaths: string[]): {
+async function collectFunctionsFromFiles(filePaths: string[]): Promise<{
 	functions: FunctionInfo[];
 	totalFiles: number;
-} {
-	const functions: FunctionInfo[] = [];
-
-	for (const filePath of filePaths) {
-		const content = ts.sys.readFile(filePath);
-		if (!content) {
-			continue;
-		}
-		try {
+}> {
+	const { mapConcurrent } = await import("./concurrency.ts");
+	const results = await mapConcurrent(
+		filePaths,
+		async (filePath) => {
+			const content = await Bun.file(filePath).text();
 			const sourceFile = ts.createSourceFile(
 				filePath,
 				content,
 				ts.ScriptTarget.Latest,
 				true
 			);
-			const fileFunctions = collectFunctions(sourceFile, filePath);
-			functions.push(...fileFunctions);
-		} catch {
-			// Skip files that cannot be parsed
-		}
-	}
+			return collectFunctions(sourceFile, filePath);
+		},
+		{ onError: () => [] as FunctionInfo[] }
+	);
 
-	return { functions, totalFiles: filePaths.length };
+	return { functions: results.flat(), totalFiles: filePaths.length };
 }
 
 /**
@@ -565,7 +560,7 @@ export async function scanProjectFunctions(
 		(f) => TS_JS_EXTENSIONS.test(f) && f.startsWith(absoluteDir)
 	);
 
-	return collectFunctionsFromFiles(allFiles);
+	return await collectFunctionsFromFiles(allFiles);
 }
 
 /**
@@ -617,7 +612,7 @@ export async function scanWorkspaceFunctions(directory: string): Promise<{
 	}
 
 	const bounded = filterToWorkspaceBoundary(allFiles, workspace.root);
-	const result = collectFunctionsFromFiles(bounded);
+	const result = await collectFunctionsFromFiles(bounded);
 	return { ...result, packageCount: workspace.packages.length };
 }
 
