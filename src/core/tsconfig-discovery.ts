@@ -46,11 +46,19 @@ export interface ProjectDiscovery {
 	rootConfig?: TsConfigInfo;
 }
 
+/** Per-invocation cache for discoverProject results, keyed by resolved path */
+const discoveryCache = new Map<string, ProjectDiscovery>();
+
 /**
- * Discover all tsconfig files in a directory and build ownership maps
+ * Discover all tsconfig files in a directory and build ownership maps.
+ * Results are cached per resolved path for the lifetime of the process.
  */
 export function discoverProject(projectDir: string): ProjectDiscovery {
 	const absoluteDir = path.resolve(projectDir);
+	const cached = discoveryCache.get(absoluteDir);
+	if (cached) {
+		return cached;
+	}
 	const configs: TsConfigInfo[] = [];
 	const fileOwnership = new Map<string, TsConfigInfo>();
 
@@ -86,7 +94,9 @@ export function discoverProject(projectDir: string): ProjectDiscovery {
 		configs.find((c) => c.isSolution) ??
 		configs.find((c) => c.path === path.join(absoluteDir, "tsconfig.json"));
 
-	return { configs, fileOwnership, rootConfig };
+	const result: ProjectDiscovery = { configs, fileOwnership, rootConfig };
+	discoveryCache.set(absoluteDir, result);
+	return result;
 }
 
 /**

@@ -25,12 +25,20 @@ interface FileScanResult {
 	barrels: BarrelExport[];
 }
 
+/** Per-invocation cache for dependency graphs, keyed by tsconfig path */
+const graphCache = new Map<string, DependencyGraph>();
+
 /**
- * Build a complete dependency graph for the project
+ * Build a complete dependency graph for the project.
+ * Results are cached per tsconfig path for the lifetime of the process.
  */
 export async function buildDependencyGraph(
 	project: ProjectConfig
 ): Promise<DependencyGraph> {
+	const cached = graphCache.get(project.tsconfigPath);
+	if (cached) {
+		return cached;
+	}
 	const files = getProjectFiles(project);
 	const program = createProgram(project, files);
 
@@ -78,7 +86,14 @@ export async function buildDependencyGraph(
 		}
 	}
 
-	return { imports, importedBy, barrelFiles, barrelReExports };
+	const result: DependencyGraph = {
+		imports,
+		importedBy,
+		barrelFiles,
+		barrelReExports,
+	};
+	graphCache.set(project.tsconfigPath, result);
+	return result;
 }
 
 /**
