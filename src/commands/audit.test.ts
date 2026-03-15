@@ -50,8 +50,10 @@ describe("detectCycles", () => {
 		]);
 		const cycles = detectCycles(graph);
 		expect(cycles.length).toBe(1);
-		expect(cycles[0].files).toContain("/a.ts");
-		expect(cycles[0].files).toContain("/b.ts");
+		const cycle = cycles.at(0);
+		expect(cycle).toBeDefined();
+		expect(cycle?.files).toContain("/a.ts");
+		expect(cycle?.files).toContain("/b.ts");
 	});
 
 	test("detects three-node cycle", () => {
@@ -62,7 +64,7 @@ describe("detectCycles", () => {
 		]);
 		const cycles = detectCycles(graph);
 		expect(cycles.length).toBe(1);
-		expect(cycles[0].files.length).toBe(3);
+		expect(cycles.at(0)?.files.length).toBe(3);
 	});
 
 	test("does not duplicate cycles", () => {
@@ -91,6 +93,6 @@ describe("detectCycles", () => {
 		const graph = makeGraph([["/a.ts", "/a.ts"]]);
 		const cycles = detectCycles(graph);
 		expect(cycles.length).toBe(1);
-		expect(cycles[0].files).toEqual(["/a.ts"]);
+		expect(cycles.at(0)?.files).toEqual(["/a.ts"]);
 	});
 });
