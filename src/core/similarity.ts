@@ -363,6 +363,16 @@ export function findSimilarGroups(
 		candidates = candidates.filter((f) => !f.hasDirective);
 	}
 
+	// Precompute token artifacts for all candidates to avoid redundant
+	// tokenization and bigram generation inside the O(n^2) pairwise loop.
+	const preTokens: string[][] = [];
+	const preBigrams: string[][] = [];
+	for (const fn of candidates) {
+		const tokens = tokenize(fn.normalizedBody);
+		preTokens.push(tokens);
+		preBigrams.push(tokenBigrams(tokens));
+	}
+
 	const groups: SimilarityGroup[] = [];
 	const assigned = new Set<number>();
 
@@ -375,7 +385,8 @@ export function findSimilarGroups(
 		if (!fnI) {
 			continue;
 		}
-		const tokensI = tokenize(fnI.normalizedBody);
+		const tokensI = preTokens[i];
+		const bigramsI = preBigrams[i];
 		const group: FunctionInfo[] = [fnI];
 		let minScore = 1.0;
 
@@ -416,10 +427,10 @@ export function findSimilarGroups(
 			// ignores frequency, so functions with the same unique tokens but
 			// different lengths (e.g. a.has(b) vs a.b.has(c(d))) get a
 			// misleading 1.0 score.
-			const tokensJ = tokenize(fnJ.normalizedBody);
+			const tokensJ = preTokens[j];
 			const tokenRatio =
-				Math.min(tokensI.length, tokensJ.length) /
-				Math.max(tokensI.length, tokensJ.length);
+				Math.min(tokensI?.length ?? 0, tokensJ?.length ?? 0) /
+				Math.max(tokensI?.length ?? 1, tokensJ?.length ?? 1);
 			if (tokenRatio < 0.75) {
 				continue;
 			}
@@ -437,10 +448,10 @@ export function findSimilarGroups(
 				);
 				score = 0.5 + 0.5 * contentSim;
 			} else {
-				// Use bigrams to capture token ordering — plain set Jaccard
-				// gives misleading 1.0 for functions with the same token
+				// Use precomputed bigrams to capture token ordering — plain set
+				// Jaccard gives misleading 1.0 for functions with the same token
 				// vocabulary but different structure.
-				score = jaccardSimilarity(tokenBigrams(tokensI), tokenBigrams(tokensJ));
+				score = jaccardSimilarity(bigramsI ?? [], preBigrams[j] ?? []);
 			}
 
 			if (score >= threshold) {
