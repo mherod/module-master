@@ -353,6 +353,7 @@ Examples:
   ${name} extract-common src --group=1
   ${name} extract-common src --output=src/shared/utils.ts
   ${name} extract-common src --only-related-to=src/utils/helpers.ts
+  ${name} extract-common . --workspace
 `);
 			break;
 		case "audit":

@@ -510,4 +510,87 @@ export const contactsRegistry = { reAuth: async () => {} };
 
 		await rm(dir, { recursive: true, force: true });
 	});
+
+	test("--workspace: deduplicates across packages in a workspace", async () => {
+		const dir = nextFixtureDir();
+
+		// Minimal pnpm workspace with two packages sharing a duplicate function
+		await Bun.write(
+			path.join(dir, "pnpm-workspace.yaml"),
+			`packages:\n  - "packages/*"\n`
+		);
+		await Bun.write(
+			path.join(dir, "package.json"),
+			JSON.stringify({ name: "root", version: "0.0.0" })
+		);
+
+		const pkgA = path.join(dir, "packages", "pkg-a");
+		const pkgB = path.join(dir, "packages", "pkg-b");
+
+		await Bun.write(
+			path.join(pkgA, "tsconfig.json"),
+			JSON.stringify({
+				compilerOptions: { target: "ES2020", module: "ESNext", strict: true },
+				include: ["*.ts"],
+			})
+		);
+		await Bun.write(
+			path.join(pkgA, "package.json"),
+			JSON.stringify({ name: "pkg-a", version: "0.0.0" })
+		);
+		await Bun.write(
+			path.join(pkgA, "utils.ts"),
+			`export function formatDate(input: Date): string {
+  const iso = input.toISOString();
+  const parts = iso.split("T");
+  return parts[0] ?? "";
+}
+`
+		);
+
+		await Bun.write(
+			path.join(pkgB, "tsconfig.json"),
+			JSON.stringify({
+				compilerOptions: { target: "ES2020", module: "ESNext", strict: true },
+				include: ["*.ts"],
+			})
+		);
+		await Bun.write(
+			path.join(pkgB, "package.json"),
+			JSON.stringify({ name: "pkg-b", version: "0.0.0" })
+		);
+		await Bun.write(
+			path.join(pkgB, "helpers.ts"),
+			`function formatDate(input: Date): string {
+  const iso = input.toISOString();
+  const parts = iso.split("T");
+  return parts[0] ?? "";
+}
+
+export function otherHelper(): number {
+  return 7;
+}
+`
+		);
+
+		await extractCommonCommand({
+			directory: dir,
+			threshold: 0.95,
+			dryRun: false,
+			workspace: true,
+		});
+
+		const pkgAContent = await Bun.file(path.join(pkgA, "utils.ts")).text();
+		const pkgBContent = await Bun.file(path.join(pkgB, "helpers.ts")).text();
+
+		// pkg-a canonical should be untouched (already exported)
+		expect(pkgAContent).toContain("export function formatDate");
+
+		// pkg-b duplicate should be removed and replaced with an import
+		expect(pkgBContent).not.toContain("function formatDate(input: Date)");
+		// pkg-b should still have its own function
+		expect(pkgBContent).toContain("export function otherHelper");
+
+		await rm(dir, { recursive: true, force: true });
+	});
 });
