@@ -1,3 +1,4 @@
+import type ts from "typescript";
 import type { BarrelExport, ModuleReference, ProjectConfig } from "../types.ts";
 import { mapConcurrent } from "./concurrency.ts";
 import { createProgram, getProjectFiles } from "./project.ts";
@@ -17,6 +18,9 @@ export interface DependencyGraph {
 	barrelFiles: Set<string>;
 	/** Map from barrel file to the files it actually re-exports (export ... from) */
 	barrelReExports: Map<string, string[]>;
+	/** The TypeScript program used to build this graph — enables zero-disk-I/O source file access.
+	 * Absent on test-constructed graphs and workspace-merged graphs. */
+	program?: ts.Program;
 }
 
 interface FileScanResult {
@@ -91,6 +95,7 @@ export async function buildDependencyGraph(
 		importedBy,
 		barrelFiles,
 		barrelReExports,
+		program,
 	};
 	graphCache.set(project.tsconfigPath, result);
 	return result;

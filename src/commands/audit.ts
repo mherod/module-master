@@ -78,7 +78,10 @@ export function computeMetrics(graph: DependencyGraph): FileMetrics[] {
 		const total = fanIn + fanOut;
 		const instability = total === 0 ? 0 : fanOut / total;
 
-		const exportCount = withSourceFile(file, scanExports, []).length;
+		const sf = graph.program?.getSourceFile(file);
+		const exportCount = sf
+			? scanExports(sf).length
+			: withSourceFile(file, scanExports, []).length;
 
 		metrics.push({
 			file,
