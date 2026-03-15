@@ -474,3 +474,64 @@ DO: Commit all related changes together as one scope rather than fragmenting acr
 DO: When adding a CLI-wide feature (e.g., `--workspace` flag), scan all command files in `src/commands/*.ts` upfront and plan one commit covering every applicable command. Adding to `similar.ts` alone, then `find.ts`, then `analyze.ts`, then `move.ts`/`rename.ts` in separate commits is 4x the work and 4 fragmented commits.
 DON'T: Ship three commits for what is logically one fix. If offset-correction, documentation, and comments all address the same concern, plan them as one scope.
 DON'T: Declare a fix "done" without checking whether the same pattern applies to neighbouring code paths.
+
+## Performance Patterns
+
+### `withSourceFile` — Always Use the Program Overload When a Program Is Available
+
+`withSourceFile` has two overloads:
+
+```typescript
+// File-path overload — reads from disk + creates a new ts.SourceFile every call
+withSourceFile(filePath: string, callback, fallback)
+
+// Program overload — retrieves already-parsed source file from memory, zero I/O
+withSourceFile(program: ts.Program, filePath: string, callback, fallback)
+```
+
+**DON'T** use the file-path overload inside loops when a `ts.Program` is available in scope. Every call to `withSourceFile(filePath, ...)` invokes `ts.sys.readFile()` + `ts.createSourceFile()` — a full disk read and parse pass. The known violation is `audit.ts:81`:
+
+```typescript
+// WRONG — re-reads and re-parses every project file from disk
+const exportCount = withSourceFile(file, scanExports, []).length;
+
+// CORRECT — zero I/O, uses already-parsed source file from graph Program
+const exportCount = withSourceFile(graph.program, file, scanExports, []).length;
+```
+
+### `buildDependencyGraph` Does Not Expose Its Internal `ts.Program`
+
+`buildDependencyGraph` (graph.ts) builds a `ts.Program` internally but only returns the `DependencyGraph` struct. Commands that need both graph data and source file access — `move.ts` (line 335) and `rename.ts` (line 162) — call `createProgram(project)` a second time, paying twice the program-construction cost for the same tsconfig.
+
+If exposing the Program from `buildDependencyGraph` is ever implemented, add a `program: ts.Program` field to `DependencyGraph`. Until then, be aware that `move` and `rename` each build two Programs per invocation.
+
+DON'T: Add a third `createProgram` call to `move.ts` or `rename.ts` for any reason — the existing dual build is already a known inefficiency.
+
+### `discoverWorkspace` Has No Cache
+
+`discoverProject` (tsconfig-discovery.ts) has `discoveryCache`. `buildDependencyGraph` (graph.ts) has `graphCache`. `discoverWorkspace` (workspace.ts) has **no cache**.
+
+Every call to `discoverWorkspace` traverses the directory tree, globs all `package.json` files, and reads each one. For a 20-package monorepo this is 20+ file reads per call. It is called at 9 sites across commands.
+
+DON'T: Call `discoverWorkspace` in a loop or in a hot path. Call it once per command invocation and pass the result downstream.
+DO: When adding a per-invocation workspace cache, mirror the `graphCache` Map pattern in `graph.ts` — key by absolute directory, store `WorkspaceInfo | null`.
+
+### Parallelize Independent File Writes With `mapConcurrent`
+
+Sequential `for...of` loops with `await writeFile(...)` per file serializes all writes. Each file write in `move`, `rename`, and `alias` is independent — no file's content depends on another's write result.
+
+```typescript
+// WRONG — sequential writes
+for (const [filePath, content] of updates) {
+    await rt.fs.writeFile(filePath, content);
+}
+
+// CORRECT — parallel writes with bounded concurrency
+await mapConcurrent(
+    [...updates],
+    ([filePath, content]) => rt.fs.writeFile(filePath, content),
+    { concurrency: 4 }
+);
+```
+
+Use `mapConcurrent` (default concurrency=4) from `src/core/concurrency.ts` rather than bare `Promise.all` to avoid exhausting file descriptors on large graphs.
