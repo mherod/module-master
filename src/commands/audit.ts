@@ -316,7 +316,8 @@ function printReport(
 		);
 		for (const cycle of report.cycles) {
 			const relFiles = cycle.files.map((f) => path.relative(baseDir, f));
-			logger.info(`   ${relFiles.join(" → ")} → ${relFiles[0]}`);
+			const loopBack = relFiles.at(0) ?? "?";
+			logger.info(`   ${relFiles.join(" → ")} → ${loopBack}`);
 		}
 		logger.empty();
 	} else {
