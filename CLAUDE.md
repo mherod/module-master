@@ -60,8 +60,8 @@ The codebase uses the TypeScript Compiler API (`typescript` package) for parsing
 
 - **project.ts** - Loads tsconfig.json, extracts path aliases, creates TS programs
 - **tsconfig-discovery.ts** - Smart discovery of all tsconfig files, handles monorepos and project references
-- **similarity-algorithms.ts** - Pure stateless algorithm primitives: `tokenBigrams`, `jaccardSimilarity`, `nameSimilarity`, `camelCaseTokenize`, `normalizeBody`, `tokenize`, `extractContentTokens`. No I/O, no async — fully unit-testable in isolation without mocking workspace or filesystem
-- **source-file.ts** - Source-file I/O utilities: `parseSourceFile()` (reads and parses a `.ts`/`.vue` file into a `ts.SourceFile`) and `withSourceFile()` (two overloads: file-path and program-based, both invoke a callback with the parsed source file or return a fallback)
+- **similarity-algorithms.ts** - Pure stateless algorithm primitives (bigrams, Jaccard, name similarity, normalization). No I/O, no async — unit-testable without mocking
+- **source-file.ts** - `parseSourceFile()` and `withSourceFile()` (file-path and program overloads, both invoke a callback with the parsed source file)
 - **scanner.ts** - AST traversal to extract all imports/exports from a source file; scanner functions take `ts.SourceFile` directly (use `source-file.ts` to obtain one)
 - **resolver.ts** - Module path resolution, alias matching, relative path calculation, cross-package import resolution
 - **graph.ts** - Builds dependency graph (imports/importedBy maps) for the entire project
@@ -148,119 +148,70 @@ When loading a project with a target file, use `loadProject(tsconfigPath, target
 
 ## AST Node Coverage
 
-`resect` claims "AST-level precision" by using the TypeScript Compiler API directly. This section is the canonical support matrix — it maps which TypeScript AST node kinds each core helper handles, what is partially supported, and what is intentionally out of scope. See also the [README](./README.md) AST-level precision note.
+Support matrix for TypeScript AST node kinds. See also [README](./README.md) AST-level precision claim.
 
-### `scanModuleReferences()` — Module Reference Detection
+### `scanModuleReferences()`
 
-Walks the entire AST with `ts.forEachChild` and produces `ModuleReference` records.
-
-| Node kind | Pattern | `ReferenceType` output |
+| Node kind | Pattern | Output |
 |---|---|---|
 | `ImportDeclaration` (no clause) | `import './x'` | `import-side-effect` |
 | `ImportDeclaration` (default) | `import x from './x'` | `import` |
 | `ImportDeclaration` (named) | `import { x } from './x'` | `import-named` |
 | `ImportDeclaration` (namespace) | `import * as x from './x'` | `import-namespace` |
-| `ExportDeclaration` (no clause) | `export * from './x'` | `export-all` |
+| `ExportDeclaration` (wildcard) | `export * from './x'` | `export-all` |
 | `ExportDeclaration` (namespace) | `export * as x from './x'` | `export-all-as` |
 | `ExportDeclaration` (named) | `export { x } from './x'` | `export-from` |
-| `CallExpression` (`ImportKeyword`) | `import('./x')` | `import-dynamic` |
+| `CallExpression` (dynamic import) | `import('./x')` | `import-dynamic` |
 | `CallExpression` (`require`) | `require('./x')` | `require` |
 | `CallExpression` (`require.resolve`) | `require.resolve('./x')` | `require-resolve` |
-| `CallExpression` (`jest/vi/vitest.mock`) | `jest.mock('./x')`, `vi.mock('./x')` | `jest-mock` |
+| `CallExpression` (mock) | `jest.mock('./x')`, `vi.mock('./x')` | `jest-mock` |
 
-**Not handled (out of scope):**
-- Non-string-literal specifiers: `require(someVar)` — static analysis only; dynamic arguments are silently skipped
-- `import.meta.url` patterns — not a cross-file module reference
-- `export namespace X { }` — not a cross-file reference
+Out of scope: non-string-literal specifiers (`require(someVar)`), `import.meta.url`, `export namespace`.
 
-### `scanExports()` — Export Declaration Detection
-
-Visits top-level nodes and builds `ExportInfo` records. Only export-modifier nodes are included; internal declarations are skipped.
+### `scanExports()`
 
 | Node kind | Pattern | Notes |
 |---|---|---|
-| `VariableStatement` + export | `export const x = ...` | Only `Identifier` binding names; destructured names (e.g. `export const { x } = obj`) are **not** extracted |
-| `FunctionDeclaration` + export | `export function foo() {}` | `export default function foo()` → `type: "default"` |
-| `ClassDeclaration` + export | `export class Foo {}` | `export default class Foo` → `type: "default"` |
+| `VariableStatement` + export | `export const x = ...` | Identifier bindings only; destructured names not extracted |
+| `FunctionDeclaration` + export | `export function foo() {}` | default → `type: "default"` |
+| `ClassDeclaration` + export | `export class Foo {}` | default → `type: "default"` |
 | `TypeAliasDeclaration` + export | `export type Foo = ...` | `isType: true` |
 | `InterfaceDeclaration` + export | `export interface Foo {}` | `isType: true` |
 | `EnumDeclaration` + export | `export enum Foo {}` | `isType: false` |
-| `ExportAssignment` | `export default expr` | Always `type: "default"` |
-| `ExportDeclaration` (no specifier) | `export { x, y }` | Local re-export clause only |
+| `ExportAssignment` | `export default expr` | `type: "default"` |
+| `ExportDeclaration` (no specifier) | `export { x, y }` | Local re-export only |
 
-**Not handled:**
-- `export namespace Foo {}` — namespace/module declarations
-- Destructured variable exports: `export const { a, b } = obj` — only the raw statement is seen, not the individual bindings
+Out of scope: `export namespace`, destructured variable exports.
 
-### `scanBarrelExports()` — Re-export Detection
+### `scanBarrelExports()`
 
-Visits only the top-level `ExportDeclaration` nodes that carry a `moduleSpecifier`. Local `export { x }` (no source module) is intentionally excluded.
-
-| Pattern | Description |
+| Pattern | Type |
 |---|---|
-| `export * from './x'` | Wildcard re-export — `type: "all"` |
-| `export * as x from './x'` | Namespace re-export — `type: "all-as"` |
-| `export { x, y } from './x'` | Named re-export — `type: "named"` per binding |
+| `export * from './x'` | `all` |
+| `export * as x from './x'` | `all-as` |
+| `export { x, y } from './x'` | `named` (per binding) |
 
-### `getNameNode()` — Declaration Name Extraction
+### `getNameNode()`
 
-Shared helper used by `scanner.ts` (export analysis) and `rename.ts` (rename-at-declaration). Returns the `ts.Identifier` that names the declaration, or `null`.
+Returns `node.name` for: `FunctionDeclaration`, `ClassDeclaration`, `TypeAliasDeclaration`, `InterfaceDeclaration`, `EnumDeclaration`. `VariableStatement`/`VariableDeclaration` → first declaration's identifier only. `ExportAssignment` → `node.expression`. Returns `null` for: `MethodDeclaration`, `ConstructorDeclaration`, accessor declarations, namespace declarations — handled at the command layer.
 
-| Node kind | Identifier returned |
-|---|---|
-| `FunctionDeclaration` | `node.name` |
-| `ClassDeclaration` | `node.name` |
-| `VariableStatement` | First declaration's `name` — identifier only |
-| `VariableDeclaration` | `node.name` — identifier only |
-| `TypeAliasDeclaration` | `node.name` |
-| `InterfaceDeclaration` | `node.name` |
-| `EnumDeclaration` | `node.name` |
-| `ExportAssignment` (identifier) | `node.expression` |
+### Rename Command — Command-Layer Extensions
 
-**Not handled (returns `null`):** `MethodDeclaration`, `ConstructorDeclaration`, `GetAccessorDeclaration`, `SetAccessorDeclaration`, namespace/module declarations. These are handled at the command layer (see below).
+Three helpers in `src/commands/rename.ts` extend scanner coverage:
 
-### Rename Command — Command-Layer AST Extensions
+**`nodeIntroducesShadow()`** — detects parameter shadowing in: `FunctionDeclaration`, `FunctionExpression`, `ArrowFunction`, `MethodDeclaration`, `ConstructorDeclaration`, `GetAccessorDeclaration`, `SetAccessorDeclaration`.
 
-`src/commands/rename.ts` extends the scanner helpers with additional node handling to correctly scope renames without updating shadowed bindings. This logic lives at the command layer, not in `src/core/scanner.ts`.
+**`bindingContainsName()`** — recursive binding check: `Identifier`, `ObjectBindingPattern`, `ArrayBindingPattern`, `OmittedExpression` (skipped).
 
-**`nodeIntroducesShadow()` — function-like scope detection:**
-
-Detects when a function-like node introduces a parameter that shadows the rename target. Covers all function-like kinds that the core `getNameNode()` does not handle:
-
-| Node kind | Example |
-|---|---|
-| `FunctionDeclaration` | `function foo(oldName) { … }` |
-| `FunctionExpression` | `const f = function(oldName) { … }` |
-| `ArrowFunction` | `(oldName) => …` |
-| `MethodDeclaration` | `class C { method(oldName) {} }` |
-| `ConstructorDeclaration` | `class C { constructor(oldName) {} }` |
-| `GetAccessorDeclaration` | `get prop()` parameters |
-| `SetAccessorDeclaration` | `set prop(oldName) {}` |
-
-**`bindingContainsName()` — destructuring pattern traversal:**
-
-Recursively checks whether a binding pattern introduces the target name:
-
-| Node kind | Example |
-|---|---|
-| `Identifier` | Simple parameter: `(oldName)` |
-| `ObjectBindingPattern` | `{ oldName, other }` |
-| `ArrayBindingPattern` | `[oldName, other]` |
-| `OmittedExpression` | Hole `[, other]` — skipped |
-
-**`isDeclaringIdentifier()` — declaration context detection:**
-
-Prevents the rename visitor from treating a declaring occurrence as an import reference:
+**`isDeclaringIdentifier()`** — declaring contexts to skip:
 
 | Parent node | Example |
 |---|---|
-| `Parameter` | `function foo(oldName)` — declares, not references |
-| `VariableDeclaration` | `const oldName = …` — declares |
-| `BindingElement` | `const { oldName } = …` — declares |
-| `FunctionDeclaration.name` | `function oldName() {}` — handled by export rename |
-| `ClassDeclaration.name` | `class OldName {}` — handled by export rename |
-
-**Relationship to #41:** Issue #41 is about moving TypeScript API usage behind the `core/` boundary. This documentation describes the current boundary — scanner helpers are in `core/`, while the rename command extends that boundary locally at the command layer. Future work from #41 may lift `nodeIntroducesShadow` and `bindingContainsName` into a `core/rename-helpers.ts` module.
+| `Parameter` | `function foo(oldName)` |
+| `VariableDeclaration` | `const oldName = …` |
+| `BindingElement` | `const { oldName } = …` |
+| `FunctionDeclaration.name` | `function oldName() {}` |
+| `ClassDeclaration.name` | `class OldName {}` |
 
 DON'T: Modify string literals in fs/Bun.file calls—these are not module paths and cannot be safely resolved.
 
@@ -300,11 +251,9 @@ The `verify.ts` module provides safety for refactoring operations:
 - **Bonus tracking**: Reports errors fixed by the refactoring as a side effect
 - **Enabled by default**: Use `--no-verify` to skip for faster execution (risky)
 
-Verification spawns `tsc` as a subprocess using `spawnSync` and parses error output. Errors are matched as lines containing `: error TS`. The tool tracks which errors existed before, which are new, and which were fixed.
+Verification spawns `tsc` as a subprocess and diffs error output (before vs after). `runTypeCheck(project)` is exported from `verify.ts` and reused by `move.ts`.
 
-`runTypeCheck(project)` is exported from `verify.ts` and reused by `move.ts`.
-
-`collectUnresolvableDiagnostics(project)` scans all project files for unresolvable imports and returns `UnresolvableDiagnosticWithFile[]` (each entry has `file`, `specifier`, `line`, `diagnostic`). Use this for project-wide unresolvable import reporting. `VerificationResult.unresolvableDiagnostics` exposes these after a verify pass.
+`collectUnresolvableDiagnostics(project)` returns `UnresolvableDiagnosticWithFile[]` for project-wide unresolvable import reporting. Exposed as `VerificationResult.unresolvableDiagnostics` after a verify pass.
 
 DON'T: Duplicate `runTypeCheck` logic in command files. Import from `verify.ts`.
 
@@ -452,7 +401,7 @@ DON'T: Use relative paths like `../../../packages/foo/src/bar` for cross-package
 
 ### Barrel Re-export Handling for Cross-Package Moves
 
-When moving files across packages, source barrel re-exports (`export * from "./moved-file"`) must be **removed entirely**, not changed to `export * from "@scope/package"`. Changing to a package import would pull in ALL exports from that package, causing duplicate export conflicts.
+Source barrel re-exports (`export * from "./moved-file"`) must be **removed**, not changed to `export * from "@scope/package"` — that pulls in ALL exports from the target package, causing duplicate export conflicts.
 
 The `updateBarrelExports()` function in `updater.ts` handles this:
 - Resolves each export declaration's specifier to check if it points to the moved file
@@ -641,9 +590,7 @@ const exportCount = withSourceFile(graph.program, file, scanExports, []).length;
 
 ### `buildDependencyGraph` Does Not Expose Its Internal `ts.Program`
 
-`buildDependencyGraph` (graph.ts) builds a `ts.Program` internally but only returns the `DependencyGraph` struct. Commands that need both graph data and source file access — `move.ts` (line 335) and `rename.ts` (line 162) — call `createProgram(project)` a second time, paying twice the program-construction cost for the same tsconfig.
-
-If exposing the Program from `buildDependencyGraph` is ever implemented, add a `program: ts.Program` field to `DependencyGraph`. Until then, be aware that `move` and `rename` each build two Programs per invocation.
+`buildDependencyGraph` builds a `ts.Program` internally but only returns `DependencyGraph`. Commands needing source file access (`move.ts`, `rename.ts`) call `createProgram()` a second time. If ever fixed, add a `program: ts.Program` field to `DependencyGraph`.
 
 DON'T: Add a third `createProgram` call to `move.ts` or `rename.ts` for any reason — the existing dual build is already a known inefficiency.
 
