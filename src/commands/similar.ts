@@ -88,18 +88,22 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 	}
 }
 
+const BUCKET_META: Record<
+	SimilarityGroup["bucket"],
+	{ icon: string; label: (pct: string) => string }
+> = {
+	exact: {
+		icon: "🔴",
+		label: (_pct) => "exact duplicate (after normalization)",
+	},
+	high: { icon: "🟠", label: (pct) => `high similarity (${pct})` },
+	medium: { icon: "🟡", label: (pct) => `medium similarity (${pct})` },
+};
+
 function bucketInfo(group: SimilarityGroup): { icon: string; label: string } {
 	const pct = `${(group.score * 100).toFixed(0)}%`;
-	switch (group.bucket) {
-		case "exact":
-			return { icon: "🔴", label: "exact duplicate (after normalization)" };
-		case "high":
-			return { icon: "🟠", label: `high similarity (${pct})` };
-		case "medium":
-			return { icon: "🟡", label: `medium similarity (${pct})` };
-		default:
-			return { icon: "⚪", label: `similarity (${pct})` };
-	}
+	const { icon, label } = BUCKET_META[group.bucket];
+	return { icon, label: label(pct) };
 }
 
 function printReport(
