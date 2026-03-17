@@ -214,7 +214,7 @@ Without `--output`, keeps one canonical copy in place and replaces all others wi
 
 ## Features
 
-- **AST-level precision** — Uses TypeScript Compiler API, not regex
+- **AST-level precision** — Uses TypeScript Compiler API, not regex (see [AST Node Coverage](./CLAUDE.md#ast-node-coverage) for the full node-kind support matrix)
 - **Type-safe refactoring** — Runs `tsc --noEmit` before and after changes
 - **Full import coverage** — Named, default, namespace, dynamic, require, require.resolve
 - **Test mock support** — jest.mock(), vi.mock(), vitest.mock()

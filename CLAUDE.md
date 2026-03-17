@@ -146,13 +146,121 @@ The `tsconfig-discovery.ts` module handles complex project structures:
 
 When loading a project with a target file, use `loadProject(tsconfigPath, targetFile)` to automatically find the most specific config that includes that file.
 
-## Scanner Coverage
+## AST Node Coverage
 
-The scanner (`src/core/scanner.ts`) detects these reference types:
-- ESM imports: default, named, namespace, side-effect, dynamic `import()`
-- CommonJS: `require()`, `require.resolve()`
-- Re-exports: `export { x } from`, `export * from`, `export * as x from`
-- Test mocks: `jest.mock()`, `vi.mock()`, `vitest.mock()`, including `doMock`/`unmock` variants
+`resect` claims "AST-level precision" by using the TypeScript Compiler API directly. This section is the canonical support matrix — it maps which TypeScript AST node kinds each core helper handles, what is partially supported, and what is intentionally out of scope. See also the [README](./README.md) AST-level precision note.
+
+### `scanModuleReferences()` — Module Reference Detection
+
+Walks the entire AST with `ts.forEachChild` and produces `ModuleReference` records.
+
+| Node kind | Pattern | `ReferenceType` output |
+|---|---|---|
+| `ImportDeclaration` (no clause) | `import './x'` | `import-side-effect` |
+| `ImportDeclaration` (default) | `import x from './x'` | `import` |
+| `ImportDeclaration` (named) | `import { x } from './x'` | `import-named` |
+| `ImportDeclaration` (namespace) | `import * as x from './x'` | `import-namespace` |
+| `ExportDeclaration` (no clause) | `export * from './x'` | `export-all` |
+| `ExportDeclaration` (namespace) | `export * as x from './x'` | `export-all-as` |
+| `ExportDeclaration` (named) | `export { x } from './x'` | `export-from` |
+| `CallExpression` (`ImportKeyword`) | `import('./x')` | `import-dynamic` |
+| `CallExpression` (`require`) | `require('./x')` | `require` |
+| `CallExpression` (`require.resolve`) | `require.resolve('./x')` | `require-resolve` |
+| `CallExpression` (`jest/vi/vitest.mock`) | `jest.mock('./x')`, `vi.mock('./x')` | `jest-mock` |
+
+**Not handled (out of scope):**
+- Non-string-literal specifiers: `require(someVar)` — static analysis only; dynamic arguments are silently skipped
+- `import.meta.url` patterns — not a cross-file module reference
+- `export namespace X { }` — not a cross-file reference
+
+### `scanExports()` — Export Declaration Detection
+
+Visits top-level nodes and builds `ExportInfo` records. Only export-modifier nodes are included; internal declarations are skipped.
+
+| Node kind | Pattern | Notes |
+|---|---|---|
+| `VariableStatement` + export | `export const x = ...` | Only `Identifier` binding names; destructured names (e.g. `export const { x } = obj`) are **not** extracted |
+| `FunctionDeclaration` + export | `export function foo() {}` | `export default function foo()` → `type: "default"` |
+| `ClassDeclaration` + export | `export class Foo {}` | `export default class Foo` → `type: "default"` |
+| `TypeAliasDeclaration` + export | `export type Foo = ...` | `isType: true` |
+| `InterfaceDeclaration` + export | `export interface Foo {}` | `isType: true` |
+| `EnumDeclaration` + export | `export enum Foo {}` | `isType: false` |
+| `ExportAssignment` | `export default expr` | Always `type: "default"` |
+| `ExportDeclaration` (no specifier) | `export { x, y }` | Local re-export clause only |
+
+**Not handled:**
+- `export namespace Foo {}` — namespace/module declarations
+- Destructured variable exports: `export const { a, b } = obj` — only the raw statement is seen, not the individual bindings
+
+### `scanBarrelExports()` — Re-export Detection
+
+Visits only the top-level `ExportDeclaration` nodes that carry a `moduleSpecifier`. Local `export { x }` (no source module) is intentionally excluded.
+
+| Pattern | Description |
+|---|---|
+| `export * from './x'` | Wildcard re-export — `type: "all"` |
+| `export * as x from './x'` | Namespace re-export — `type: "all-as"` |
+| `export { x, y } from './x'` | Named re-export — `type: "named"` per binding |
+
+### `getNameNode()` — Declaration Name Extraction
+
+Shared helper used by `scanner.ts` (export analysis) and `rename.ts` (rename-at-declaration). Returns the `ts.Identifier` that names the declaration, or `null`.
+
+| Node kind | Identifier returned |
+|---|---|
+| `FunctionDeclaration` | `node.name` |
+| `ClassDeclaration` | `node.name` |
+| `VariableStatement` | First declaration's `name` — identifier only |
+| `VariableDeclaration` | `node.name` — identifier only |
+| `TypeAliasDeclaration` | `node.name` |
+| `InterfaceDeclaration` | `node.name` |
+| `EnumDeclaration` | `node.name` |
+| `ExportAssignment` (identifier) | `node.expression` |
+
+**Not handled (returns `null`):** `MethodDeclaration`, `ConstructorDeclaration`, `GetAccessorDeclaration`, `SetAccessorDeclaration`, namespace/module declarations. These are handled at the command layer (see below).
+
+### Rename Command — Command-Layer AST Extensions
+
+`src/commands/rename.ts` extends the scanner helpers with additional node handling to correctly scope renames without updating shadowed bindings. This logic lives at the command layer, not in `src/core/scanner.ts`.
+
+**`nodeIntroducesShadow()` — function-like scope detection:**
+
+Detects when a function-like node introduces a parameter that shadows the rename target. Covers all function-like kinds that the core `getNameNode()` does not handle:
+
+| Node kind | Example |
+|---|---|
+| `FunctionDeclaration` | `function foo(oldName) { … }` |
+| `FunctionExpression` | `const f = function(oldName) { … }` |
+| `ArrowFunction` | `(oldName) => …` |
+| `MethodDeclaration` | `class C { method(oldName) {} }` |
+| `ConstructorDeclaration` | `class C { constructor(oldName) {} }` |
+| `GetAccessorDeclaration` | `get prop()` parameters |
+| `SetAccessorDeclaration` | `set prop(oldName) {}` |
+
+**`bindingContainsName()` — destructuring pattern traversal:**
+
+Recursively checks whether a binding pattern introduces the target name:
+
+| Node kind | Example |
+|---|---|
+| `Identifier` | Simple parameter: `(oldName)` |
+| `ObjectBindingPattern` | `{ oldName, other }` |
+| `ArrayBindingPattern` | `[oldName, other]` |
+| `OmittedExpression` | Hole `[, other]` — skipped |
+
+**`isDeclaringIdentifier()` — declaration context detection:**
+
+Prevents the rename visitor from treating a declaring occurrence as an import reference:
+
+| Parent node | Example |
+|---|---|
+| `Parameter` | `function foo(oldName)` — declares, not references |
+| `VariableDeclaration` | `const oldName = …` — declares |
+| `BindingElement` | `const { oldName } = …` — declares |
+| `FunctionDeclaration.name` | `function oldName() {}` — handled by export rename |
+| `ClassDeclaration.name` | `class OldName {}` — handled by export rename |
+
+**Relationship to #41:** Issue #41 is about moving TypeScript API usage behind the `core/` boundary. This documentation describes the current boundary — scanner helpers are in `core/`, while the rename command extends that boundary locally at the command layer. Future work from #41 may lift `nodeIntroducesShadow` and `bindingContainsName` into a `core/rename-helpers.ts` module.
 
 DON'T: Modify string literals in fs/Bun.file calls—these are not module paths and cannot be safely resolved.
 
