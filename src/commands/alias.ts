@@ -22,7 +22,8 @@ import {
 	filterToWorkspaceBoundary,
 } from "../core/workspace.ts";
 import { getRuntime } from "../runtime/index.ts";
-import type { ModuleReference, ProjectConfig } from "../types.ts";
+import type { ModuleReference } from "../types/graph.ts";
+import type { ProjectConfig } from "../types.ts";
 
 export interface AliasOptions {
 	target: string;

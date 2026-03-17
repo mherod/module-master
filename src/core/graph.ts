@@ -1,5 +1,6 @@
 import type ts from "typescript";
-import type { BarrelExport, ModuleReference, ProjectConfig } from "../types.ts";
+import type { BarrelExport, ModuleReference } from "../types/graph.ts";
+import type { ProjectConfig } from "../types.ts";
 import { mapConcurrent } from "./concurrency.ts";
 import { createProgram, getProjectFiles } from "./project.ts";
 import { normalizePath } from "./resolver.ts";

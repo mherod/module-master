@@ -7,7 +7,7 @@ import {
 	discoverWorkspace,
 	filterToWorkspaceBoundary,
 } from "../core/workspace.ts";
-import type { ExportInfo } from "../types.ts";
+import type { ExportInfo } from "../types/analysis.ts";
 
 export interface FindOptions {
 	query: string;

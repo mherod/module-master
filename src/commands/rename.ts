@@ -18,11 +18,9 @@ import {
 } from "../core/text-changes.ts";
 import { discoverWorkspace } from "../core/workspace.ts";
 import { getRuntime } from "../runtime/index.ts";
-import type {
-	ModuleReference,
-	ProjectConfig,
-	UpdatedReference,
-} from "../types.ts";
+import type { ModuleReference } from "../types/graph.ts";
+import type { UpdatedReference } from "../types/move.ts";
+import type { ProjectConfig } from "../types.ts";
 
 export interface RenameOptions {
 	file: string;

@@ -22,7 +22,8 @@ import {
 	discoverWorkspace,
 	filterToWorkspaceBoundary,
 } from "../core/workspace.ts";
-import type { AnalysisResult, ProjectConfig } from "../types.ts";
+import type { AnalysisResult } from "../types/analysis.ts";
+import type { ProjectConfig } from "../types.ts";
 
 export interface AnalyzeOptions {
 	file: string;

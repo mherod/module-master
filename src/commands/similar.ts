@@ -2,7 +2,7 @@ import path from "node:path";
 import { logger } from "../cli-logger.ts";
 import type { SimilarityDiscoveryOptions } from "../core/similarity.ts";
 import { analyzeSimilarity } from "../core/similarity.ts";
-import type { SimilarityGroup, SimilarityReport } from "../types.ts";
+import type { SimilarityGroup, SimilarityReport } from "../types/similar.ts";
 
 export interface SimilarOptions extends SimilarityDiscoveryOptions {
 	json?: boolean;

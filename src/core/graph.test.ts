@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ModuleReference } from "../types";
+import type { ModuleReference } from "../types/graph";
 import { type DependencyGraph, findAllReferences } from "./graph";
 
 describe("findAllReferences", () => {

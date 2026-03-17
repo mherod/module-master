@@ -11,7 +11,7 @@ import { analyzeSimilarity } from "../core/similarity.ts";
 import { withSourceFile } from "../core/source-file.ts";
 import { applyTextChanges, type TextChange } from "../core/text-changes.ts";
 import type { WorkspaceInfo } from "../core/workspace.ts";
-import type { FunctionInfo, SimilarityGroup } from "../types.ts";
+import type { FunctionInfo, SimilarityGroup } from "../types/similar.ts";
 
 /**
  * Compute the import specifier for a file importing from importTarget.

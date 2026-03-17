@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { DependencyGraph } from "../core/graph.ts";
-import type { ModuleReference } from "../types.ts";
+import type { ModuleReference } from "../types/graph.ts";
 import { detectCycles } from "./audit.ts";
 
 function makeRef(sourceFile: string, resolvedPath: string): ModuleReference {

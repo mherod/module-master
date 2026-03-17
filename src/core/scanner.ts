@@ -1,14 +1,14 @@
 import ts from "typescript";
 import { logger } from "../cli-logger.ts";
+import type { ExportInfo } from "../types/analysis.ts";
 import type {
 	BarrelExport,
 	BarrelExportEntry,
-	ExportInfo,
 	ImportBinding,
 	ModuleReference,
-	ProjectConfig,
 	ReferenceType,
-} from "../types.ts";
+} from "../types/graph.ts";
+import type { ProjectConfig } from "../types.ts";
 import { type ResolveResult, resolveModuleSpecifier } from "./resolver.ts";
 
 /**

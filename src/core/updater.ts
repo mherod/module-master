@@ -1,13 +1,10 @@
 import path from "node:path";
 import ts from "typescript";
 import { logger } from "../cli-logger.ts";
-import type {
-	ExportInfo,
-	ImportBinding,
-	ModuleReference,
-	ProjectConfig,
-	UpdatedReference,
-} from "../types.ts";
+import type { ExportInfo } from "../types/analysis.ts";
+import type { ImportBinding, ModuleReference } from "../types/graph.ts";
+import type { UpdatedReference } from "../types/move.ts";
+import type { ProjectConfig } from "../types.ts";
 import {
 	calculateNewSpecifier,
 	findCrossPackageImport,

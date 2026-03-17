@@ -91,13 +91,31 @@ The codebase uses the TypeScript Compiler API (`typescript` package) for parsing
 4. **Calculate changes** → Determine new import specifiers based on operation
 5. **Apply updates** → Modify source text at precise AST node positions
 
-### Key Types (`src/types.ts`)
+### Key Types
 
-- `ModuleReference` - Represents an import/export with source location, specifier, and bindings
-- `ReferenceType` - Discriminates import variants (named, namespace, dynamic, require, jest-mock)
-- `ProjectConfig` - tsconfig data including path aliases, include/exclude patterns, resolved files
+Types are organised into per-domain modules under `src/types/`. Root `src/types.ts` retains only cross-cutting infrastructure types and re-exports the domain types for backward compatibility.
+
+- **`src/types.ts`** - `ProjectConfig`, `ProjectReference` (plus re-exports from domain modules)
+- **`src/types/graph.ts`** - `ModuleReference`, `ReferenceType`, `ImportBinding`, `BarrelExport`, `BarrelExportEntry`
+- **`src/types/move.ts`** - `MoveOperation`, `MoveResult`, `UpdatedReference`, `MoveError`
+- **`src/types/analysis.ts`** - `AnalysisResult`, `ExportInfo`
+- **`src/types/similar.ts`** - `FunctionInfo`, `SimilarityBucket`, `SimilarityGroup`, `SimilarityReport`
+
+Import from the specific domain module, not the root barrel:
+
+```typescript
+// ✓ preferred — explicit domain import
+import type { ModuleReference } from "../types/graph.ts";
+import type { ExportInfo } from "../types/analysis.ts";
+import type { ProjectConfig } from "../types.ts"; // cross-cutting infra stays at root
+
+// also works (backward compat) but obscures the domain
+import type { ModuleReference, ExportInfo } from "../types.ts";
+```
+
+Other types:
 - `TsConfigInfo` - Discovery result for a single tsconfig (in tsconfig-discovery.ts)
-- `DependencyGraph` - Maps files to their imports and reverse references
+- `DependencyGraph` - Maps files to their imports and reverse references (in core/graph.ts)
 
 ## Bun Runtime
 

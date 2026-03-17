@@ -36,12 +36,8 @@ import {
 	type WorkspaceInfo,
 } from "../core/workspace.ts";
 import { getRuntime } from "../runtime/index.ts";
-import type {
-	MoveError,
-	MoveResult,
-	ProjectConfig,
-	UpdatedReference,
-} from "../types.ts";
+import type { MoveError, MoveResult, UpdatedReference } from "../types/move.ts";
+import type { ProjectConfig } from "../types.ts";
 
 export interface MoveOptions {
 	source: string;

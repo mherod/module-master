@@ -5,7 +5,7 @@ import type {
 	SimilarityBucket,
 	SimilarityGroup,
 	SimilarityReport,
-} from "../types.ts";
+} from "../types/similar.ts";
 import { TS_JS_VUE_EXTENSIONS } from "./constants.ts";
 import {
 	extractContentTokens,
