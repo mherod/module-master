@@ -75,6 +75,7 @@ describe("extract-common", () => {
 			await extractCommonCommand({
 				directory: dir,
 				threshold: 0.95,
+				force: true,
 				dryRun: true,
 			});
 		} finally {
@@ -102,6 +103,7 @@ describe("extract-common", () => {
 		await extractCommonCommand({
 			directory: dir,
 			threshold: 0.95,
+			force: true,
 			dryRun: false,
 		});
 
@@ -160,6 +162,7 @@ describe("extract-common", () => {
 			await extractCommonCommand({
 				directory: dir,
 				threshold: 0.95,
+				force: true,
 				dryRun: true,
 			});
 		} finally {
@@ -205,6 +208,7 @@ export function otherUtil(): number {
 		await extractCommonCommand({
 			directory: dir,
 			threshold: 0.95,
+			force: true,
 			dryRun: false,
 		});
 
@@ -258,6 +262,7 @@ export function otherB(): number {
 		await extractCommonCommand({
 			directory: dir,
 			threshold: 0.95,
+			force: true,
 			dryRun: false,
 			sameNameOnly: false,
 		});
@@ -320,6 +325,7 @@ export function otherB(): number {
 		await extractCommonCommand({
 			directory: dir,
 			threshold: 0.95,
+			force: true,
 			dryRun: false,
 		});
 
@@ -382,6 +388,7 @@ export function run(): void {
 		await extractCommonCommand({
 			directory: dir,
 			threshold: 0.95,
+			force: true,
 			dryRun: false,
 		});
 
@@ -455,6 +462,7 @@ export const contactsRegistry = { reAuth: async () => {} };
 			await extractCommonCommand({
 				directory: dir,
 				threshold: 0.95,
+				force: true,
 				dryRun: false,
 				sameNameOnly: true,
 			});
@@ -485,6 +493,7 @@ export const contactsRegistry = { reAuth: async () => {} };
 		await extractCommonCommand({
 			directory: dir,
 			threshold: 0.95,
+			force: true,
 			dryRun: false,
 			output: outputFile,
 		});
@@ -521,6 +530,7 @@ export const contactsRegistry = { reAuth: async () => {} };
 			await extractCommonCommand({
 				directory: dir,
 				threshold: 0.95,
+				force: true,
 				dryRun: true,
 				json: true,
 			});
@@ -580,6 +590,7 @@ export const contactsRegistry = { reAuth: async () => {} };
 			await extractCommonCommand({
 				directory: dir,
 				threshold: 0.95,
+				force: true,
 				dryRun: false,
 				json: true,
 			});
@@ -615,6 +626,7 @@ export const contactsRegistry = { reAuth: async () => {} };
 			await extractCommonCommand({
 				directory: dir,
 				threshold: 0.95,
+				force: true,
 				dryRun: true,
 				strict: true,
 			});
@@ -656,6 +668,7 @@ export const contactsRegistry = { reAuth: async () => {} };
 			await extractCommonCommand({
 				directory: dir,
 				threshold: 0.95,
+				force: true,
 				dryRun: true,
 				strict: true,
 			});
@@ -733,6 +746,7 @@ export function otherHelper(): number {
 		await extractCommonCommand({
 			directory: dir,
 			threshold: 0.95,
+			force: true,
 			dryRun: false,
 			workspace: true,
 		});

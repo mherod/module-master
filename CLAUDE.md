@@ -68,6 +68,7 @@ The codebase uses the TypeScript Compiler API (`typescript` package) for parsing
 - **workspace.ts** - Discovers pnpm/yarn/npm workspace packages, barrel files, and tsconfig paths
 - **text-changes.ts** - Shared utilities for applying text edits: `TextChange` interface, `applyTextChanges()`, `deduplicateChanges()`
 - **constants.ts** - Shared constants and patterns: `TSC_ERROR_PATTERN`, `EXPORT_STATEMENT_PATTERN`, `removeExtension()`
+- **git.ts** - Git worktree safety: `isWorktreeDirty()` and `ensureCleanWorktree()` for dirty-worktree guard
 
 ### Commands (`src/commands/`)
 
@@ -181,9 +182,20 @@ DON'T: Duplicate `runTypeCheck` logic in command files. Import from `verify.ts`.
 
 DON'T: Duplicate unresolvable-import scanning across command files. Call `collectUnresolvableDiagnostics(project)` from `verify.ts`.
 
+## Dirty Worktree Guard
+
+All four mutating commands (`move`, `rename`, `alias`, `extract-common`) refuse to write files when the git working tree has uncommitted changes (staged, unstaged, or untracked). This prevents accidental data loss by ensuring refactoring happens on a clean commit boundary.
+
+- **`--force`** overrides the guard and allows mutation on a dirty worktree.
+- **`--dry-run`** bypasses the guard automatically (dry runs don't write files).
+- Non-git directories are silently allowed (no guard applies).
+- The guard is implemented in `src/core/git.ts` (`ensureCleanWorktree()`) and called at the top of each mutating command before any file I/O.
+
+DON'T: Add a new mutating command without calling `ensureCleanWorktree()` before writes.
+
 ## Conflict Detection
 
-All three mutating commands (`move`, `rename`, `alias`) perform conflict detection before applying changes. The read-only commands (`find`, `discover`, `workspace`, `analyze`) have no write operations and need no conflict guards.
+All four mutating commands (`move`, `rename`, `alias`, `extract-common`) perform conflict detection before applying changes. The read-only commands (`find`, `discover`, `workspace`, `analyze`) have no write operations and need no conflict guards.
 
 ### Rename Conflict Detection (`src/commands/rename.ts`)
 

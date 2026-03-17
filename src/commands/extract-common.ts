@@ -46,6 +46,7 @@ export interface ExtractCommonOptions {
 	project?: string;
 	threshold?: number;
 	dryRun?: boolean;
+	force?: boolean;
 	json?: boolean;
 	strict?: boolean;
 	group?: number;
@@ -748,6 +749,7 @@ export async function extractCommonCommand(
 		project,
 		threshold = 0.95,
 		dryRun = false,
+		force = false,
 		json = false,
 		strict = false,
 		group: targetGroup,
@@ -762,6 +764,10 @@ export async function extractCommonCommand(
 		output,
 	} = options;
 	const absoluteDir = path.resolve(directory);
+
+	// Guard: refuse to mutate a dirty worktree unless --force
+	const { ensureCleanWorktree } = await import("../core/git.ts");
+	await ensureCleanWorktree(absoluteDir, force, dryRun);
 
 	if (!json) {
 		const scope = workspace ? "across workspace packages in" : "in";

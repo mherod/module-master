@@ -1,6 +1,7 @@
 import path from "node:path";
 import ts from "typescript";
 import { logger, printCommandResult } from "../cli-logger.ts";
+import { ensureCleanWorktree } from "../core/git.ts";
 import {
 	buildDependencyGraph,
 	findAllReferences,
@@ -45,6 +46,7 @@ export interface MoveOptions {
 	source: string;
 	target: string;
 	dryRun?: boolean;
+	force?: boolean;
 	verbose?: boolean;
 	verify?: boolean;
 	project?: string;
@@ -56,6 +58,7 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 		source,
 		target,
 		dryRun = false,
+		force = false,
 		verbose = false,
 		verify = true,
 		project: projectArg,
@@ -63,6 +66,9 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 
 	const absoluteSource = path.resolve(source);
 	const absoluteTarget = path.resolve(target);
+
+	// Guard: refuse to mutate a dirty worktree unless --force
+	await ensureCleanWorktree(path.dirname(absoluteSource), force, dryRun);
 
 	// Find and load project config
 	const tsconfigPath = resolveTsConfig(

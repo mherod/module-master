@@ -1,6 +1,7 @@
 import path from "node:path";
 import ts from "typescript";
 import { logger } from "../cli-logger.ts";
+import { ensureCleanWorktree } from "../core/git.ts";
 import {
 	createProgram,
 	loadProject,
@@ -26,6 +27,7 @@ export interface AliasOptions {
 	target: string;
 	prefer: "alias" | "relative" | "shortest";
 	dryRun?: boolean;
+	force?: boolean;
 	verbose?: boolean;
 	verify?: boolean;
 	project?: string;
@@ -51,6 +53,7 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 		target,
 		prefer,
 		dryRun = false,
+		force = false,
 		verbose = false,
 		verify = true,
 		project: projectArg,
@@ -58,6 +61,9 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 	} = options;
 
 	const absoluteTarget = path.resolve(target);
+
+	// Guard: refuse to mutate a dirty worktree unless --force
+	await ensureCleanWorktree(absoluteTarget, force, dryRun);
 
 	// Workspace mode: normalize imports across all packages
 	if (workspace) {

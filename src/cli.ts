@@ -22,6 +22,7 @@ const { values, positionals } = parseArgs({
 		project: { type: "string", short: "p" },
 		type: { type: "string", short: "t" },
 		prefer: { type: "string" },
+		force: { type: "boolean" },
 		"no-verify": { type: "boolean" },
 		json: { type: "boolean" },
 		threshold: { type: "string" },
@@ -69,6 +70,7 @@ Options:
   -h, --help        Show this help message
   -v, --version     Show version
   -n, --dry-run     Preview changes without modifying files
+  --force           Allow mutating commands when the git worktree has uncommitted changes
   -p, --project     Path to project directory or tsconfig.json
   -t, --type        Filter type for find command (file, export, all)
   --prefer          Strategy for alias command (alias, relative, shortest)
@@ -118,6 +120,7 @@ Arguments:
 
 Options:
   -n, --dry-run   Preview changes without modifying files
+  --force         Allow operation when git worktree has uncommitted changes
   --verbose       Show detailed information about each change
   --workspace     Scan across all workspace packages
 
@@ -146,6 +149,7 @@ Arguments:
 
 Options:
   -n, --dry-run   Preview changes without modifying files
+  --force         Allow operation when git worktree has uncommitted changes
   --verbose       Show detailed information about each change
   --workspace     Scan across all workspace packages
 
@@ -253,6 +257,7 @@ Options:
   --prefer        Strategy: alias, relative, or shortest (required)
   -p, --project   Path to project directory or tsconfig.json
   -n, --dry-run   Preview changes without modifying files
+  --force         Allow operation when git worktree has uncommitted changes
   --no-verify     Disable type checking verification (enabled by default)
   --verbose       Show detailed changes
   --workspace     Scan across all workspace packages
@@ -335,6 +340,7 @@ Options:
   --group            Target a specific group number (from 'similar' output)
   -o, --output       Write extracted functions to this file (consolidate into one location)
   -n, --dry-run      Preview changes without modifying files
+  --force            Allow operation when git worktree has uncommitted changes
   --json             Output results as JSON
   --strict           Exit 1 if extractable duplicate groups are found (use with --dry-run for CI)
   --skip-same-file   Skip groups where all functions are in the same file
@@ -425,6 +431,7 @@ async function main() {
 				source,
 				target,
 				dryRun: values["dry-run"],
+				force: values.force,
 				verbose: values.verbose,
 				verify: !values["no-verify"],
 				project: values.project,
@@ -447,6 +454,7 @@ async function main() {
 				oldName,
 				newName,
 				dryRun: values["dry-run"],
+				force: values.force,
 				verbose: values.verbose,
 				project: values.project,
 				workspace: values.workspace,
@@ -553,6 +561,7 @@ async function main() {
 				target,
 				prefer,
 				dryRun: values["dry-run"],
+				force: values.force,
 				verbose: values.verbose,
 				verify: !values["no-verify"],
 				project: values.project,
@@ -635,6 +644,7 @@ async function main() {
 				project: values.project,
 				threshold,
 				dryRun: values["dry-run"],
+				force: values.force,
 				json: values.json,
 				strict: values.strict,
 				group,

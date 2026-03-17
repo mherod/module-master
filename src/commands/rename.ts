@@ -1,6 +1,7 @@
 import path from "node:path";
 import ts from "typescript";
 import { logger, printCommandResult } from "../cli-logger.ts";
+import { ensureCleanWorktree } from "../core/git.ts";
 import { buildDependencyGraph, findAllReferences } from "../core/graph.ts";
 import {
 	createProgram,
@@ -28,6 +29,7 @@ export interface RenameOptions {
 	oldName: string;
 	newName: string;
 	dryRun?: boolean;
+	force?: boolean;
 	verbose?: boolean;
 	project?: string;
 	workspace?: boolean;
@@ -46,12 +48,16 @@ export async function renameCommand(options: RenameOptions): Promise<void> {
 		oldName,
 		newName,
 		dryRun = false,
+		force = false,
 		verbose = false,
 		project: projectArg,
 		workspace = false,
 	} = options;
 
 	const absolutePath = path.resolve(file);
+
+	// Guard: refuse to mutate a dirty worktree unless --force
+	await ensureCleanWorktree(path.dirname(absolutePath), force, dryRun);
 
 	const tsconfigPath = resolveTsConfig(projectArg, path.dirname(absolutePath));
 	if (!tsconfigPath) {

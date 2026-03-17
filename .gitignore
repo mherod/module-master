@@ -39,3 +39,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Finder (MacOS) folder config
 .DS_Store
 .swiz/
+
+# Test temp directories
+__tmp_git_test__/
+__fixtures__/
