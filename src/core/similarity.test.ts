@@ -2,17 +2,19 @@ import { describe, expect, test } from "bun:test";
 import ts from "typescript";
 import {
 	analyzeSimilarity,
-	camelCaseTokenize,
 	collectFunctions,
-	extractContentTokens,
 	findSimilarGroups,
-	jaccardSimilarity,
 	matchesRelatedPath,
+	scanWorkspaceFunctions,
+} from "./similarity";
+import {
+	camelCaseTokenize,
+	extractContentTokens,
+	jaccardSimilarity,
 	nameSimilarity,
 	normalizeBody,
-	scanWorkspaceFunctions,
 	tokenize,
-} from "./similarity";
+} from "./similarity-algorithms";
 
 function makeSourceFile(code: string, fileName = "test.ts"): ts.SourceFile {
 	return ts.createSourceFile(fileName, code, ts.ScriptTarget.Latest, true);

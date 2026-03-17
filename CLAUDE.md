@@ -60,6 +60,7 @@ The codebase uses the TypeScript Compiler API (`typescript` package) for parsing
 
 - **project.ts** - Loads tsconfig.json, extracts path aliases, creates TS programs
 - **tsconfig-discovery.ts** - Smart discovery of all tsconfig files, handles monorepos and project references
+- **similarity-algorithms.ts** - Pure stateless algorithm primitives: `tokenBigrams`, `jaccardSimilarity`, `nameSimilarity`, `camelCaseTokenize`, `normalizeBody`, `tokenize`, `extractContentTokens`. No I/O, no async — fully unit-testable in isolation without mocking workspace or filesystem
 - **source-file.ts** - Source-file I/O utilities: `parseSourceFile()` (reads and parses a `.ts`/`.vue` file into a `ts.SourceFile`) and `withSourceFile()` (two overloads: file-path and program-based, both invoke a callback with the parsed source file or return a fallback)
 - **scanner.ts** - AST traversal to extract all imports/exports from a source file; scanner functions take `ts.SourceFile` directly (use `source-file.ts` to obtain one)
 - **resolver.ts** - Module path resolution, alias matching, relative path calculation, cross-package import resolution
