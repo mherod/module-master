@@ -10,6 +10,7 @@ import type {
 	ReferenceType,
 } from "../types.ts";
 import { type ResolveResult, resolveModuleSpecifier } from "./resolver.ts";
+import { extractVueScript } from "./vue-sfc.ts";
 
 /**
  * Warn when a specifier cannot be resolved. External packages are expected
@@ -19,6 +20,29 @@ function warnIfUnresolvable(result: ResolveResult): void {
 	if (result.kind === "unresolvable") {
 		logger.warn(result.diagnostic);
 	}
+}
+
+/**
+ * Read and parse a Vue SFC file into a SourceFile by extracting its script block.
+ * Uses a virtual .vue.ts filename so the TypeScript compiler accepts the content.
+ * Returns null if the file cannot be read or contains no script block.
+ */
+function parseVueSourceFile(filePath: string): ts.SourceFile | null {
+	const raw = ts.sys.readFile(filePath);
+	if (!raw) {
+		return null;
+	}
+	const script = extractVueScript(raw);
+	if (!script) {
+		return null;
+	}
+	const virtualName = `${filePath}.${script.lang}`;
+	return ts.createSourceFile(
+		virtualName,
+		script.content,
+		ts.ScriptTarget.Latest,
+		true
+	);
 }
 
 /**
@@ -638,10 +662,14 @@ export function getNameNode(node: ts.Node): ts.Identifier | null {
 }
 
 /**
- * Read and parse a TypeScript/JavaScript file into a SourceFile.
- * Returns null if the file cannot be read.
+ * Read and parse a TypeScript/JavaScript/Vue file into a SourceFile.
+ * For .vue files, the <script> block is extracted first.
+ * Returns null if the file cannot be read or (for .vue) has no script block.
  */
 export function parseSourceFile(filePath: string): ts.SourceFile | null {
+	if (filePath.endsWith(".vue")) {
+		return parseVueSourceFile(filePath);
+	}
 	const content = ts.sys.readFile(filePath);
 	if (!content) {
 		return null;

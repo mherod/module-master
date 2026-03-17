@@ -6,7 +6,7 @@ import type {
 	SimilarityGroup,
 	SimilarityReport,
 } from "../types.ts";
-import { TS_JS_EXTENSIONS } from "./constants.ts";
+import { TS_JS_VUE_EXTENSIONS } from "./constants.ts";
 import { discoverProject } from "./tsconfig-discovery.ts";
 
 /** Minimum token count for a function body to be included */
@@ -598,7 +598,7 @@ export async function scanProjectFunctions(
 
 	const discovery = discoverProject(rootDir);
 	const allFiles = Array.from(discovery.fileOwnership.keys()).filter(
-		(f) => TS_JS_EXTENSIONS.test(f) && f.startsWith(absoluteDir)
+		(f) => TS_JS_VUE_EXTENSIONS.test(f) && f.startsWith(absoluteDir)
 	);
 
 	return await collectFunctionsFromFiles(allFiles);
@@ -636,7 +636,7 @@ export async function scanWorkspaceFunctions(directory: string): Promise<{
 			const scanDir = pkg.srcDir ? path.join(pkg.path, pkg.srcDir) : pkg.path;
 			const discovery = discoverProject(scanDir);
 			return Array.from(discovery.fileOwnership.keys()).filter((fp) =>
-				TS_JS_EXTENSIONS.test(fp)
+				TS_JS_VUE_EXTENSIONS.test(fp)
 			);
 		},
 		{ onError: () => [] as string[] }

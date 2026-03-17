@@ -11,6 +11,7 @@ import {
 	resolveTsConfig,
 } from "../core/project.ts";
 import {
+	parseSourceFile,
 	scanBarrelExports,
 	scanExports,
 	scanModuleReferences,
@@ -113,8 +114,10 @@ export async function analyze(
 	filePath: string,
 	project: ProjectConfig
 ): Promise<AnalysisResult> {
-	const program = createProgram(project, [filePath]);
-	const sourceFile = program.getSourceFile(filePath);
+	// .vue files cannot be parsed via createProgram — use the Vue-aware parseSourceFile instead
+	const sourceFile = filePath.endsWith(".vue")
+		? (parseSourceFile(filePath) ?? undefined)
+		: createProgram(project, [filePath]).getSourceFile(filePath);
 
 	if (!sourceFile) {
 		throw new Error(`Could not parse file: ${filePath}`);

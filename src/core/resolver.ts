@@ -1,6 +1,7 @@
 import path from "node:path";
 import ts from "typescript";
 import type { ProjectConfig } from "../types.ts";
+import { removeExtension, VUE_EXTENSION } from "./constants.ts";
 import type { WorkspaceInfo } from "./workspace.ts";
 
 export type ResolveResult =
@@ -29,6 +30,44 @@ export function resolveModuleSpecifier(
 			return { kind: "external", specifier };
 		}
 		return { kind: "resolved", path: result.resolvedModule.resolvedFileName };
+	}
+
+	// .vue specifiers are not resolved by ts.resolveModuleName — handle directly
+	if (VUE_EXTENSION.test(specifier)) {
+		const fromDir = path.dirname(fromFile);
+		if (specifier.startsWith("./") || specifier.startsWith("../")) {
+			const absolutePath = path.resolve(fromDir, specifier);
+			if (ts.sys.fileExists(absolutePath)) {
+				return { kind: "resolved", path: absolutePath };
+			}
+		} else if (!(specifier.startsWith(".") || path.isAbsolute(specifier))) {
+			// Alias-style .vue import: expand via pathAliases
+			const baseUrl = project.compilerOptions.baseUrl ?? project.rootDir;
+			for (const [alias, paths] of project.pathAliases) {
+				const isWildcard = alias.endsWith("/*");
+				const prefix = isWildcard ? alias.slice(0, -1) : alias;
+				if (specifier.startsWith(prefix)) {
+					const remainder = isWildcard ? specifier.slice(prefix.length) : "";
+					for (const pathPattern of paths) {
+						const resolvedPattern = pathPattern.endsWith("/*")
+							? pathPattern.slice(0, -1)
+							: pathPattern;
+						const absolutePath = path.resolve(
+							baseUrl,
+							resolvedPattern + remainder
+						);
+						if (ts.sys.fileExists(absolutePath)) {
+							return { kind: "resolved", path: absolutePath };
+						}
+					}
+				}
+			}
+		}
+		return {
+			kind: "unresolvable",
+			specifier,
+			diagnostic: `Cannot resolve "${specifier}" from ${fromFile}`,
+		};
 	}
 
 	// Bare specifiers without ./ or ../ are external packages
@@ -119,10 +158,9 @@ export function findAliasForPath(
 			);
 
 			if (normalizedTarget.startsWith(absolutePattern)) {
-				const remainder = normalizedTarget
-					.slice(absolutePattern.length)
-					.replace(/^\//, "") // strip leading slash left by path.normalize dropping trailing /
-					.replace(/\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/, "");
+				const remainder = removeExtension(
+					normalizedTarget.slice(absolutePattern.length).replace(/^\//, "") // strip leading slash left by path.normalize dropping trailing /
+				);
 
 				// For wildcard aliases, use them if there's a remainder
 				// For exact aliases, only use if there's NO remainder (exact match)
@@ -213,9 +251,9 @@ function updateAliasedSpecifier(
 			// Check if the NEW target is ALSO within this alias scope
 			if (normalizedNewTarget.startsWith(absolutePattern)) {
 				// New target is in the same alias scope - update the remainder
-				const newRemainder = normalizedNewTarget
-					.slice(absolutePattern.length)
-					.replace(/\.[tj]sx?$/, "");
+				const newRemainder = removeExtension(
+					normalizedNewTarget.slice(absolutePattern.length)
+				);
 
 				const aliasPrefix = aliasMatch.alias.endsWith("/*")
 					? aliasMatch.alias.slice(0, -1)
@@ -250,7 +288,7 @@ export function calculateRelativeSpecifier(
 	let relativePath = path.relative(fromDir, toFile);
 
 	// Remove extension
-	relativePath = relativePath.replace(/\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/, "");
+	relativePath = removeExtension(relativePath);
 
 	// Handle index files
 	if (relativePath.endsWith("/index") || relativePath === "index") {
@@ -352,7 +390,7 @@ export function findCrossPackageImport(
 	// The export will be added to the barrel, so consumers can import from the package
 	if (addingToBarrel && pkg.srcDir) {
 		const relativePath = path.relative(pkg.path, normalizedTarget);
-		const subpath = relativePath.replace(/\.[tj]sx?$/, "");
+		const subpath = removeExtension(relativePath);
 
 		// If it's in the src directory, it will be exported from the barrel
 		if (subpath.startsWith(`${pkg.srcDir}/`)) {
@@ -363,7 +401,7 @@ export function findCrossPackageImport(
 
 	// Get relative path within the package
 	const relativePath = path.relative(pkg.path, normalizedTarget);
-	const subpath = relativePath.replace(/\.[tj]sx?$/, "");
+	const subpath = removeExtension(relativePath);
 
 	// Check if this file matches a package.json export
 	if (pkg.exports && typeof pkg.exports === "object") {

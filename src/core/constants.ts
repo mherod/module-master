@@ -18,9 +18,15 @@ export const EXPORT_STATEMENT_PATTERN =
 /** TypeScript/JavaScript file extensions for scanning */
 export const TS_JS_EXTENSIONS = /\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/;
 
+/** Vue single-file component extension */
+export const VUE_EXTENSION = /\.vue$/;
+
+/** TypeScript, JavaScript, and Vue file extensions for scanning */
+export const TS_JS_VUE_EXTENSIONS = /\.(ts|tsx|js|jsx|mts|cts|mjs|cjs|vue)$/;
+
 /**
- * Remove TypeScript/JavaScript extension from a path
+ * Remove TypeScript/JavaScript/Vue extension from a path
  */
 export function removeExtension(filePath: string): string {
-	return filePath.replace(TS_JS_EXTENSIONS, "");
+	return filePath.replace(TS_JS_VUE_EXTENSIONS, "");
 }

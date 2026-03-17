@@ -152,7 +152,7 @@ resect alias src --prefer=alias --dry-run     # Preview changes
 ```
 
 - Processes both relative (`./foo`) and alias (`@/foo`) imports — normalizes in either direction
-- Handles all TypeScript/JavaScript extensions: `.ts`, `.tsx`, `.js`, `.jsx`, `.mts`, `.cts`, `.mjs`, `.cjs`
+- Handles all TypeScript/JavaScript/Vue extensions: `.ts`, `.tsx`, `.js`, `.jsx`, `.mts`, `.cts`, `.mjs`, `.cjs`, `.vue`
 - Detects and skips changes that would create duplicate bindings
 - Verification enabled by default; use `--no-verify` to skip
 
