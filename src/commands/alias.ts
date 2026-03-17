@@ -11,7 +11,8 @@ import {
 	calculateRelativeSpecifier,
 	findAliasForPath,
 } from "../core/resolver.ts";
-import { scanModuleReferences, withSourceFile } from "../core/scanner.ts";
+import { scanModuleReferences } from "../core/scanner.ts";
+import { withSourceFile } from "../core/source-file.ts";
 import {
 	printVerificationResults,
 	verifyTypeChecking,

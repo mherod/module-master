@@ -11,12 +11,12 @@ import {
 	resolveTsConfig,
 } from "../core/project.ts";
 import {
-	parseSourceFile,
 	scanBarrelExports,
 	scanExports,
 	scanModuleReferences,
 	scanUnresolvableImports,
 } from "../core/scanner.ts";
+import { parseSourceFile } from "../core/source-file.ts";
 import { collectUnresolvableDiagnostics } from "../core/verify.ts";
 import {
 	discoverWorkspace,

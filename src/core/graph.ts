@@ -3,11 +3,8 @@ import type { BarrelExport, ModuleReference, ProjectConfig } from "../types.ts";
 import { mapConcurrent } from "./concurrency.ts";
 import { createProgram, getProjectFiles } from "./project.ts";
 import { normalizePath } from "./resolver.ts";
-import {
-	scanBarrelExports,
-	scanModuleReferences,
-	withSourceFile,
-} from "./scanner.ts";
+import { scanBarrelExports, scanModuleReferences } from "./scanner.ts";
+import { withSourceFile } from "./source-file.ts";
 
 export interface DependencyGraph {
 	/** Map from file path to files it imports */

@@ -6,9 +6,9 @@ import {
 	findCrossPackageImport,
 	isCrossPackageMove,
 } from "../core/resolver.ts";
-import { withSourceFile } from "../core/scanner.ts";
 import type { SimilarityDiscoveryOptions } from "../core/similarity.ts";
 import { analyzeSimilarity } from "../core/similarity.ts";
+import { withSourceFile } from "../core/source-file.ts";
 import { applyTextChanges, type TextChange } from "../core/text-changes.ts";
 import type { WorkspaceInfo } from "../core/workspace.ts";
 import type { FunctionInfo, SimilarityGroup } from "../types.ts";

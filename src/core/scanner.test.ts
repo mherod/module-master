@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import ts from "typescript";
 import type { ProjectConfig } from "../types";
-import { scanModuleReferences, withSourceFile } from "./scanner";
+import { scanModuleReferences } from "./scanner";
+import { withSourceFile } from "./source-file";
 
 // Mock resolver to avoid file system lookups
 await mock.module("./resolver", () => {

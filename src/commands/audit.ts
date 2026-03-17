@@ -3,7 +3,8 @@ import { logger } from "../cli-logger.ts";
 import { buildDependencyGraph, type DependencyGraph } from "../core/graph.ts";
 import { loadProject, resolveTsConfig } from "../core/project.ts";
 import { normalizePath } from "../core/resolver.ts";
-import { scanExports, withSourceFile } from "../core/scanner.ts";
+import { scanExports } from "../core/scanner.ts";
+import { withSourceFile } from "../core/source-file.ts";
 import { discoverWorkspace } from "../core/workspace.ts";
 
 export interface AuditOptions {

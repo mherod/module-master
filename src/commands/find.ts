@@ -1,6 +1,7 @@
 import path from "node:path";
 import { logger } from "../cli-logger.ts";
-import { scanExports, withSourceFile } from "../core/scanner.ts";
+import { scanExports } from "../core/scanner.ts";
+import { withSourceFile } from "../core/source-file.ts";
 import { discoverProject } from "../core/tsconfig-discovery.ts";
 import {
 	discoverWorkspace,
