@@ -1,23 +1,13 @@
 import path from "node:path";
 import { logger } from "../cli-logger.ts";
+import type { SimilarityDiscoveryOptions } from "../core/similarity.ts";
 import { analyzeSimilarity } from "../core/similarity.ts";
 import type { SimilarityGroup, SimilarityReport } from "../types.ts";
 
-export interface SimilarOptions {
-	directory: string;
-	project?: string;
+export interface SimilarOptions extends SimilarityDiscoveryOptions {
 	json?: boolean;
-	threshold?: number;
 	maxGroups?: number;
 	strict?: boolean;
-	workspace?: boolean;
-	nameThreshold?: number;
-	sameNameOnly?: boolean;
-	skipSameFile?: boolean;
-	onlyRelatedTo?: string;
-	minLines?: number;
-	skipDirectives?: boolean;
-	skipWrappers?: boolean;
 }
 
 export async function similarCommand(options: SimilarOptions): Promise<void> {
@@ -47,7 +37,7 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 	const report = await analyzeSimilarity({
 		directory: absoluteDir,
 		threshold,
-		projectRoot: project,
+		project,
 		workspace,
 		nameThreshold,
 		sameNameOnly,

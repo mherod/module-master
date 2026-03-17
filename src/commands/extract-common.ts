@@ -7,6 +7,7 @@ import {
 	isCrossPackageMove,
 } from "../core/resolver.ts";
 import { withSourceFile } from "../core/scanner.ts";
+import type { SimilarityDiscoveryOptions } from "../core/similarity.ts";
 import { analyzeSimilarity } from "../core/similarity.ts";
 import { applyTextChanges, type TextChange } from "../core/text-changes.ts";
 import type { WorkspaceInfo } from "../core/workspace.ts";
@@ -41,23 +42,12 @@ function computeSpecifier(
 	return spec;
 }
 
-export interface ExtractCommonOptions {
-	directory: string;
-	project?: string;
-	threshold?: number;
+export interface ExtractCommonOptions extends SimilarityDiscoveryOptions {
 	dryRun?: boolean;
 	force?: boolean;
 	json?: boolean;
 	strict?: boolean;
 	group?: number;
-	workspace?: boolean;
-	nameThreshold?: number;
-	sameNameOnly?: boolean;
-	skipSameFile?: boolean;
-	onlyRelatedTo?: string;
-	minLines?: number;
-	skipDirectives?: boolean;
-	skipWrappers?: boolean;
 	/** Write the canonical function to this file instead of keeping it in place */
 	output?: string;
 }
@@ -784,7 +774,7 @@ export async function extractCommonCommand(
 	const report = await analyzeSimilarity({
 		directory: absoluteDir,
 		threshold,
-		projectRoot: project,
+		project,
 		workspace,
 		nameThreshold,
 		sameNameOnly,

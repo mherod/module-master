@@ -666,19 +666,13 @@ export async function scanWorkspaceFunctions(directory: string): Promise<{
  * @param projectRoot - Optional project root containing tsconfig.json
  * @param workspace - When true, scan across all workspace packages
  */
-export interface AnalyzeSimilarityOptions {
+export interface SimilarityDiscoveryOptions extends SimilarityFilterOptions {
 	directory: string;
-	threshold?: number;
-	projectRoot?: string;
+	project?: string;
 	workspace?: boolean;
-	nameThreshold?: number;
-	sameNameOnly?: boolean;
-	skipSameFile?: boolean;
-	onlyRelatedTo?: string;
-	minLines?: number;
-	skipDirectives?: boolean;
-	skipWrappers?: boolean;
 }
+
+export type AnalyzeSimilarityOptions = SimilarityDiscoveryOptions;
 
 export async function analyzeSimilarity(
 	directoryOrOpts: string | AnalyzeSimilarityOptions,
@@ -688,11 +682,16 @@ export async function analyzeSimilarity(
 ): Promise<SimilarityReport & { packageCount?: number }> {
 	const opts: AnalyzeSimilarityOptions =
 		typeof directoryOrOpts === "string"
-			? { directory: directoryOrOpts, threshold, projectRoot, workspace }
+			? {
+					directory: directoryOrOpts,
+					threshold,
+					project: projectRoot,
+					workspace,
+				}
 			: directoryOrOpts;
 	const dir = opts.directory;
 	const th = opts.threshold ?? threshold;
-	const pr = opts.projectRoot ?? projectRoot;
+	const pr = opts.project ?? projectRoot;
 	const ws = opts.workspace ?? workspace;
 	const filterOpts: SimilarityFilterOptions = {
 		threshold: th,
