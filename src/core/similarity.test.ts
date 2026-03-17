@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import ts from "typescript";
 import {
 	analyzeSimilarity,
 	collectFunctions,
@@ -15,9 +14,10 @@ import {
 	normalizeBody,
 	tokenize,
 } from "./similarity-algorithms";
+import { createSourceFileFromText } from "./source-file";
 
-function makeSourceFile(code: string, fileName = "test.ts"): ts.SourceFile {
-	return ts.createSourceFile(fileName, code, ts.ScriptTarget.Latest, true);
+function makeSourceFile(code: string, fileName = "test.ts") {
+	return createSourceFileFromText(fileName, code);
 }
 
 describe("extractContentTokens", () => {

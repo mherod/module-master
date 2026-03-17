@@ -1,6 +1,6 @@
 import path from "node:path";
-import ts from "typescript";
 import { logger } from "../cli-logger.ts";
+import ts from "../core/ast-utils.ts";
 import {
 	calculateRelativeSpecifier,
 	findCrossPackageImport,
@@ -8,7 +8,10 @@ import {
 } from "../core/resolver.ts";
 import type { SimilarityDiscoveryOptions } from "../core/similarity.ts";
 import { analyzeSimilarity } from "../core/similarity.ts";
-import { withSourceFile } from "../core/source-file.ts";
+import {
+	createSourceFileFromText,
+	withSourceFile,
+} from "../core/source-file.ts";
 import { applyTextChanges, type TextChange } from "../core/text-changes.ts";
 import type { WorkspaceInfo } from "../core/workspace.ts";
 import type { FunctionInfo, SimilarityGroup } from "../types/similar.ts";
@@ -687,12 +690,7 @@ async function applyFileUpdates(
  * Find the byte offset of the end of the last import statement in the content.
  */
 function findLastImportEnd(content: string): number {
-	const sf = ts.createSourceFile(
-		"temp.ts",
-		content,
-		ts.ScriptTarget.Latest,
-		true
-	);
+	const sf = createSourceFileFromText("temp.ts", content);
 	let lastImportEnd = 0;
 	for (const stmt of sf.statements) {
 		if (ts.isImportDeclaration(stmt)) {

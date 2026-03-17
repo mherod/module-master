@@ -1,6 +1,6 @@
 import path from "node:path";
-import ts from "typescript";
 import { logger, printCommandResult } from "../cli-logger.ts";
+import ts from "../core/ast-utils.ts";
 import { checkAllConflicts } from "../core/conflict-detection.ts";
 import { ensureCleanWorktree } from "../core/git.ts";
 import { buildDependencyGraph, findAllReferences } from "../core/graph.ts";

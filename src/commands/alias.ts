@@ -1,6 +1,6 @@
 import path from "node:path";
-import ts from "typescript";
 import { logger } from "../cli-logger.ts";
+import ts from "../core/ast-utils.ts";
 import { ensureCleanWorktree } from "../core/git.ts";
 import {
 	createProgram,

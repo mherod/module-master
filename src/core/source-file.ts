@@ -16,12 +16,18 @@ function parseVueSourceFile(filePath: string): ts.SourceFile | null {
 		return null;
 	}
 	const virtualName = `${filePath}.${script.lang}`;
-	return ts.createSourceFile(
-		virtualName,
-		script.content,
-		ts.ScriptTarget.Latest,
-		true
-	);
+	return createSourceFileFromText(virtualName, script.content);
+}
+
+/**
+ * Parse an in-memory text string into a SourceFile without touching the disk.
+ * Wraps the recurring `ts.createSourceFile(..., ts.ScriptTarget.Latest, true)` pattern.
+ */
+export function createSourceFileFromText(
+	fileName: string,
+	text: string
+): ts.SourceFile {
+	return ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true);
 }
 
 /**
@@ -37,7 +43,7 @@ export function parseSourceFile(filePath: string): ts.SourceFile | null {
 	if (!content) {
 		return null;
 	}
-	return ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
+	return createSourceFileFromText(filePath, content);
 }
 
 /**

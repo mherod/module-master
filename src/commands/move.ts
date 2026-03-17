@@ -1,6 +1,6 @@
 import path from "node:path";
-import ts from "typescript";
 import { logger, printCommandResult } from "../cli-logger.ts";
+import type ts from "../core/ast-utils.ts";
 import { checkAllConflicts } from "../core/conflict-detection.ts";
 import { ensureCleanWorktree } from "../core/git.ts";
 import {
@@ -20,6 +20,7 @@ import {
 	normalizePath,
 } from "../core/resolver.ts";
 import { scanExports, scanModuleReferences } from "../core/scanner.ts";
+import { createSourceFileFromText } from "../core/source-file.ts";
 import { applyTextChanges } from "../core/text-changes.ts";
 import {
 	addExportToDestinationBarrel,
@@ -354,11 +355,9 @@ export async function moveModule(
 			const destBarrelPath = findDestinationBarrel(targetPath, workspace);
 			if (destBarrelPath && (await rt.fs.exists(destBarrelPath))) {
 				const barrelContent = await rt.fs.readFile(destBarrelPath);
-				targetBarrelAst = ts.createSourceFile(
+				targetBarrelAst = createSourceFileFromText(
 					destBarrelPath,
-					barrelContent,
-					ts.ScriptTarget.Latest,
-					true
+					barrelContent
 				);
 			}
 		}
