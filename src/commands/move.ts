@@ -1,6 +1,7 @@
 import path from "node:path";
 import ts from "typescript";
 import { logger, printCommandResult } from "../cli-logger.ts";
+import { checkAllConflicts } from "../core/conflict-detection.ts";
 import { ensureCleanWorktree } from "../core/git.ts";
 import {
 	buildDependencyGraph,
@@ -27,7 +28,7 @@ import {
 	updateBarrelExports,
 	updateFileReferences,
 } from "../core/updater.ts";
-import { checkAllConflicts, runTypeCheck } from "../core/verify.ts";
+import { runTypeCheck } from "../core/verify.ts";
 import {
 	discoverWorkspace,
 	filterToWorkspaceBoundary,

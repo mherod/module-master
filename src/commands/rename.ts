@@ -1,6 +1,7 @@
 import path from "node:path";
 import ts from "typescript";
 import { logger, printCommandResult } from "../cli-logger.ts";
+import { checkAllConflicts } from "../core/conflict-detection.ts";
 import { ensureCleanWorktree } from "../core/git.ts";
 import { buildDependencyGraph, findAllReferences } from "../core/graph.ts";
 import {
@@ -15,7 +16,6 @@ import {
 	deduplicateChanges,
 	type TextChange,
 } from "../core/text-changes.ts";
-import { checkAllConflicts } from "../core/verify.ts";
 import { discoverWorkspace } from "../core/workspace.ts";
 import { getRuntime } from "../runtime/index.ts";
 import type {
