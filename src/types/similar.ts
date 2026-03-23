@@ -25,6 +25,8 @@ export interface FunctionInfo {
 	contentTokens: string[];
 	/** Whether the function body is a thin wrapper (single return + call expression) */
 	isWrapper: boolean;
+	/** Whether the function is a type predicate (return type `value is SomeType`) */
+	isTypeGuard: boolean;
 }
 
 export type SimilarityBucket = "exact" | "high" | "medium";

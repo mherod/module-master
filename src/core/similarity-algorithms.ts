@@ -58,6 +58,31 @@ const JS_KEYWORDS = new Set([
 ]);
 
 /**
+ * Extract all non-keyword identifier tokens from a body text.
+ *
+ * Unlike `extractContentTokens`, this captures every identifier including
+ * camelCase property names — useful for type/interface bodies where field
+ * names are the primary differentiator between structurally similar shapes.
+ * For example, `{ _seconds: number }` and `{ seconds: number }` normalise to
+ * the same shape, but this function produces `["_seconds", "number"]` vs
+ * `["seconds", "number"]`, giving a lower content similarity score.
+ */
+export function extractAllIdentifiers(bodyText: string): string[] {
+	let s = bodyText.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+	// Remove string and template literals before extracting identifiers
+	s = s
+		.replace(/`(?:[^`\\]|\\.)*`/g, " ")
+		.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, " ");
+	const tokens: string[] = [];
+	for (const m of s.matchAll(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)\b/g)) {
+		if (!JS_KEYWORDS.has(m[0])) {
+			tokens.push(m[0]);
+		}
+	}
+	return tokens;
+}
+
+/**
  * Extract semantic content tokens from a function body: uppercase identifiers
  * (constants, types, enum members) and string literal values. These carry
  * domain-specific meaning that normalization strips away.

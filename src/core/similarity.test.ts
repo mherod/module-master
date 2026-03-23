@@ -422,6 +422,7 @@ describe("findSimilarGroups", () => {
 				bodyLines: body.split("\n").length,
 				hasDirective: false,
 				isWrapper: false,
+				isTypeGuard: false,
 				contentTokens: extractContentTokens(body),
 			};
 		}
@@ -533,6 +534,7 @@ describe("findSimilarGroups", () => {
 			bodyLines: 5,
 			hasDirective: false,
 			isWrapper: false,
+			isTypeGuard: false,
 			contentTokens: [],
 		};
 		const fnE2: ReturnType<typeof collectFunctions>[number] = {
@@ -547,6 +549,7 @@ describe("findSimilarGroups", () => {
 			bodyLines: 5,
 			hasDirective: false,
 			isWrapper: false,
+			isTypeGuard: false,
 			contentTokens: [],
 		};
 
@@ -567,6 +570,7 @@ describe("findSimilarGroups", () => {
 			bodyLines: 5,
 			hasDirective: false,
 			isWrapper: false,
+			isTypeGuard: false,
 			contentTokens: [],
 		};
 		const fnL2: ReturnType<typeof collectFunctions>[number] = {
@@ -581,6 +585,7 @@ describe("findSimilarGroups", () => {
 			bodyLines: 5,
 			hasDirective: false,
 			isWrapper: false,
+			isTypeGuard: false,
 			contentTokens: [],
 		};
 
@@ -1044,6 +1049,7 @@ describe("findSimilarGroups onlyRelatedTo", () => {
 				bodyLines: body.split("\n").length,
 				hasDirective: false,
 				isWrapper: false,
+				isTypeGuard: false,
 				contentTokens: extractContentTokens(body),
 			};
 		}
@@ -1117,6 +1123,7 @@ describe("directive detection", () => {
 				bodyLines: body.split("\n").length,
 				hasDirective: false,
 				isWrapper: false,
+				isTypeGuard: false,
 				contentTokens: extractContentTokens(body),
 			};
 		}
@@ -1225,6 +1232,215 @@ describe("analyzeSimilarity kinds filter forwarding", () => {
 			for (const fn of group.functions) {
 				expect(fn.kind).toBe("type");
 			}
+		}
+	});
+});
+
+describe("false positive categories (issue #45)", () => {
+	// ── Category 1: structurally identical types with different field names ──
+	test("does not flag types with identical shape but different property names as exact", () => {
+		// _seconds/_nanoseconds vs seconds/nanoseconds: same shape after
+		// normalization, but field names are semantically distinct. With
+		// extractAllIdentifiers as content tokens these should score < 1.0.
+		const code = `
+export type FirestoreTimestampA = {
+  _seconds: number;
+  _nanoseconds: number;
+};
+export type FirestoreTimestampB = {
+  seconds: number;
+  nanoseconds: number;
+};
+`;
+		const sf = makeSourceFile(code);
+		const fns = collectFunctions(sf, "timestamps.ts");
+		expect(fns).toHaveLength(2);
+		const [a, b] = fns as [
+			ReturnType<typeof collectFunctions>[0],
+			ReturnType<typeof collectFunctions>[0],
+		];
+		// Verify both are collected
+		expect(a.kind).toBe("type");
+		expect(b.kind).toBe("type");
+		// Content tokens for types must include property names
+		expect(a.contentTokens).toContain("_seconds");
+		expect(b.contentTokens).toContain("seconds");
+		// Grouping at default threshold must not flag these as a group
+		const groups = findSimilarGroups([a, b], { threshold: 0.8 });
+		expect(groups).toHaveLength(0);
+	});
+
+	// ── Category 2: type guard functions (cross-file) ──
+	test("does not group cross-file type guard functions", () => {
+		const codeA = `
+function isTimestampA(value: unknown): value is TimestampA {
+  const v = value as Record<string, unknown>;
+  if (typeof v !== "object" || v === null) return false;
+  if (typeof v["_seconds"] !== "number") return false;
+  if (typeof v["_nanoseconds"] !== "number") return false;
+  return true;
+}
+`;
+		const codeB = `
+function isTimestampB(value: unknown): value is TimestampB {
+  const v = value as Record<string, unknown>;
+  if (typeof v !== "object" || v === null) return false;
+  if (typeof v["seconds"] !== "number") return false;
+  if (typeof v["nanoseconds"] !== "number") return false;
+  return true;
+}
+`;
+		const sfA = makeSourceFile(codeA, "a.ts");
+		const sfB = makeSourceFile(codeB, "b.ts");
+		const fnsA = collectFunctions(sfA, "guards/a.ts");
+		const fnsB = collectFunctions(sfB, "guards/b.ts");
+		expect(fnsA).toHaveLength(1);
+		expect(fnsB).toHaveLength(1);
+		// Both should be detected as type guards
+		expect(fnsA[0]?.isTypeGuard).toBe(true);
+		expect(fnsB[0]?.isTypeGuard).toBe(true);
+		// Cross-file type guard pairs must not be grouped
+		const guardA = fnsA[0];
+		const guardB = fnsB[0];
+		if (!(guardA && guardB)) {
+			throw new Error("Expected type guard functions to be collected");
+		}
+		const groups = findSimilarGroups([guardA, guardB], { threshold: 0.7 });
+		expect(groups).toHaveLength(0);
+	});
+
+	test("still groups non-type-guard functions with identical structure", () => {
+		// Confirm the type-guard exclusion doesn't over-suppress regular functions
+		const bodyA = `{
+  const v = value as Record<string, unknown>;
+  if (typeof v !== "object" || v === null) return false;
+  if (typeof v["fieldA"] !== "number") return false;
+  if (typeof v["fieldB"] !== "number") return false;
+  return true;
+}`;
+		const bodyB = `{
+  const v = value as Record<string, unknown>;
+  if (typeof v !== "object" || v === null) return false;
+  if (typeof v["fieldX"] !== "number") return false;
+  if (typeof v["fieldY"] !== "number") return false;
+  return true;
+}`;
+		const codeA = `function checkPropsA(value: unknown): boolean ${bodyA}`;
+		const codeB = `function checkPropsB(value: unknown): boolean ${bodyB}`;
+		const sfA = makeSourceFile(codeA, "a.ts");
+		const sfB = makeSourceFile(codeB, "b.ts");
+		const fnsA = collectFunctions(sfA, "checks/a.ts");
+		const fnsB = collectFunctions(sfB, "checks/b.ts");
+		expect(fnsA[0]?.isTypeGuard).toBe(false);
+		expect(fnsB[0]?.isTypeGuard).toBe(false);
+		// Regular functions with identical structure ARE expected to group
+		const checkA = fnsA[0];
+		const checkB = fnsB[0];
+		if (!(checkA && checkB)) {
+			throw new Error("Expected functions to be collected");
+		}
+		const groups = findSimilarGroups([checkA, checkB], { threshold: 0.5 });
+		expect(groups.length).toBeGreaterThanOrEqual(1);
+	});
+
+	// ── Category 3: Zod-like string literal unions with disjoint literals ──
+	test("does not group type aliases with identical Zod-like shape but disjoint literal values", () => {
+		// Simulates: z.union([z.literal("a"), z.literal("b")]) vs z.union([z.literal("x"), z.literal("y"), z.literal("z")])
+		// Different numbers of literals → bigram path, but content tokens (literals) are disjoint
+		const codeA = `
+type ApprovalStatus = "pending" | "approved" | "rejected";
+`;
+		const codeB = `
+type ChannelType = "email" | "push" | "sms";
+`;
+		const sfA = makeSourceFile(codeA, "approval.ts");
+		const sfB = makeSourceFile(codeB, "channel.ts");
+		const fnsA = collectFunctions(sfA, "approval.ts");
+		const fnsB = collectFunctions(sfB, "channel.ts");
+		const zodA = fnsA[0];
+		const zodB = fnsB[0];
+		// Both may be too small for the type token threshold — skip if not collected
+		if (!(zodA && zodB)) {
+			return;
+		}
+		const groups = findSimilarGroups([zodA, zodB], { threshold: 0.8 });
+		expect(groups).toHaveLength(0);
+	});
+
+	test("content token penalty reduces score for structurally similar types with disjoint string literals", () => {
+		// Simulate types whose bigrams are very similar but whose string literal
+		// content tokens are completely disjoint. The score must be reduced below 0.8.
+		const normalized =
+			"{ $I : $I ; $I : $I ; $I : $I ; $I : $I ; $I : $I ; $I : $I ; }";
+		const base: ReturnType<typeof collectFunctions>[number] = {
+			file: "a.ts",
+			name: "SchemaA",
+			kind: "type" as const,
+			line: 1,
+			column: 0,
+			normalizedBody: `${normalized} x`,
+			tokenCount: 20,
+			bodyLength: 120,
+			bodyLines: 3,
+			hasDirective: false,
+			isWrapper: false,
+			isTypeGuard: false,
+			contentTokens: ["pending", "approved", "rejected"],
+		};
+		const other: ReturnType<typeof collectFunctions>[number] = {
+			...base,
+			file: "b.ts",
+			name: "SchemaB",
+			normalizedBody: `${normalized} y`,
+			contentTokens: ["email", "push", "sms"],
+		};
+		// Completely disjoint content tokens → penalty applied → should not group at 0.8
+		const groups = findSimilarGroups([base, other], { threshold: 0.8 });
+		// Either not grouped, or score reflects the content penalty
+		if (groups.length > 0) {
+			expect(groups[0]?.score).toBeLessThan(0.8);
+		}
+	});
+
+	// ── Category 4: input validation type vs stored record type ──
+	test("does not group interface with all-required fields vs interface with all-optional fields", () => {
+		const code = `
+export interface ClickRecord {
+  id: string;
+  shortLinkId: string;
+  timestamp: string;
+  ip: string;
+  userAgent: string;
+  referer: string;
+  country?: string;
+  city?: string;
+}
+export interface ClickInput {
+  userAgent?: string;
+  referer?: string;
+  ipAddress?: string;
+  country?: string;
+  city?: string;
+  timestamp?: string;
+}
+`;
+		const sf = makeSourceFile(code);
+		const fns = collectFunctions(sf, "events.ts");
+		expect(fns).toHaveLength(2);
+		const [record, input] = fns as [
+			ReturnType<typeof collectFunctions>[0],
+			ReturnType<typeof collectFunctions>[0],
+		];
+		expect(record.kind).toBe("interface");
+		expect(input.kind).toBe("interface");
+		// Both carry property names in content tokens
+		expect(record.contentTokens).toContain("id");
+		expect(record.contentTokens).toContain("shortLinkId");
+		expect(input.contentTokens).toContain("ipAddress");
+		// Content token sets are not identical → score below exact (1.0)
+		const groups = findSimilarGroups([record, input], { threshold: 0.8 });
+		if (groups.length > 0) {
+			expect(groups[0]?.bucket).not.toBe("exact");
 		}
 	});
 });

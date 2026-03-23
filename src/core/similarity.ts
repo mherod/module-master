@@ -9,6 +9,7 @@ import type {
 } from "../types/similar.ts";
 import { TS_JS_VUE_EXTENSIONS } from "./constants.ts";
 import {
+	extractAllIdentifiers,
 	extractContentTokens,
 	jaccardSimilarity,
 	nameSimilarity,
@@ -78,8 +79,18 @@ function makeFunctionInfo(
 	normalized: string,
 	tokens: string[],
 	hasDirective: boolean,
-	isWrapper: boolean
+	isWrapper: boolean,
+	isTypeGuard: boolean
 ): FunctionInfo {
+	// For type/interface declarations, use all non-keyword identifiers (including
+	// camelCase property names) as content tokens. This prevents structurally
+	// identical shapes with different field names (e.g. `_seconds` vs `seconds`)
+	// from scoring as exact duplicates when their property names differ.
+	// For functions, keep the original uppercase-only + string-literal tokens.
+	const contentTokens =
+		kind === "type" || kind === "interface"
+			? extractAllIdentifiers(bodyText)
+			: extractContentTokens(bodyText);
 	return {
 		file: filePath,
 		name,
@@ -91,8 +102,9 @@ function makeFunctionInfo(
 		bodyLength: bodyText.length,
 		bodyLines: bodyText.split("\n").length,
 		hasDirective,
-		contentTokens: extractContentTokens(bodyText),
+		contentTokens,
 		isWrapper,
+		isTypeGuard,
 	};
 }
 
@@ -127,7 +139,8 @@ export function collectFunctions(
 						normalized,
 						tokens,
 						DIRECTIVE_PATTERN.test(bodyText),
-						isWrapperBody(stmt.body)
+						isWrapperBody(stmt.body),
+						stmt.type != null && ts.isTypePredicateNode(stmt.type)
 					)
 				);
 			}
@@ -163,7 +176,8 @@ export function collectFunctions(
 								normalized,
 								tokens,
 								DIRECTIVE_PATTERN.test(bodyText),
-								isWrapperBody(init.body)
+								isWrapperBody(init.body),
+								init.type != null && ts.isTypePredicateNode(init.type)
 							)
 						);
 					}
@@ -189,6 +203,7 @@ export function collectFunctions(
 						bodyText,
 						normalized,
 						tokens,
+						false,
 						false,
 						false
 					)
@@ -218,6 +233,7 @@ export function collectFunctions(
 						bodyText,
 						normalized,
 						tokens,
+						false,
 						false,
 						false
 					)
@@ -362,6 +378,15 @@ export function findSimilarGroups(
 				continue;
 			}
 
+			// Skip cross-file type guard pairs — type predicates (`value is T`) are
+			// intrinsically tied to the type they guard. Two guards that call the same
+			// helper (e.g. `hasNumericProps(v, "fieldA", "fieldB")`) are structurally
+			// similar only because they share an implementation pattern, not because
+			// they are candidates for consolidation.
+			if (fnI.file !== fnJ.file && fnI.isTypeGuard && fnJ.isTypeGuard) {
+				continue;
+			}
+
 			// Skip if original body sizes are very different — avoids false
 			// positives where normalization collapses large and small functions
 			// to the same token set (e.g. a 40-line template vs a 1-liner).
@@ -401,6 +426,27 @@ export function findSimilarGroups(
 				// Jaccard gives misleading 1.0 for functions with the same token
 				// vocabulary but different structure.
 				score = jaccardSimilarity(bigramsI ?? [], preBigrams[j] ?? []);
+
+				// Penalise structural lookalikes whose semantic content is completely
+				// disjoint. Zod literal unions, string-enum-like patterns, and config
+				// schemas often share the same AST shape (same bigram distribution)
+				// but carry entirely different string literal values or identifiers —
+				// they are coincidental structural matches rather than true duplicates.
+				// Only apply when both declarations carry meaningful content tokens
+				// (≥2) so that empty-content declarations are not inadvertently
+				// penalised.
+				const contentI = fnI.contentTokens;
+				const contentJ = fnJ.contentTokens;
+				if (contentI.length >= 2 && contentJ.length >= 2) {
+					const contentSim = jaccardSimilarity(contentI, contentJ);
+					if (contentSim === 0) {
+						// Completely disjoint — strong reduction to push below threshold
+						score *= 0.65;
+					} else if (contentSim < 0.2) {
+						// Mostly disjoint — softer blend
+						score = 0.85 * score + 0.15 * contentSim;
+					}
+				}
 			}
 
 			// Soft penalty for cross-file pairs with completely dissimilar names.
