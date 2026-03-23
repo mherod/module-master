@@ -270,6 +270,81 @@ function tiny() { return 1; }
 		expect(fns).toHaveLength(0);
 	});
 
+	test("sets kind=function for all function variants", () => {
+		const code = `
+export function decl(x: number): number {
+  const a = x * 2;
+  const b = a + 1;
+  return b;
+}
+const arrow = (x: number): number => {
+  const a = x * 2;
+  const b = a + 1;
+  return b;
+};
+`;
+		const sf = makeSourceFile(code);
+		const fns = collectFunctions(sf, "test.ts");
+		expect(fns).toHaveLength(2);
+		for (const fn of fns) {
+			expect(fn.kind).toBe("function");
+		}
+	});
+
+	test("collects type alias declarations", () => {
+		const code = `
+export type UserConfig = {
+  id: string;
+  name: string;
+  role: string;
+};
+`;
+		const sf = makeSourceFile(code);
+		const fns = collectFunctions(sf, "test.ts");
+		expect(fns).toHaveLength(1);
+		expect(fns[0]?.name).toBe("UserConfig");
+		expect(fns[0]?.kind).toBe("type");
+	});
+
+	test("collects interface declarations", () => {
+		const code = `
+export interface ProductConfig {
+  id: string;
+  title: string;
+  price: number;
+}
+`;
+		const sf = makeSourceFile(code);
+		const fns = collectFunctions(sf, "test.ts");
+		expect(fns).toHaveLength(1);
+		expect(fns[0]?.name).toBe("ProductConfig");
+		expect(fns[0]?.kind).toBe("interface");
+	});
+
+	test("collects interface with heritage clause", () => {
+		const code = `
+export interface AdminConfig extends UserConfig {
+  permissions: string[];
+  level: number;
+}
+`;
+		const sf = makeSourceFile(code);
+		const fns = collectFunctions(sf, "test.ts");
+		expect(fns).toHaveLength(1);
+		expect(fns[0]?.name).toBe("AdminConfig");
+		expect(fns[0]?.kind).toBe("interface");
+		// Body should include extends clause
+		expect(fns[0]?.normalizedBody).toContain("extends");
+	});
+
+	test("skips trivially small type aliases (below token threshold)", () => {
+		const code = "type Foo = string;";
+		const sf = makeSourceFile(code);
+		const fns = collectFunctions(sf, "test.ts");
+		// 'string' as a type body → too few tokens after normalization
+		expect(fns).toHaveLength(0);
+	});
+
 	test("collects multiple functions", () => {
 		const code = `
 function alpha(x: number): number {
@@ -338,6 +413,7 @@ describe("findSimilarGroups", () => {
 			return {
 				file,
 				name,
+				kind: "function" as const,
 				line: 1,
 				column: 0,
 				normalizedBody: normalized,
@@ -448,6 +524,7 @@ describe("findSimilarGroups", () => {
 		const fnE1: ReturnType<typeof collectFunctions>[number] = {
 			file: "a.ts",
 			name: "exactA",
+			kind: "function" as const,
 			line: 1,
 			column: 0,
 			normalizedBody: exactBody,
@@ -461,6 +538,7 @@ describe("findSimilarGroups", () => {
 		const fnE2: ReturnType<typeof collectFunctions>[number] = {
 			file: "b.ts",
 			name: "exactB",
+			kind: "function" as const,
 			line: 1,
 			column: 0,
 			normalizedBody: exactBody,
@@ -480,6 +558,7 @@ describe("findSimilarGroups", () => {
 		const fnL1: ReturnType<typeof collectFunctions>[number] = {
 			file: "c.ts",
 			name: "loopA",
+			kind: "function" as const,
 			line: 1,
 			column: 0,
 			normalizedBody: looseBodyA,
@@ -493,6 +572,7 @@ describe("findSimilarGroups", () => {
 		const fnL2: ReturnType<typeof collectFunctions>[number] = {
 			file: "d.ts",
 			name: "loopB",
+			kind: "function" as const,
 			line: 1,
 			column: 0,
 			normalizedBody: looseBodyB,
@@ -763,6 +843,97 @@ function isSqlFunction(functionName: string): boolean {
 		const groups = findSimilarGroups([fnA, fnB], 0.8);
 		expect(groups).toHaveLength(1);
 	});
+
+	test("kinds filter excludes non-matching declaration kinds", () => {
+		const body = `{
+  const x = a.doSomething(b, c);
+  const y = d.process(e, f);
+  return x + y;
+}`;
+		const sf = makeSourceFile(`
+function fnA() ${body}
+function fnB() ${body}
+type AliasA = { id: string; name: string; role: string };
+type AliasB = { id: string; name: string; role: string };
+`);
+		const all = collectFunctions(sf, "test.ts");
+		const fns = all.filter((f) => f.kind === "function");
+		const types = all.filter((f) => f.kind === "type");
+
+		// Without filter: groups may include both functions and types
+		const fnOnlyGroups = findSimilarGroups(all, {
+			threshold: 0.7,
+			kinds: ["function"],
+		});
+		for (const g of fnOnlyGroups) {
+			for (const fn of g.functions) {
+				expect(fn.kind).toBe("function");
+			}
+		}
+
+		const typeOnlyGroups = findSimilarGroups(all, {
+			threshold: 0.7,
+			kinds: ["type"],
+		});
+		for (const g of typeOnlyGroups) {
+			for (const fn of g.functions) {
+				expect(fn.kind).toBe("type");
+			}
+		}
+
+		// Both arrays consumed to suppress lint warnings
+		expect(fns.length + types.length).toBe(all.length);
+	});
+
+	test("similar type aliases are grouped", () => {
+		const sf = makeSourceFile(`
+export type UserModel = {
+  id: string;
+  name: string;
+  email: string;
+  createdAt: Date;
+};
+export type ProductModel = {
+  id: string;
+  name: string;
+  email: string;
+  createdAt: Date;
+};
+`);
+		const declarations = collectFunctions(sf, "test.ts");
+		expect(declarations.filter((d) => d.kind === "type")).toHaveLength(2);
+		const groups = findSimilarGroups(declarations, { threshold: 0.7 });
+		expect(groups.length).toBeGreaterThanOrEqual(1);
+		const typeGroup = groups.find((g) =>
+			g.functions.every((f) => f.kind === "type")
+		);
+		expect(typeGroup).toBeDefined();
+	});
+
+	test("similar interfaces are grouped", () => {
+		const sf = makeSourceFile(`
+export interface RequestOptions {
+  method: string;
+  headers: Record<string, string>;
+  timeout: number;
+  retry: boolean;
+}
+export interface FetchOptions {
+  method: string;
+  headers: Record<string, string>;
+  timeout: number;
+  retry: boolean;
+}
+`);
+		const declarations = collectFunctions(sf, "test.ts");
+		expect(declarations.filter((d) => d.kind === "interface")).toHaveLength(2);
+		const groups = findSimilarGroups(declarations, { threshold: 0.7 });
+		expect(groups.length).toBeGreaterThanOrEqual(1);
+		const ifaceGroup = groups.find((g) =>
+			g.functions.every((f) => f.kind === "interface")
+		);
+		expect(ifaceGroup).toBeDefined();
+	});
 });
 
 describe("camelCaseTokenize", () => {
@@ -864,6 +1035,7 @@ describe("findSimilarGroups onlyRelatedTo", () => {
 			return {
 				file,
 				name: fnName,
+				kind: "function" as const,
 				line: 1,
 				column: 0,
 				normalizedBody: normalized,
@@ -936,6 +1108,7 @@ describe("directive detection", () => {
 			return {
 				file,
 				name: fnName,
+				kind: "function" as const,
 				line: 1,
 				column: 0,
 				normalizedBody: normalized,
@@ -1021,6 +1194,37 @@ function normalFunction(x: number) {
 		});
 		for (const g of filtered) {
 			expect(g.functions.every((f) => !f.hasDirective)).toBe(true);
+		}
+	});
+});
+
+describe("analyzeSimilarity kinds filter forwarding", () => {
+	test("kinds=function excludes type and interface results via analyzeSimilarity", async () => {
+		const dir = import.meta.dir;
+		// Run with kinds restricted to function — should never return type/interface groups
+		const report = await analyzeSimilarity({
+			directory: dir,
+			threshold: 0.5,
+			kinds: ["function"],
+		});
+		for (const group of report.groups) {
+			for (const fn of group.functions) {
+				expect(fn.kind).toBe("function");
+			}
+		}
+	});
+
+	test("kinds=type excludes function and interface results via analyzeSimilarity", async () => {
+		const dir = import.meta.dir;
+		const report = await analyzeSimilarity({
+			directory: dir,
+			threshold: 0.5,
+			kinds: ["type"],
+		});
+		for (const group of report.groups) {
+			for (const fn of group.functions) {
+				expect(fn.kind).toBe("type");
+			}
 		}
 	});
 });

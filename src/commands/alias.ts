@@ -23,17 +23,12 @@ import {
 } from "../core/workspace.ts";
 import { getRuntime } from "../runtime/index.ts";
 import type { ModuleReference } from "../types/graph.ts";
-import type { ProjectConfig } from "../types.ts";
+import type { MutatingCommandOptions, ProjectConfig } from "../types.ts";
 
-export interface AliasOptions {
+export interface AliasOptions extends MutatingCommandOptions {
 	target: string;
 	prefer: "alias" | "relative" | "shortest";
-	dryRun?: boolean;
-	force?: boolean;
-	verbose?: boolean;
 	verify?: boolean;
-	project?: string;
-	workspace?: boolean;
 }
 
 export interface AliasResult {

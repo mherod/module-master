@@ -1,8 +1,12 @@
+export type DeclarationKind = "function" | "type" | "interface";
+
 export interface FunctionInfo {
 	/** Absolute path to the file */
 	file: string;
 	/** Function name */
 	name: string;
+	/** Declaration kind: function, type alias, or interface */
+	kind: DeclarationKind;
 	/** Line number where the function starts */
 	line: number;
 	/** Column number */

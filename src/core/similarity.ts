@@ -1,6 +1,7 @@
 import path from "node:path";
 import ts from "typescript";
 import type {
+	DeclarationKind,
 	FunctionInfo,
 	SimilarityBucket,
 	SimilarityGroup,
@@ -19,6 +20,9 @@ import { discoverProject } from "./tsconfig-discovery.ts";
 
 /** Minimum token count for a function body to be included */
 const MIN_TOKEN_COUNT = 8;
+
+/** Minimum token count for a type alias or interface body to be included */
+const MIN_TYPE_TOKEN_COUNT = 6;
 
 /** Compile-time directives that prevent function consolidation */
 const DIRECTIVE_PATTERN =
@@ -62,8 +66,39 @@ function isWrapperBody(body: ts.Block): boolean {
 }
 
 /**
- * Collect all top-level function declarations and named const arrow/function
- * expressions from a source file.
+ * Build a FunctionInfo entry from a normalized body text and metadata.
+ */
+function makeFunctionInfo(
+	filePath: string,
+	name: string,
+	kind: DeclarationKind,
+	line: number,
+	character: number,
+	bodyText: string,
+	normalized: string,
+	tokens: string[],
+	hasDirective: boolean,
+	isWrapper: boolean
+): FunctionInfo {
+	return {
+		file: filePath,
+		name,
+		kind,
+		line,
+		column: character,
+		normalizedBody: normalized,
+		tokenCount: tokens.length,
+		bodyLength: bodyText.length,
+		bodyLines: bodyText.split("\n").length,
+		hasDirective,
+		contentTokens: extractContentTokens(bodyText),
+		isWrapper,
+	};
+}
+
+/**
+ * Collect all top-level function declarations, named const arrow/function
+ * expressions, type aliases, and interfaces from a source file.
  */
 export function collectFunctions(
 	sourceFile: ts.SourceFile,
@@ -81,19 +116,20 @@ export function collectFunctions(
 				const { line, character } = sourceFile.getLineAndCharacterOfPosition(
 					stmt.getStart(sourceFile)
 				);
-				functions.push({
-					file: filePath,
-					name: stmt.name.text,
-					line: line + 1,
-					column: character,
-					normalizedBody: normalized,
-					tokenCount: tokens.length,
-					bodyLength: bodyText.length,
-					bodyLines: bodyText.split("\n").length,
-					hasDirective: DIRECTIVE_PATTERN.test(bodyText),
-					contentTokens: extractContentTokens(bodyText),
-					isWrapper: isWrapperBody(stmt.body),
-				});
+				functions.push(
+					makeFunctionInfo(
+						filePath,
+						stmt.name.text,
+						"function",
+						line + 1,
+						character,
+						bodyText,
+						normalized,
+						tokens,
+						DIRECTIVE_PATTERN.test(bodyText),
+						isWrapperBody(stmt.body)
+					)
+				);
 			}
 		}
 		// const foo = () => { ... } or const foo = function() { ... }
@@ -116,21 +152,76 @@ export function collectFunctions(
 							sourceFile.getLineAndCharacterOfPosition(
 								stmt.getStart(sourceFile)
 							);
-						functions.push({
-							file: filePath,
-							name: decl.name.text,
-							line: line + 1,
-							column: character,
-							normalizedBody: normalized,
-							tokenCount: tokens.length,
-							bodyLength: bodyText.length,
-							bodyLines: bodyText.split("\n").length,
-							hasDirective: DIRECTIVE_PATTERN.test(bodyText),
-							contentTokens: extractContentTokens(bodyText),
-							isWrapper: isWrapperBody(init.body),
-						});
+						functions.push(
+							makeFunctionInfo(
+								filePath,
+								decl.name.text,
+								"function",
+								line + 1,
+								character,
+								bodyText,
+								normalized,
+								tokens,
+								DIRECTIVE_PATTERN.test(bodyText),
+								isWrapperBody(init.body)
+							)
+						);
 					}
 				}
+			}
+		}
+		// type Foo = ... or export type Foo = ...
+		else if (ts.isTypeAliasDeclaration(stmt) && stmt.name) {
+			const bodyText = stmt.type.getText(sourceFile);
+			const normalized = normalizeBody(bodyText);
+			const tokens = tokenize(normalized);
+			if (tokens.length >= MIN_TYPE_TOKEN_COUNT) {
+				const { line, character } = sourceFile.getLineAndCharacterOfPosition(
+					stmt.getStart(sourceFile)
+				);
+				functions.push(
+					makeFunctionInfo(
+						filePath,
+						stmt.name.text,
+						"type",
+						line + 1,
+						character,
+						bodyText,
+						normalized,
+						tokens,
+						false,
+						false
+					)
+				);
+			}
+		}
+		// interface Foo { ... } or export interface Foo extends Bar { ... }
+		else if (ts.isInterfaceDeclaration(stmt) && stmt.name) {
+			// Body spans from heritage clauses (if any) through the closing brace
+			const heritageClauses = stmt.heritageClauses;
+			const bodyStart =
+				heritageClauses?.[0]?.getStart(sourceFile) ?? stmt.members.pos;
+			const bodyText = sourceFile.text.slice(bodyStart, stmt.end).trim();
+			const normalized = normalizeBody(bodyText);
+			const tokens = tokenize(normalized);
+			if (tokens.length >= MIN_TYPE_TOKEN_COUNT) {
+				const { line, character } = sourceFile.getLineAndCharacterOfPosition(
+					stmt.getStart(sourceFile)
+				);
+				functions.push(
+					makeFunctionInfo(
+						filePath,
+						stmt.name.text,
+						"interface",
+						line + 1,
+						character,
+						bodyText,
+						normalized,
+						tokens,
+						false,
+						false
+					)
+				);
 			}
 		}
 	}
@@ -187,6 +278,8 @@ export interface SimilarityFilterOptions {
 	skipDirectives?: boolean;
 	/** Exclude thin wrapper functions (single return + call expression) */
 	skipWrappers?: boolean;
+	/** Only include declarations of these kinds (default: all kinds) */
+	kinds?: DeclarationKind[];
 }
 
 export function findSimilarGroups(
@@ -213,6 +306,10 @@ export function findSimilarGroups(
 	}
 	if (opts.skipWrappers) {
 		candidates = candidates.filter((f) => !f.isWrapper);
+	}
+	if (opts.kinds && opts.kinds.length > 0) {
+		const kindSet = new Set(opts.kinds);
+		candidates = candidates.filter((f) => kindSet.has(f.kind));
 	}
 
 	// Precompute token artifacts for all candidates to avoid redundant
@@ -523,6 +620,7 @@ export async function analyzeSimilarity(
 		minLines: opts.minLines,
 		skipDirectives: opts.skipDirectives,
 		skipWrappers: opts.skipWrappers,
+		kinds: opts.kinds,
 	};
 
 	if (ws) {

@@ -26,12 +26,15 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 		minLines,
 		skipDirectives,
 		skipWrappers,
+		kinds,
 	} = options;
 	const absoluteDir = path.resolve(directory);
 
 	if (!json) {
 		const mode = workspace ? "across workspace packages" : "in";
-		logger.info(`\n🔍 Scanning for similar functions ${mode} ${absoluteDir}\n`);
+		logger.info(
+			`\n🔍 Scanning for similar declarations ${mode} ${absoluteDir}\n`
+		);
 	}
 
 	const report = await analyzeSimilarity({
@@ -46,6 +49,7 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 		minLines,
 		skipDirectives,
 		skipWrappers,
+		kinds,
 	});
 
 	if (json) {
@@ -61,7 +65,7 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 		process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
 		if (strict && report.groups.length > 0) {
 			process.stderr.write(
-				`error: ${report.groups.length} similar function group(s) found (threshold: ${threshold})\n`
+				`error: ${report.groups.length} similar declaration group(s) found (threshold: ${threshold})\n`
 			);
 			process.exit(1);
 		}
@@ -72,7 +76,7 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 
 	if (strict && report.groups.length > 0) {
 		logger.error(
-			`\nerror: ${report.groups.length} similar function group(s) found (threshold: ${threshold})`
+			`\nerror: ${report.groups.length} similar declaration group(s) found (threshold: ${threshold})`
 		);
 		process.exit(1);
 	}
@@ -96,17 +100,22 @@ function bucketInfo(group: SimilarityGroup): { icon: string; label: string } {
 	return { icon, label: label(pct) };
 }
 
+const KIND_LABEL: Record<string, string> = {
+	type: " (type)",
+	interface: " (iface)",
+};
+
 function printReport(
 	report: SimilarityReport,
 	baseDir: string,
 	maxGroups: number
 ): void {
 	logger.info(
-		`📊 Scanned ${report.totalFunctions} function(s) across ${report.totalFiles} file(s)\n`
+		`📊 Scanned ${report.totalFunctions} declaration(s) across ${report.totalFiles} file(s)\n`
 	);
 
 	if (report.groups.length === 0) {
-		logger.info("✅ No similar functions found.");
+		logger.info("✅ No similar declarations found.");
 		logger.empty();
 		return;
 	}
@@ -128,7 +137,8 @@ function printReport(
 
 		for (const fn of group.functions) {
 			const rel = path.relative(baseDir, fn.file);
-			logger.info(`   • ${fn.name}  ${rel}:${fn.line}`);
+			const kindSuffix = KIND_LABEL[fn.kind] ?? "";
+			logger.info(`   • ${fn.name}${kindSuffix}  ${rel}:${fn.line}`);
 		}
 
 		logger.empty();

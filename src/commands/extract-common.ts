@@ -14,6 +14,7 @@ import {
 } from "../core/source-file.ts";
 import { applyTextChanges, type TextChange } from "../core/text-changes.ts";
 import type { WorkspaceInfo } from "../core/workspace.ts";
+import type { MutatingCommandOptions } from "../types/commands.ts";
 import type { FunctionInfo, SimilarityGroup } from "../types/similar.ts";
 
 /**
@@ -45,9 +46,9 @@ function computeSpecifier(
 	return spec;
 }
 
-export interface ExtractCommonOptions extends SimilarityDiscoveryOptions {
-	dryRun?: boolean;
-	force?: boolean;
+export interface ExtractCommonOptions
+	extends SimilarityDiscoveryOptions,
+		MutatingCommandOptions {
 	json?: boolean;
 	strict?: boolean;
 	group?: number;
@@ -375,6 +376,7 @@ function findFunctionNode(
 					info: {
 						file: filePath,
 						name: functionName,
+						kind: "function" as const,
 						line: targetLine,
 						column: 0,
 						normalizedBody: "",
@@ -422,6 +424,7 @@ function findFunctionNode(
 						info: {
 							file: filePath,
 							name: functionName,
+							kind: "function" as const,
 							line: targetLine,
 							column: 0,
 							normalizedBody: "",

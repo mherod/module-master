@@ -20,17 +20,12 @@ import { discoverWorkspace } from "../core/workspace.ts";
 import { getRuntime } from "../runtime/index.ts";
 import type { ModuleReference } from "../types/graph.ts";
 import type { UpdatedReference } from "../types/move.ts";
-import type { ProjectConfig } from "../types.ts";
+import type { MutatingCommandOptions, ProjectConfig } from "../types.ts";
 
-export interface RenameOptions {
+export interface RenameOptions extends MutatingCommandOptions {
 	file: string;
 	oldName: string;
 	newName: string;
-	dryRun?: boolean;
-	force?: boolean;
-	verbose?: boolean;
-	project?: string;
-	workspace?: boolean;
 }
 
 export interface RenameResult {

@@ -25,6 +25,7 @@ export interface ProjectReference {
 }
 
 export type { AnalysisResult, ExportInfo } from "./types/analysis.ts";
+export type { MutatingCommandOptions } from "./types/commands.ts";
 export type {
 	BarrelExport,
 	BarrelExportEntry,

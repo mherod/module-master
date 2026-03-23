@@ -38,17 +38,12 @@ import {
 } from "../core/workspace.ts";
 import { getRuntime } from "../runtime/index.ts";
 import type { MoveError, MoveResult, UpdatedReference } from "../types/move.ts";
-import type { ProjectConfig } from "../types.ts";
+import type { MutatingCommandOptions, ProjectConfig } from "../types.ts";
 
-export interface MoveOptions {
+export interface MoveOptions extends MutatingCommandOptions {
 	source: string;
 	target: string;
-	dryRun?: boolean;
-	force?: boolean;
-	verbose?: boolean;
 	verify?: boolean;
-	project?: string;
-	workspace?: boolean;
 }
 
 export async function moveCommand(options: MoveOptions): Promise<void> {

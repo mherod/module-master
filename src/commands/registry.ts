@@ -32,6 +32,7 @@ export interface CliValues {
 	"min-lines"?: string;
 	"skip-directives"?: boolean;
 	"skip-wrappers"?: boolean;
+	kinds?: string;
 	group?: string;
 	output?: string;
 	workspace?: boolean;
@@ -384,9 +385,9 @@ Examples:
 		helpText: `
 Usage: ${name} similar <directory> [options]
 
-Scan a project or directory for similar or duplicate top-level functions.
-Reports candidate groups with similarity score, file paths, symbol names,
-and line numbers for consolidation work.
+Scan a project or directory for similar or duplicate top-level functions,
+type aliases, and interfaces. Reports candidate groups with similarity score,
+file paths, symbol names, and line numbers for consolidation work.
 
 Arguments:
   directory    Path to the project directory to scan
@@ -395,13 +396,15 @@ Options:
   --json            Output results as JSON
   --threshold       Minimum similarity score 0.0–1.0 (default: 0.8)
   --max-groups      Maximum number of groups to display (default: 10, 0 for unlimited)
-  --strict          Exit with error code 1 if similar functions are found (for CI/hooks)
-  --name-threshold  Only group functions whose names also meet this similarity (0.0–1.0)
-  --same-name-only  Only group functions with identical names
-  --skip-same-file  Skip groups where all functions are in the same file
+  --strict          Exit with error code 1 if similar declarations are found (for CI/hooks)
+  --name-threshold  Only group declarations whose names also meet this similarity (0.0–1.0)
+  --same-name-only  Only group declarations with identical names
+  --skip-same-file  Skip groups where all declarations are in the same file
   --only-related-to Only show groups related to a file or folder (path or glob)
-  --min-lines       Exclude functions with fewer body lines (filters thin wrappers)
+  --min-lines       Exclude declarations with fewer body lines (filters thin wrappers)
   --skip-directives Skip functions containing compile-time directives
+  --kinds           Comma-separated list of declaration kinds to include:
+                    function, type, interface (default: all)
   --workspace       Scan across all workspace packages
   -p, --project     Path to project directory or tsconfig.json
 
@@ -425,6 +428,8 @@ Examples:
   ${name} similar src --name-threshold=0.5  # require similar names
   ${name} similar src --same-name-only      # only identical names
   ${name} similar src --only-related-to=src/utils/helpers.ts
+  ${name} similar src --kinds=function      # functions only (previous default)
+  ${name} similar src --kinds=type,interface # types and interfaces only
 `,
 		run: async ([directory], values) => {
 			if (!directory) {
@@ -456,6 +461,16 @@ Examples:
 				);
 				process.exit(1);
 			}
+			const validKinds = ["function", "type", "interface"] as const;
+			type ValidKind = (typeof validKinds)[number];
+			const kindsArg = values.kinds
+				? values.kinds
+						.split(",")
+						.map((k) => k.trim())
+						.filter((k): k is ValidKind =>
+							(validKinds as readonly string[]).includes(k)
+						)
+				: undefined;
 			await similarCommand({
 				directory,
 				project: values.project,
@@ -471,6 +486,7 @@ Examples:
 				minLines: values["min-lines"] ? Number(values["min-lines"]) : undefined,
 				skipDirectives: values["skip-directives"],
 				skipWrappers: values["skip-wrappers"],
+				kinds: kindsArg,
 			});
 		},
 	},
