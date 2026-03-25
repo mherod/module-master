@@ -50,18 +50,20 @@ export function otherB(): number {
 	);
 }
 
-function captureStdout(): { output: () => string; restore: () => void } {
-	const originalWrite = process.stdout.write.bind(process.stdout);
-	let buf = "";
-	process.stdout.write = (chunk: string | Uint8Array) => {
-		buf += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
-		return true;
-	};
+function runExtractCommonCli(args: string[]): {
+	stdout: string;
+	stderr: string;
+	exitCode: number;
+} {
+	const proc = Bun.spawnSync(
+		["bun", path.join(process.cwd(), "src/cli.ts"), "extract-common", ...args],
+		{ stdout: "pipe", stderr: "pipe" }
+	);
+
 	return {
-		output: () => buf,
-		restore: () => {
-			process.stdout.write = originalWrite;
-		},
+		stdout: proc.stdout.toString(),
+		stderr: proc.stderr.toString(),
+		exitCode: proc.exitCode,
 	};
 }
 
@@ -69,23 +71,17 @@ describe("extract-common", () => {
 	test("dry-run reports duplicates without modifying files", async () => {
 		const dir = nextFixtureDir();
 		await setupFixtures(dir);
-		const cap = captureStdout();
 
-		try {
-			await extractCommonCommand({
-				directory: dir,
-				threshold: 0.95,
-				force: true,
-				dryRun: true,
-			});
-		} finally {
-			cap.restore();
-		}
-
-		const output = cap.output();
-		expect(output).toContain("Dry run");
-		expect(output).toContain("formatDate");
-		expect(output).toContain("Would remove from");
+		const { stdout, stderr, exitCode } = runExtractCommonCli([
+			dir,
+			"--threshold=0.95",
+			"--dry-run",
+			"--force",
+		]);
+		expect(exitCode).toBe(0);
+		expect(stdout + stderr).toContain("Dry run");
+		expect(stdout + stderr).toContain("formatDate");
+		expect(stdout + stderr).toContain("Would remove from");
 
 		// Files should be unchanged
 		const aContent = await Bun.file(path.join(dir, "a.ts")).text();
@@ -157,19 +153,14 @@ describe("extract-common", () => {
 `
 		);
 
-		const cap = captureStdout();
-		try {
-			await extractCommonCommand({
-				directory: dir,
-				threshold: 0.95,
-				force: true,
-				dryRun: true,
-			});
-		} finally {
-			cap.restore();
-		}
-
-		expect(cap.output()).toContain("No similar function groups found");
+		const { stdout, stderr, exitCode } = runExtractCommonCli([
+			dir,
+			"--threshold=0.95",
+			"--dry-run",
+			"--force",
+		]);
+		expect(exitCode).toBe(0);
+		expect(stdout + stderr).toContain("No similar function groups found");
 
 		await rm(dir, { recursive: true, force: true });
 	});
@@ -457,18 +448,13 @@ export const contactsRegistry = { reAuth: async () => {} };
 `
 		);
 
-		const cap = captureStdout();
-		try {
-			await extractCommonCommand({
-				directory: dir,
-				threshold: 0.95,
-				force: true,
-				dryRun: false,
-				sameNameOnly: true,
-			});
-		} finally {
-			cap.restore();
-		}
+		await extractCommonCommand({
+			directory: dir,
+			threshold: 0.95,
+			force: true,
+			dryRun: false,
+			sameNameOnly: true,
+		});
 
 		const calContent = await Bun.file(path.join(dir, "cal.ts")).text();
 		const contactsContent = await Bun.file(
@@ -523,24 +509,17 @@ export const contactsRegistry = { reAuth: async () => {} };
 	test("--json emits valid JSON with expected schema", async () => {
 		const dir = nextFixtureDir();
 		await setupFixtures(dir);
-		const cap = captureStdout();
-		let output = "";
-
-		try {
-			await extractCommonCommand({
-				directory: dir,
-				threshold: 0.95,
-				force: true,
-				dryRun: true,
-				json: true,
-			});
-		} finally {
-			cap.restore();
-			output = cap.output();
-		}
+		const { stdout, exitCode } = runExtractCommonCli([
+			dir,
+			"--threshold=0.95",
+			"--dry-run",
+			"--force",
+			"--json",
+		]);
+		expect(exitCode).toBe(0);
 
 		// Should be valid JSON
-		const parsed = JSON.parse(output);
+		const parsed = JSON.parse(stdout);
 
 		// Top-level schema
 		expect(typeof parsed.totalGroups).toBe("number");
@@ -583,23 +562,15 @@ export const contactsRegistry = { reAuth: async () => {} };
 	test("--json without --dry-run modifies files and emits JSON with dryRun: false", async () => {
 		const dir = nextFixtureDir();
 		await setupFixtures(dir);
-		const cap = captureStdout();
-		let output = "";
+		const { stdout, exitCode } = runExtractCommonCli([
+			dir,
+			"--threshold=0.95",
+			"--force",
+			"--json",
+		]);
+		expect(exitCode).toBe(0);
 
-		try {
-			await extractCommonCommand({
-				directory: dir,
-				threshold: 0.95,
-				force: true,
-				dryRun: false,
-				json: true,
-			});
-		} finally {
-			cap.restore();
-			output = cap.output();
-		}
-
-		const parsed = JSON.parse(output);
+		const parsed = JSON.parse(stdout);
 		expect(parsed.dryRun).toBe(false);
 		expect(parsed.totalGroups).toBeGreaterThan(0);
 
@@ -615,27 +586,15 @@ export const contactsRegistry = { reAuth: async () => {} };
 		const dir = nextFixtureDir();
 		await setupFixtures(dir);
 
-		let exitCode: number | undefined;
-		const originalExit = process.exit.bind(process);
-		process.exit = ((code?: number) => {
-			exitCode = code ?? 0;
-		}) as typeof process.exit;
+		const result = runExtractCommonCli([
+			dir,
+			"--threshold=0.95",
+			"--dry-run",
+			"--force",
+			"--strict",
+		]);
+		expect(result.exitCode).toBe(1);
 
-		const cap = captureStdout();
-		try {
-			await extractCommonCommand({
-				directory: dir,
-				threshold: 0.95,
-				force: true,
-				dryRun: true,
-				strict: true,
-			});
-		} finally {
-			cap.restore();
-			process.exit = originalExit;
-		}
-
-		expect(exitCode).toBe(1);
 		// Files should be unchanged (dry-run)
 		const bContent = await Bun.file(path.join(dir, "b.ts")).text();
 		expect(bContent).toContain("function formatDate");
@@ -658,25 +617,14 @@ export const contactsRegistry = { reAuth: async () => {} };
 			"export function onlyHere(): number { return 1; }\n"
 		);
 
-		let exitCode: number | undefined;
-		const originalExit = process.exit.bind(process);
-		process.exit = ((code?: number) => {
-			exitCode = code ?? 0;
-		}) as typeof process.exit;
-
-		try {
-			await extractCommonCommand({
-				directory: dir,
-				threshold: 0.95,
-				force: true,
-				dryRun: true,
-				strict: true,
-			});
-		} finally {
-			process.exit = originalExit;
-		}
-
-		expect(exitCode).toBeUndefined();
+		const result = runExtractCommonCli([
+			dir,
+			"--threshold=0.95",
+			"--dry-run",
+			"--force",
+			"--strict",
+		]);
+		expect(result.exitCode).toBe(0);
 
 		await rm(dir, { recursive: true, force: true });
 	});
