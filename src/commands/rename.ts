@@ -1,6 +1,7 @@
 import path from "node:path";
 import { logger, printCommandResult } from "../cli-logger.ts";
 import ts from "../core/ast-utils.ts";
+import { mapConcurrent } from "../core/concurrency.ts";
 import { checkAllConflicts } from "../core/conflict-detection.ts";
 import { ensureCleanWorktree } from "../core/git.ts";
 import { buildDependencyGraph, findAllReferences } from "../core/graph.ts";
@@ -68,7 +69,6 @@ export async function renameCommand(options: RenameOptions): Promise<void> {
 			: path.dirname(tsconfigPath);
 		const wsInfo = await discoverWorkspace(wsDir);
 		if (wsInfo && wsInfo.packages.length > 0) {
-			const { mapConcurrent } = await import("../core/concurrency.ts");
 			const eligiblePkgs = wsInfo.packages.filter(
 				(pkg) => pkg.tsconfigPath && pkg.tsconfigPath !== tsconfigPath
 			);
@@ -159,6 +159,7 @@ export async function renameSymbol(
 
 	// Create program for parsing
 	const program = createProgram(project);
+	const checker = program.getTypeChecker();
 
 	// First, rename the export in the source file
 	const sourceAst = program.getSourceFile(filePath);
@@ -232,7 +233,11 @@ export async function renameSymbol(
 	}
 
 	// Rename in source file
-	const sourceResult = renameInSourceFile(sourceAst, oldName, newName);
+	const renamedSymbol = getRenamedSymbol(sourceAst, checker, exportInfo);
+	const sourceResult = renameInSourceFile(sourceAst, oldName, newName, {
+		checker,
+		renamedSymbol: renamedSymbol ?? undefined,
+	});
 	if (sourceResult.changes.length > 0) {
 		updatedReferences.push(
 			...sourceResult.updates.map((u) => ({ ...u, file: filePath }))
@@ -296,6 +301,41 @@ interface ExportLocation {
 	type: "declaration" | "named-export" | "default";
 	node: ts.Node;
 	line: number;
+}
+
+function getRenamedSymbol(
+	_sourceFile: ts.SourceFile,
+	checker: ts.TypeChecker,
+	location: ExportLocation
+): ts.Symbol | null {
+	if (location.type === "declaration") {
+		const nameNode = getNameNode(location.node);
+		if (nameNode) {
+			return checker.getSymbolAtLocation(nameNode) ?? null;
+		}
+		return null;
+	}
+
+	if (location.type === "default") {
+		if (
+			ts.isExportAssignment(location.node) &&
+			!location.node.isExportEquals &&
+			ts.isIdentifier(location.node.expression)
+		) {
+			return checker.getSymbolAtLocation(location.node.expression) ?? null;
+		}
+		return null;
+	}
+
+	// named-export: export { foo } / export { foo as Bar }
+	// Prefer the local name (propertyName when present, else name).
+	if (ts.isExportSpecifier(location.node)) {
+		const localId = location.node.propertyName ?? location.node.name;
+		return checker.getSymbolAtLocation(localId) ?? null;
+	}
+
+	// Fallback — keep behavior unchanged if we can't resolve a symbol
+	return null;
 }
 
 function findExport(
@@ -369,7 +409,11 @@ function findExport(
 export function renameInSourceFile(
 	sourceFile: ts.SourceFile,
 	oldName: string,
-	newName: string
+	newName: string,
+	options?: {
+		checker?: ts.TypeChecker;
+		renamedSymbol?: ts.Symbol;
+	}
 ): {
 	newContent: string;
 	changes: TextChange[];
@@ -377,6 +421,8 @@ export function renameInSourceFile(
 } {
 	const changes: TextChange[] = [];
 	const updates: Omit<UpdatedReference, "file">[] = [];
+	const checker = options?.checker;
+	const renamedSymbol = options?.renamedSymbol;
 
 	// Returns true if a binding pattern (parameter name, destructuring) introduces `name`
 	function bindingContainsName(binding: ts.BindingName): boolean {
@@ -517,36 +563,56 @@ export function renameInSourceFile(
 			});
 		}
 
-		// Also rename usages within the file itself
+		// Also rename usages within the file itself.
+		//
+		// When a TypeChecker + symbol is provided, use symbol identity to ensure we only
+		// rename true references to the exported symbol (avoids false positives).
+		// Fallback to the existing heuristic when no checker is available (unit tests,
+		// standalone SourceFile parsing).
 		if (ts.isIdentifier(node) && node.text === oldName) {
-			// Skip if this is a property access (obj.oldName)
-			if (
-				node.parent &&
-				ts.isPropertyAccessExpression(node.parent) &&
-				node.parent.name === node
-			) {
-				// This is accessing a property, not our symbol
-				return;
-			}
-			// Skip if this is a property in an object literal
-			if (
-				node.parent &&
-				ts.isPropertyAssignment(node.parent) &&
-				node.parent.name === node
-			) {
-				return;
-			}
-			// Skip import specifiers (handled separately)
-			if (
-				node.parent &&
-				(ts.isImportSpecifier(node.parent) || ts.isExportSpecifier(node.parent))
-			) {
-				return;
-			}
-			// Skip if this identifier is declaring a new binding in an inner scope
-			// (parameter name, variable declaration, destructuring element, inner function/class name)
-			if (isDeclaringIdentifier(node)) {
-				return;
+			if (checker && renamedSymbol) {
+				let symbolAtNode = checker.getSymbolAtLocation(node);
+
+				// Shorthand property assignments (`{ foo }`) are represented as a property,
+				// but semantically refer to the value symbol of `foo`.
+				if (
+					symbolAtNode !== renamedSymbol &&
+					ts.isShorthandPropertyAssignment(node.parent) &&
+					node.parent.name === node
+				) {
+					symbolAtNode =
+						checker.getShorthandAssignmentValueSymbol(node.parent) ??
+						symbolAtNode;
+				}
+
+				if (symbolAtNode !== renamedSymbol) {
+					ts.forEachChild(node, (child) => visit(child, false));
+					return;
+				}
+			} else {
+				// Heuristic fallback (best-effort without binder)
+				// Skip if this is a property access (obj.oldName)
+				if (
+					node.parent &&
+					ts.isPropertyAccessExpression(node.parent) &&
+					node.parent.name === node
+				) {
+					// This is accessing a property, not our symbol
+					return;
+				}
+				// Skip import/export specifiers (handled separately)
+				if (
+					node.parent &&
+					(ts.isImportSpecifier(node.parent) ||
+						ts.isExportSpecifier(node.parent))
+				) {
+					return;
+				}
+				// Skip if this identifier is declaring a new binding in an inner scope
+				// (parameter name, variable declaration, destructuring element, inner function/class name)
+				if (isDeclaringIdentifier(node)) {
+					return;
+				}
 			}
 
 			const { line } = sourceFile.getLineAndCharacterOfPosition(
