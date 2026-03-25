@@ -83,10 +83,17 @@ function makeWorkspace(dir: string): WorkspaceInfo {
 afterEach(async () => {
 	// Best-effort cleanup of any updater fixtures we created under __fixtures__
 	const fixturesDir = path.join(import.meta.dir, "../commands/__fixtures__");
-	const glob = new Bun.Glob("updater-*");
-	for await (const match of glob.scan({ cwd: fixturesDir, onlyFiles: false })) {
-		const abs = path.join(fixturesDir, match);
-		await rm(abs, { recursive: true, force: true });
+	try {
+		const glob = new Bun.Glob("updater-*");
+		for await (const match of glob.scan({
+			cwd: fixturesDir,
+			onlyFiles: false,
+		})) {
+			const abs = path.join(fixturesDir, match);
+			await rm(abs, { recursive: true, force: true });
+		}
+	} catch {
+		// Fixtures directory may not exist yet — nothing to clean up
 	}
 });
 
