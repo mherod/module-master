@@ -386,15 +386,16 @@ export function findCrossPackageImport(
 		return null;
 	}
 
-	// If we're adding to the barrel, just use the package name
-	// The export will be added to the barrel, so consumers can import from the package
-	if (addingToBarrel && pkg.srcDir) {
+	// If we're adding to the barrel AND the barrel exists, use the package name.
+	// The export will be added to the barrel, so consumers can import from the package.
+	// Without a barrel file, we must fall through to subpath imports to avoid broken imports.
+	const hasBarrel = pkg.barrelFiles && pkg.barrelFiles.length > 0;
+	if (addingToBarrel && hasBarrel && pkg.srcDir) {
 		const relativePath = path.relative(pkg.path, normalizedTarget);
 		const subpath = removeExtension(relativePath);
 
 		// If it's in the src directory, it will be exported from the barrel
 		if (subpath.startsWith(`${pkg.srcDir}/`)) {
-			// Just use the package name - the barrel will export it
 			return pkg.name;
 		}
 	}
@@ -441,8 +442,11 @@ export function findCrossPackageImport(
 		if (srcRelative === "index" || srcRelative === "") {
 			return pkg.name;
 		}
-		// For non-index files, use package name (assumes barrel export)
-		return pkg.name;
+		// Only use bare package name if barrel exists — otherwise use subpath
+		if (hasBarrel) {
+			return pkg.name;
+		}
+		return `${pkg.name}/${subpath}`;
 	}
 
 	// Default: just use package name + subpath

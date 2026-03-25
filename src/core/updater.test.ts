@@ -67,12 +67,14 @@ function makeWorkspace(dir: string): WorkspaceInfo {
 				path: path.join(dir, "packages", "pkg-a"),
 				packageJsonPath: path.join(dir, "packages", "pkg-a", "package.json"),
 				srcDir: "src",
+				barrelFiles: [path.join(dir, "packages", "pkg-a", "src", "index.ts")],
 			},
 			{
 				name: "@scope/pkg-b",
 				path: path.join(dir, "packages", "pkg-b"),
 				packageJsonPath: path.join(dir, "packages", "pkg-b", "package.json"),
 				srcDir: "src",
+				barrelFiles: [path.join(dir, "packages", "pkg-b", "src", "index.ts")],
 			},
 		],
 	};

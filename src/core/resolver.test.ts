@@ -35,18 +35,24 @@ function makeProject(
 
 function makeWorkspace(
 	root: string,
-	packages: Array<{ name: string; subdir: string; srcDir?: string }>
+	packages: Array<{
+		name: string;
+		subdir: string;
+		srcDir?: string;
+		barrelFiles?: string[];
+	}>
 ): WorkspaceInfo {
 	return {
 		root,
 		type: "pnpm",
 		patterns: ["packages/*"],
 		packages: packages.map(
-			({ name, subdir, srcDir }): WorkspacePackage => ({
+			({ name, subdir, srcDir, barrelFiles }): WorkspacePackage => ({
 				name,
 				path: `${root}/${subdir}`,
 				packageJsonPath: `${root}/${subdir}/package.json`,
 				srcDir,
+				barrelFiles,
 			})
 		),
 	};
@@ -346,7 +352,12 @@ describe("isCrossPackageMove", () => {
 describe("findCrossPackageImport", () => {
 	test("returns package name when file is in src/ and addingToBarrel is true", () => {
 		const workspace = makeWorkspace("/repo", [
-			{ name: "@scope/pkg", subdir: "packages/pkg", srcDir: "src" },
+			{
+				name: "@scope/pkg",
+				subdir: "packages/pkg",
+				srcDir: "src",
+				barrelFiles: ["/repo/packages/pkg/src/index.ts"],
+			},
 		]);
 		const result = findCrossPackageImport(
 			"/repo/packages/pkg/src/foo.ts",
@@ -358,7 +369,12 @@ describe("findCrossPackageImport", () => {
 
 	test("returns package name even when addingToBarrel defaults to true", () => {
 		const workspace = makeWorkspace("/repo", [
-			{ name: "@scope/pkg", subdir: "packages/pkg", srcDir: "src" },
+			{
+				name: "@scope/pkg",
+				subdir: "packages/pkg",
+				srcDir: "src",
+				barrelFiles: ["/repo/packages/pkg/src/index.ts"],
+			},
 		]);
 		// default parameter is true
 		const result = findCrossPackageImport(
@@ -374,5 +390,33 @@ describe("findCrossPackageImport", () => {
 		]);
 		const result = findCrossPackageImport("/other/foo.ts", workspace);
 		expect(result).toBeNull();
+	});
+
+	test("returns subpath when package has no barrel file", () => {
+		const workspace = makeWorkspace("/repo", [
+			{ name: "@scope/pkg", subdir: "packages/pkg", srcDir: "src" },
+		]);
+		const result = findCrossPackageImport(
+			"/repo/packages/pkg/src/foo.ts",
+			workspace,
+			true
+		);
+		expect(result).toBe("@scope/pkg/src/foo");
+	});
+
+	test("returns subpath when barrelFiles is empty", () => {
+		const workspace = makeWorkspace("/repo", [
+			{
+				name: "@scope/pkg",
+				subdir: "packages/pkg",
+				srcDir: "src",
+				barrelFiles: [],
+			},
+		]);
+		const result = findCrossPackageImport(
+			"/repo/packages/pkg/src/utils.ts",
+			workspace
+		);
+		expect(result).toBe("@scope/pkg/src/utils");
 	});
 });
