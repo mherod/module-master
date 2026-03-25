@@ -62,15 +62,31 @@ export function updateFileReferences(
 	const movedExportNames = new Set(movedFileExports?.map((e) => e.name) ?? []);
 
 	for (const ref of references) {
-		// Check if this is an indirect reference through a barrel
-		// (reference specifier doesn't directly point to the moved file)
+		// Check if this is an indirect reference through a barrel.
+		//
+		// `findAllReferences()` may rewrite `ref.resolvedPath` to the moved module even
+		// when the specifier points to a barrel. Therefore we must distinguish:
+		// - direct import: ref.specifier resolves to oldPath
+		// - barrel consumer: ref.specifier resolves elsewhere, but effective resolvedPath is oldPath
+		const effectiveTargetsMovedFile =
+			normalizePath(ref.resolvedPath) === normalizePath(oldPath);
+		const specifierResolution = resolveModuleSpecifier(
+			ref.specifier,
+			ref.sourceFile,
+			project
+		);
+		const specifierDirectlyTargetsMovedFile =
+			specifierResolution.kind === "resolved" &&
+			normalizePath(specifierResolution.path) === normalizePath(oldPath);
+
 		const isBarrelReference =
 			crossPackage &&
 			movedFileExports &&
 			movedFileExports.length > 0 &&
 			ref.bindings &&
 			ref.bindings.length > 0 &&
-			normalizePath(ref.resolvedPath) === normalizePath(oldPath);
+			effectiveTargetsMovedFile &&
+			!specifierDirectlyTargetsMovedFile;
 
 		// For barrel references with mixed bindings, we need to split the import
 		if (isBarrelReference && ref.bindings) {
