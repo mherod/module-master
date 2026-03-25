@@ -269,7 +269,7 @@ function normalizeImports(
 	};
 }
 
-async function applyChanges(changes: AliasChange[]): Promise<void> {
+export async function applyChanges(changes: AliasChange[]): Promise<void> {
 	// Group changes by file
 	const byFile = new Map<string, AliasChange[]>();
 	for (const change of changes) {
@@ -277,6 +277,14 @@ async function applyChanges(changes: AliasChange[]): Promise<void> {
 		existing.push(change);
 		byFile.set(change.file, existing);
 	}
+
+	const { createSourceFileFromText: createSf } = await import(
+		"../core/source-file.ts"
+	);
+	const { findSpecifierLocation: findLoc } = await import("../core/updater.ts");
+	const { applyTextChanges: applyEdits, deduplicateChanges: dedup } =
+		await import("../core/text-changes.ts");
+	type TC = import("../core/text-changes.ts").TextChange;
 
 	const rt = getRuntime();
 	for (const [filePath, fileChanges] of byFile) {
@@ -287,26 +295,37 @@ async function applyChanges(changes: AliasChange[]): Promise<void> {
 			continue;
 		}
 
-		// Sort changes by line number (descending) to avoid offset issues
-		const sorted = [...fileChanges].sort((a, b) => b.line - a.line);
+		// Parse the file to find precise specifier locations via AST
+		const sourceFile = createSf(filePath, content);
+		const textChanges: TC[] = [];
 
-		// Apply each change
-		for (const change of sorted) {
-			// Simple string replacement approach
-			// This works for most cases, but could be improved with AST-based replacement
-			const oldImport = new RegExp(
-				`(['"\`])${escapeRegex(change.oldSpecifier)}\\1`,
-				"g"
-			);
-			content = content.replace(oldImport, `$1${change.newSpecifier}$1`);
+		for (const change of fileChanges) {
+			// Build a minimal ModuleReference to locate the specifier
+			const ref: ModuleReference = {
+				sourceFile: filePath,
+				specifier: change.oldSpecifier,
+				resolvedPath: "",
+				type: "import",
+				line: change.line,
+				column: 0,
+				isTypeOnly: false,
+			};
+			const location = findLoc(sourceFile, ref);
+			if (location) {
+				textChanges.push({
+					start: location.start,
+					end: location.end,
+					newText: change.newSpecifier,
+				});
+			}
 		}
 
-		await rt.fs.writeFile(filePath, content);
+		if (textChanges.length > 0) {
+			const unique = dedup(textChanges);
+			const newContent = applyEdits(content, unique);
+			await rt.fs.writeFile(filePath, newContent);
+		}
 	}
-}
-
-function escapeRegex(str: string): string {
-	return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function getFilesToProcess(target: string, project: ProjectConfig): string[] {
