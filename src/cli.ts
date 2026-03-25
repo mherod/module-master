@@ -33,6 +33,8 @@ const { values, positionals } = parseArgs({
 		group: { type: "string" },
 		output: { type: "string", short: "o" },
 		workspace: { type: "boolean" },
+		bucket: { type: "string" },
+		format: { type: "string" },
 		"fan-out-threshold": { type: "string" },
 		"fan-in-threshold": { type: "string" },
 		"export-threshold": { type: "string" },
@@ -83,6 +85,8 @@ Options:
   --skip-directives Skip functions with compile-time directives (use server, etc.)
   --skip-wrappers   Skip thin wrapper functions (single return + call expression)
   --kinds           Comma-separated kinds for similar command: function,type,interface
+  --bucket          Filter by similarity bucket: exact, high, medium (similar command)
+  --format          Output format: compact (similar command)
   --workspace       Scan across all workspace packages (discover, similar, and other commands)
   --fan-out-threshold  Flag files with more than N imports (default: 10, audit command)
   --fan-in-threshold   Flag files with more than N consumers (default: 10, audit command)

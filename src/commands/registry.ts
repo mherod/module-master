@@ -39,6 +39,8 @@ export interface CliValues {
 	"fan-out-threshold"?: string;
 	"fan-in-threshold"?: string;
 	"export-threshold"?: string;
+	bucket?: string;
+	format?: string;
 }
 
 export interface CommandDef {
@@ -405,6 +407,8 @@ Options:
   --skip-directives Skip functions containing compile-time directives
   --kinds           Comma-separated list of declaration kinds to include:
                     function, type, interface (default: all)
+  --bucket          Filter groups by similarity bucket: exact, high, or medium
+  --format          Output format: compact (minimal name + file:line per group)
   --workspace       Scan across all workspace packages
   -p, --project     Path to project directory or tsconfig.json
 
@@ -430,6 +434,8 @@ Examples:
   ${name} similar src --only-related-to=src/utils/helpers.ts
   ${name} similar src --kinds=function      # functions only (previous default)
   ${name} similar src --kinds=type,interface # types and interfaces only
+  ${name} similar src --bucket=exact        # only exact duplicates
+  ${name} similar src --format=compact      # minimal output for scripting
 `,
 		run: async ([directory], values) => {
 			if (!directory) {
@@ -471,6 +477,21 @@ Examples:
 							(validKinds as readonly string[]).includes(k)
 						)
 				: undefined;
+			const validBuckets = ["exact", "high", "medium"] as const;
+			type ValidBucket = (typeof validBuckets)[number];
+			const bucketArg = values.bucket as ValidBucket | undefined;
+			if (
+				bucketArg &&
+				!(validBuckets as readonly string[]).includes(bucketArg)
+			) {
+				logger.error("Error: --bucket must be 'exact', 'high', or 'medium'");
+				process.exit(1);
+			}
+			const formatArg = values.format as "compact" | undefined;
+			if (formatArg && formatArg !== "compact") {
+				logger.error("Error: --format must be 'compact'");
+				process.exit(1);
+			}
 			await similarCommand({
 				directory,
 				project: values.project,
@@ -487,6 +508,8 @@ Examples:
 				skipDirectives: values["skip-directives"],
 				skipWrappers: values["skip-wrappers"],
 				kinds: kindsArg,
+				bucket: bucketArg,
+				format: formatArg,
 			});
 		},
 	},

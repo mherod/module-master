@@ -8,6 +8,8 @@ export interface SimilarOptions extends SimilarityDiscoveryOptions {
 	json?: boolean;
 	maxGroups?: number;
 	strict?: boolean;
+	bucket?: "exact" | "high" | "medium";
+	format?: "compact";
 }
 
 export async function similarCommand(options: SimilarOptions): Promise<void> {
@@ -27,6 +29,8 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 		skipDirectives,
 		skipWrappers,
 		kinds,
+		bucket,
+		format,
 	} = options;
 	const absoluteDir = path.resolve(directory);
 
@@ -37,7 +41,7 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 		);
 	}
 
-	const report = await analyzeSimilarity({
+	const rawReport = await analyzeSimilarity({
 		directory: absoluteDir,
 		threshold,
 		project,
@@ -51,6 +55,14 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 		skipWrappers,
 		kinds,
 	});
+
+	// Apply bucket filter if specified
+	const report = bucket
+		? {
+				...rawReport,
+				groups: rawReport.groups.filter((g) => g.bucket === bucket),
+			}
+		: rawReport;
 
 	if (json) {
 		const output =
@@ -72,7 +84,11 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 		return;
 	}
 
-	printReport(report, absoluteDir, maxGroups);
+	if (format === "compact") {
+		printCompact(report, absoluteDir, maxGroups);
+	} else {
+		printReport(report, absoluteDir, maxGroups);
+	}
 
 	if (strict && report.groups.length > 0) {
 		logger.error(
@@ -104,6 +120,30 @@ const KIND_LABEL: Record<string, string> = {
 	type: " (type)",
 	interface: " (iface)",
 };
+
+function printCompact(
+	report: SimilarityReport,
+	baseDir: string,
+	maxGroups: number
+): void {
+	if (report.groups.length === 0) {
+		return;
+	}
+
+	const groups =
+		maxGroups > 0 ? report.groups.slice(0, maxGroups) : report.groups;
+
+	for (const group of groups) {
+		const pct = `${(group.score * 100).toFixed(0)}%`;
+		const label = group.bucket === "exact" ? "exact" : pct;
+		process.stdout.write(`--- ${group.bucket} ${label}\n`);
+		for (const fn of group.functions) {
+			const rel = path.relative(baseDir, fn.file);
+			const kindSuffix = KIND_LABEL[fn.kind] ?? "";
+			process.stdout.write(`  ${fn.name}${kindSuffix} ${rel}:${fn.line}\n`);
+		}
+	}
+}
 
 function printReport(
 	report: SimilarityReport,
