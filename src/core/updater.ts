@@ -5,6 +5,7 @@ import type { ExportInfo } from "../types/analysis.ts";
 import type { ImportBinding, ModuleReference } from "../types/graph.ts";
 import type { UpdatedReference } from "../types/move.ts";
 import type { ProjectConfig } from "../types.ts";
+import { removeExtension } from "./constants.ts";
 import {
 	calculateNewSpecifier,
 	findCrossPackageImport,
@@ -655,7 +656,7 @@ export function generateBarrelExport(
 	// Calculate relative path from barrel to target
 	const barrelDir = path.dirname(barrelPath);
 	let relativePath = path.relative(barrelDir, targetPath);
-	relativePath = relativePath.replace(/\.[tj]sx?$/, ""); // Remove extension
+	relativePath = removeExtension(relativePath);
 	if (!relativePath.startsWith(".")) {
 		relativePath = `./${relativePath}`;
 	}
