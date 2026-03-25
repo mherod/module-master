@@ -3,7 +3,12 @@ import { scanExports } from "./scanner.ts";
 
 export interface ConflictResult {
 	hasConflict: boolean;
-	conflicts: Array<{ file: string; name: string; line: number }>;
+	conflicts: Array<{
+		file: string;
+		name: string;
+		line: number;
+		column: number;
+	}>;
 }
 
 /**
@@ -25,6 +30,7 @@ export function checkExportConflict(
 				file: targetSourceFile.fileName,
 				name: exp.name,
 				line: exp.line,
+				column: 0,
 			});
 		}
 	}
@@ -42,16 +48,26 @@ export function checkExportConflict(
  * Used by move and rename to detect when updating an import would
  * introduce a duplicate binding in the importing file.
  */
-export function hasLocalBinding(
+/**
+ * Find the position of a local binding with the given name, or null if none exists.
+ */
+export function findLocalBinding(
 	sourceFile: ts.SourceFile,
 	name: string,
 	skipSpecifier: string,
 	skipImportedName?: string
-): boolean {
-	let found = false;
+): { line: number; column: number } | null {
+	let result: { line: number; column: number } | null = null;
+
+	function pos(node: ts.Node): { line: number; column: number } {
+		const { line, character } = sourceFile.getLineAndCharacterOfPosition(
+			node.getStart(sourceFile)
+		);
+		return { line: line + 1, column: character };
+	}
 
 	function visit(node: ts.Node) {
-		if (found) {
+		if (result) {
 			return;
 		}
 
@@ -60,32 +76,32 @@ export function hasLocalBinding(
 			ts.isIdentifier(node.name) &&
 			node.name.text === name
 		) {
-			found = true;
+			result = pos(node.name);
 			return;
 		}
 
 		if (ts.isFunctionDeclaration(node) && node.name?.text === name) {
-			found = true;
+			result = pos(node.name);
 			return;
 		}
 
 		if (ts.isClassDeclaration(node) && node.name?.text === name) {
-			found = true;
+			result = pos(node.name);
 			return;
 		}
 
 		if (ts.isTypeAliasDeclaration(node) && node.name.text === name) {
-			found = true;
+			result = pos(node.name);
 			return;
 		}
 
 		if (ts.isInterfaceDeclaration(node) && node.name.text === name) {
-			found = true;
+			result = pos(node.name);
 			return;
 		}
 
 		if (ts.isEnumDeclaration(node) && node.name.text === name) {
-			found = true;
+			result = pos(node.name);
 			return;
 		}
 
@@ -99,7 +115,7 @@ export function hasLocalBinding(
 					ts.forEachChild(node, visit);
 					return;
 				}
-				found = true;
+				result = pos(node.name);
 				return;
 			}
 			// For move: skip imports from the module being changed
@@ -110,18 +126,18 @@ export function hasLocalBinding(
 				ts.isStringLiteral(importDecl.moduleSpecifier) &&
 				importDecl.moduleSpecifier.text !== skipSpecifier
 			) {
-				found = true;
+				result = pos(node.name);
 				return;
 			}
 		}
 
 		if (ts.isNamespaceImport(node) && node.name.text === name) {
-			found = true;
+			result = pos(node.name);
 			return;
 		}
 
 		if (ts.isImportClause(node) && node.name && node.name.text === name) {
-			found = true;
+			result = pos(node.name);
 			return;
 		}
 
@@ -129,7 +145,22 @@ export function hasLocalBinding(
 	}
 
 	visit(sourceFile);
-	return found;
+	return result;
+}
+
+/**
+ * Check if a file already declares a local binding with the given name.
+ * Convenience wrapper around findLocalBinding for boolean checks.
+ */
+export function hasLocalBinding(
+	sourceFile: ts.SourceFile,
+	name: string,
+	skipSpecifier: string,
+	skipImportedName?: string
+): boolean {
+	return (
+		findLocalBinding(sourceFile, name, skipSpecifier, skipImportedName) !== null
+	);
 }
 
 /**
@@ -157,11 +188,13 @@ export function checkBindingConflicts(
 			if (!exportNames.has(binding.name)) {
 				continue;
 			}
-			if (hasLocalBinding(sourceFile, binding.name, specifier)) {
+			const bindingPos = findLocalBinding(sourceFile, binding.name, specifier);
+			if (bindingPos) {
 				conflicts.push({
 					file: sourceFile.fileName,
 					name: binding.name,
-					line: 0,
+					line: bindingPos.line,
+					column: bindingPos.column,
 				});
 				break;
 			}
@@ -206,18 +239,18 @@ export function checkAllConflicts(
 				if (binding.alias || !nameSet.has(binding.name)) {
 					continue;
 				}
-				if (
-					hasLocalBinding(
-						sourceFile,
-						binding.name,
-						"",
-						options.skipImportedName
-					)
-				) {
+				const bindingPos = findLocalBinding(
+					sourceFile,
+					binding.name,
+					"",
+					options.skipImportedName
+				);
+				if (bindingPos) {
 					allConflicts.push({
 						file: sourceFile.fileName,
 						name: binding.name,
-						line: 0,
+						line: bindingPos.line,
+						column: bindingPos.column,
 					});
 					break;
 				}

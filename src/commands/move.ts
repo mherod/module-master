@@ -396,7 +396,7 @@ export async function moveModule(
 				updatedReferences: [],
 				errors: conflictResult.conflicts.map((c) => ({
 					file: c.file,
-					message: `Conflict: "${c.name}" already exists${c.line ? ` at line ${c.line}` : ""}`,
+					message: `Conflict: "${c.name}" already exists${c.line ? ` at ${c.line}:${c.column}` : ""}`,
 					recoverable: false,
 				})),
 			};

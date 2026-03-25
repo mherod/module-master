@@ -227,7 +227,7 @@ export async function renameSymbol(
 			updatedReferences: [],
 			errors: conflictResult.conflicts.map((c) => ({
 				file: c.file,
-				message: `"${c.name}" already exists${c.line ? ` at line ${c.line}` : ""} — rename would cause a conflict`,
+				message: `"${c.name}" already exists${c.line ? ` at ${c.line}:${c.column}` : ""} — rename would cause a conflict`,
 			})),
 		};
 	}
