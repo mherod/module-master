@@ -689,16 +689,19 @@ function updateImportReferences(
 
 					if (importedName === oldName) {
 						if (element.propertyName) {
+							// import { oldName as alias } → import { newName as alias }
 							changes.push({
 								start: element.propertyName.getStart(sourceFile),
 								end: element.propertyName.getEnd(),
 								newText: newName,
 							});
 						} else {
+							// import { oldName } → import { newName as oldName }
+							// Preserves the local binding name so usage sites don't break
 							changes.push({
 								start: element.name.getStart(sourceFile),
 								end: element.name.getEnd(),
-								newText: newName,
+								newText: `${newName} as ${oldName}`,
 							});
 						}
 
@@ -750,16 +753,19 @@ function updateImportReferences(
 
 					if (importedName === oldName) {
 						if (element.propertyName) {
+							// export { oldName as alias } → export { newName as alias }
 							changes.push({
 								start: element.propertyName.getStart(sourceFile),
 								end: element.propertyName.getEnd(),
 								newText: newName,
 							});
 						} else {
+							// export { oldName } → export { newName as oldName }
+							// Preserves the public export name for downstream consumers
 							changes.push({
 								start: element.name.getStart(sourceFile),
 								end: element.name.getEnd(),
-								newText: newName,
+								newText: `${newName} as ${oldName}`,
 							});
 						}
 
