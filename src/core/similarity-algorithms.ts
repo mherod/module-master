@@ -115,6 +115,16 @@ export function extractContentTokens(bodyText: string): string[] {
 		tokens.push(m[0]);
 	}
 
+	// Extract camelCase identifiers in call positions (followed by `(`).
+	// These are function/method call targets that carry semantic meaning —
+	// e.g. `runBashHook(...)` vs `runFileEditHook(...)` should produce
+	// different content tokens even though normalization replaces both with $I.
+	for (const m of s.matchAll(/\b([a-z][a-zA-Z0-9_$]*)\s*\(/g)) {
+		if (m[1] && !JS_KEYWORDS.has(m[1])) {
+			tokens.push(m[1]);
+		}
+	}
+
 	return tokens;
 }
 

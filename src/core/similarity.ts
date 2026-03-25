@@ -412,10 +412,10 @@ export function findSimilarGroups(
 			let score: number;
 			if (fnI.normalizedBody === fnJ.normalizedBody) {
 				// Exact structural match — blend with content token similarity to detect
-				// semantic false positives. Functions with identical structure but different
-				// uppercase identifiers or string literals (e.g. KEBAB_CASE_REGEX vs
-				// HOOK_NAMING_REGEX, or ["md5",...] vs ["query",...]) score < 1.0 and may
-				// fall below the threshold, filtering structural coincidences.
+				// semantic false positives. Content tokens now include uppercase
+				// identifiers, string literals, AND camelCase function call targets,
+				// so wrappers calling different functions (e.g. runBashHook vs
+				// runFileEditHook) produce different content tokens and score < 1.0.
 				const contentSim = jaccardSimilarity(
 					fnI.contentTokens,
 					fnJ.contentTokens

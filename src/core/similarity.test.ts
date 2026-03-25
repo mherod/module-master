@@ -42,13 +42,14 @@ describe("extractContentTokens", () => {
 		expect(tokens).toContain("useState");
 	});
 
-	test("does not include lowercase identifiers", () => {
+	test("does not include lowercase non-call identifiers", () => {
 		const tokens = extractContentTokens(
 			"{ const result = source.fetch(url); return result; }"
 		);
 		expect(tokens).not.toContain("result");
 		expect(tokens).not.toContain("source");
-		expect(tokens).not.toContain("fetch");
+		// fetch is followed by ( — captured as a call-position identifier
+		expect(tokens).toContain("fetch");
 	});
 
 	test("returns empty for bodies with no uppercase ids or string literals", () => {
