@@ -354,47 +354,61 @@ function findFunctionNode(
 	functionName: string,
 	targetLine: number
 ): FunctionNode | null {
+	function buildNode(
+		stmt:
+			| ts.FunctionDeclaration
+			| ts.VariableStatement
+			| ts.TypeAliasDeclaration
+			| ts.InterfaceDeclaration,
+		kind: "function" | "type" | "interface"
+	): FunctionNode {
+		const end = stmt.getEnd();
+		const afterEnd = sourceFile.text.charCodeAt(end);
+		const actualEnd = afterEnd === 59 /* ; */ ? end + 1 : end;
+		const fullStart = stmt.getFullStart();
+		const actualStart = stmt.getStart(sourceFile);
+		const text = sourceFile.text.slice(fullStart, actualEnd);
+		const exported =
+			stmt.modifiers?.some(
+				(m: ts.ModifierLike) => m.kind === ts.SyntaxKind.ExportKeyword
+			) ?? false;
+		const capturedModuleRefs =
+			kind === "function" &&
+			(ts.isFunctionDeclaration(stmt) || ts.isVariableStatement(stmt))
+				? computeModuleRefs(stmt, sourceFile, functionName)
+				: [];
+		return {
+			info: {
+				file: filePath,
+				name: functionName,
+				kind,
+				line: targetLine,
+				column: 0,
+				normalizedBody: "",
+				tokenCount: 0,
+				bodyLength: 0,
+				bodyLines: 0,
+				hasDirective: false,
+				contentTokens: [],
+				isWrapper: false,
+				isTypeGuard: false,
+			},
+			start: fullStart,
+			actualStart,
+			end: actualEnd,
+			text,
+			exported,
+			capturedModuleRefs,
+		};
+	}
+
 	for (const stmt of sourceFile.statements) {
 		if (ts.isFunctionDeclaration(stmt) && stmt.name?.text === functionName) {
 			const { line } = sourceFile.getLineAndCharacterOfPosition(
 				stmt.getStart(sourceFile)
 			);
 			if (line + 1 === targetLine) {
-				const end = stmt.getEnd();
-				const fullStart = stmt.getFullStart();
-				const actualStart = stmt.getStart(sourceFile);
-				const text = sourceFile.text.slice(fullStart, end);
-				const exported =
-					stmt.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword) ??
-					false;
-				const capturedModuleRefs = computeModuleRefs(
-					stmt,
-					sourceFile,
-					functionName
-				);
-				return {
-					info: {
-						file: filePath,
-						name: functionName,
-						kind: "function" as const,
-						line: targetLine,
-						column: 0,
-						normalizedBody: "",
-						tokenCount: 0,
-						bodyLength: 0,
-						bodyLines: 0,
-						hasDirective: false,
-						contentTokens: [],
-						isWrapper: false,
-						isTypeGuard: false,
-					},
-					start: fullStart,
-					actualStart,
-					end,
-					text,
-					exported,
-					capturedModuleRefs,
-				};
+				return buildNode(stmt, "function");
 			}
 		} else if (ts.isVariableStatement(stmt)) {
 			for (const decl of stmt.declarationList.declarations) {
@@ -405,46 +419,28 @@ function findFunctionNode(
 					stmt.getStart(sourceFile)
 				);
 				if (line + 1 === targetLine) {
-					const end = stmt.getEnd();
-					// Include semicolon if present
-					const afterEnd = sourceFile.text.charCodeAt(end);
-					const actualEnd = afterEnd === 59 /* ; */ ? end + 1 : end;
-					const fullStart = stmt.getFullStart();
-					const actualStart = stmt.getStart(sourceFile);
-					const text = sourceFile.text.slice(fullStart, actualEnd);
-					const exported =
-						stmt.modifiers?.some(
-							(m) => m.kind === ts.SyntaxKind.ExportKeyword
-						) ?? false;
-					const capturedModuleRefs = computeModuleRefs(
-						stmt,
-						sourceFile,
-						functionName
-					);
-					return {
-						info: {
-							file: filePath,
-							name: functionName,
-							kind: "function" as const,
-							line: targetLine,
-							column: 0,
-							normalizedBody: "",
-							tokenCount: 0,
-							bodyLength: 0,
-							bodyLines: 0,
-							hasDirective: false,
-							contentTokens: [],
-							isWrapper: false,
-							isTypeGuard: false,
-						},
-						start: fullStart,
-						actualStart,
-						end: actualEnd,
-						text,
-						exported,
-						capturedModuleRefs,
-					};
+					return buildNode(stmt, "function");
 				}
+			}
+		} else if (
+			ts.isTypeAliasDeclaration(stmt) &&
+			stmt.name.text === functionName
+		) {
+			const { line } = sourceFile.getLineAndCharacterOfPosition(
+				stmt.getStart(sourceFile)
+			);
+			if (line + 1 === targetLine) {
+				return buildNode(stmt, "type");
+			}
+		} else if (
+			ts.isInterfaceDeclaration(stmt) &&
+			stmt.name.text === functionName
+		) {
+			const { line } = sourceFile.getLineAndCharacterOfPosition(
+				stmt.getStart(sourceFile)
+			);
+			if (line + 1 === targetLine) {
+				return buildNode(stmt, "interface");
 			}
 		}
 	}
@@ -561,9 +557,12 @@ function buildImportStatement(
 		dupName === canonicalName
 			? canonicalName
 			: `${canonicalName} as ${dupName}`;
+	// Use `import type` / `export type` for type aliases and interfaces
+	const isType = dup.info.kind === "type" || dup.info.kind === "interface";
+	const typePrefix = isType ? "type " : "";
 	return dup.exported
-		? `export { ${importedName} } from "${specifier}";`
-		: `import { ${importedName} } from "${specifier}";`;
+		? `export ${typePrefix}{ ${importedName} } from "${specifier}";`
+		: `import ${typePrefix}{ ${importedName} } from "${specifier}";`;
 }
 
 /**
