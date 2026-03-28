@@ -7,26 +7,52 @@
     "resect": "./bin/resect.js"
   },
   "exports": {
-    ".": "./src/index.ts",
-    "./bun": "./src/runtime/bun.ts",
-    "./node": "./src/runtime/node.ts",
-    "./runtime": "./src/runtime/index.ts"
+    ".": {
+      "bun": "./src/index.ts",
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "./bun": {
+      "bun": "./src/runtime/bun.ts",
+      "import": {
+        "types": "./dist/runtime/bun.d.ts",
+        "default": "./dist/runtime/bun.js"
+      }
+    },
+    "./node": {
+      "bun": "./src/runtime/node.ts",
+      "import": {
+        "types": "./dist/runtime/node.d.ts",
+        "default": "./dist/runtime/node.js"
+      }
+    },
+    "./runtime": {
+      "bun": "./src/runtime/index.ts",
+      "import": {
+        "types": "./dist/runtime/index.d.ts",
+        "default": "./dist/runtime/index.js"
+      }
+    }
   },
   "files": [
     "bin",
     "src",
+    "dist",
     "README.md",
     "LICENSE",
     "NOTICE"
   ],
   "scripts": {
     "dev": "bun run src/cli.ts",
-    "build": "bun build src/cli.ts --compile --outfile dist/resect",
+    "build": "bun build src/cli.ts --compile --outfile bin/resect-bin",
+    "build:lib": "tsc -p tsconfig.build.json && bun build src/index.ts src/runtime/bun.ts src/runtime/node.ts src/runtime/index.ts --outdir dist --target bun --format esm --external typescript --splitting",
     "test": "bun test",
     "lint": "pnpm exec biome check --write . && pnpm run lint:eslint",
     "lint:eslint": "eslint src --max-warnings 0",
     "typecheck": "pnpm exec tsc --noEmit",
-    "prepublishOnly": "pnpm run typecheck && pnpm run lint && pnpm test",
+    "prepublishOnly": "pnpm run typecheck && pnpm run lint && pnpm test && pnpm run build:lib",
     "git:unlock": "rm -f .git/index.lock",
     "check": "ultracite check",
     "fix": "ultracite fix",
