@@ -115,10 +115,10 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 		}
 
 		if (dryRun) {
-			printResults(result, dryRun, verbose);
+			printResults(result, dryRun, verbose, wsInfo.root);
 		} else {
 			await applyChanges(result.changes);
-			printResults(result, dryRun, verbose);
+			printResults(result, dryRun, verbose, wsInfo.root);
 		}
 		return;
 	}
@@ -151,7 +151,7 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 
 	// Apply changes with optional verification
 	if (dryRun) {
-		printResults(result, dryRun, verbose);
+		printResults(result, dryRun, verbose, project.rootDir);
 	} else if (verify) {
 		const verifyResult = await verifyTypeChecking(
 			project,
@@ -161,7 +161,7 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 			async () => applyChanges(result.changes)
 		);
 
-		printResults(result, dryRun, verbose);
+		printResults(result, dryRun, verbose, project.rootDir);
 		logger.empty();
 		printVerificationResults(verifyResult);
 
@@ -173,7 +173,7 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 		}
 	} else {
 		await applyChanges(result.changes);
-		printResults(result, dryRun, verbose);
+		printResults(result, dryRun, verbose, project.rootDir);
 	}
 }
 
@@ -255,7 +255,7 @@ function normalizeImports(
 			`⚠️  Skipped ${skipped.length} import(s) to avoid binding conflicts:`
 		);
 		for (const change of skipped) {
-			const relativePath = path.relative(process.cwd(), change.file);
+			const relativePath = path.relative(project.rootDir, change.file);
 			logger.info(
 				`   ${relativePath}:${change.line}: "${change.oldSpecifier}" → "${change.newSpecifier}" would duplicate a binding`
 			);
@@ -391,8 +391,10 @@ function calculatePreferredSpecifier(
 function printResults(
 	result: AliasResult,
 	dryRun: boolean,
-	verbose: boolean
+	verbose: boolean,
+	projectRoot?: string
 ): void {
+	const pathBase = projectRoot ?? process.cwd();
 	logger.info(
 		`${dryRun ? "📋 Would update" : "✅ Updated"} ${result.importsUpdated} import(s) in ${result.filesProcessed} file(s)\n`
 	);
@@ -407,7 +409,7 @@ function printResults(
 		}
 
 		for (const [file, changes] of byFile) {
-			const relativePath = path.relative(process.cwd(), file);
+			const relativePath = path.relative(pathBase, file);
 			logger.info(`📄 ${relativePath}`);
 			for (const change of changes) {
 				logger.info(`   Line ${change.line}:`);
