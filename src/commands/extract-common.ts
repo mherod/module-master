@@ -483,7 +483,9 @@ function pickCanonical(nodes: FunctionNode[]): {
  * are excluded: moving them would silently bind the extracted function to the
  * wrong module-level state (Bug 5).
  */
-function planExtractions(groups: SimilarityGroup[]): ExtractionPlan[] {
+async function planExtractions(
+	groups: SimilarityGroup[]
+): Promise<ExtractionPlan[]> {
 	const plans: ExtractionPlan[] = [];
 
 	for (const group of groups) {
@@ -500,6 +502,14 @@ function planExtractions(groups: SimilarityGroup[]): ExtractionPlan[] {
 		const { canonical, duplicates } = pickCanonical(nodes);
 		const canonicalRefs = canonical.capturedModuleRefs.join(",");
 
+		// Pre-read canonical file content for cycle detection
+		let canonicalContent = "";
+		try {
+			canonicalContent = await Bun.file(canonical.info.file).text();
+		} catch {
+			// If unreadable, skip cycle check
+		}
+
 		const safeDuplicates = duplicates.filter((dup) => {
 			// Same-file, different-name declarations are intentional aliases
 			// (e.g. type FlushCallbacks = (s: Store) => void and
@@ -508,6 +518,22 @@ function planExtractions(groups: SimilarityGroup[]): ExtractionPlan[] {
 				dup.info.file === canonical.info.file &&
 				dup.info.name !== canonical.info.name
 			) {
+				return false;
+			}
+			// For value (non-type) extractions, skip if it would create a
+			// runtime circular dependency: the canonical file already imports
+			// from the duplicate's file, and we'd add the reverse import.
+			const isType = dup.info.kind === "type" || dup.info.kind === "interface";
+			if (
+				!isType &&
+				dup.info.file !== canonical.info.file &&
+				wouldCreateCycle(canonicalContent, canonical.info.file, dup.info.file)
+			) {
+				const dupFile = path.basename(dup.info.file);
+				const canonFile = path.basename(canonical.info.file);
+				logger.warn(
+					`⚠️  Skipping ${dup.info.name} in ${dupFile}: would create circular import with ${canonFile}`
+				);
 				return false;
 			}
 			const dupRefs = dup.capturedModuleRefs.join(",");
@@ -532,6 +558,36 @@ function planExtractions(groups: SimilarityGroup[]): ExtractionPlan[] {
 	}
 
 	return plans;
+}
+
+/**
+ * Check if the canonical file's content contains an import that resolves
+ * to the duplicate's file, meaning adding a reverse import would create
+ * a runtime circular dependency.
+ */
+function wouldCreateCycle(
+	canonicalContent: string,
+	canonicalFile: string,
+	dupFile: string
+): boolean {
+	const canonDir = path.dirname(canonicalFile);
+	const dupNoExt = dupFile.replace(/\.[^.]+$/, "");
+
+	const importMatches = canonicalContent.matchAll(
+		/(?:import|from)\s+['"]([^'"]+)['"]/g
+	);
+	for (const m of importMatches) {
+		const spec = m[1];
+		if (!spec?.startsWith(".")) {
+			continue;
+		}
+		const resolved = path.resolve(canonDir, spec);
+		const resolvedNoExt = resolved.replace(/\.[^.]+$/, "");
+		if (resolvedNoExt === dupNoExt || resolved === dupFile) {
+			return true;
+		}
+	}
+	return false;
 }
 
 /**
@@ -825,7 +881,7 @@ export async function extractCommonCommand(
 	}
 
 	// Step 3: Build extraction plans
-	const plans = planExtractions(groups);
+	const plans = await planExtractions(groups);
 
 	if (plans.length === 0) {
 		if (json) {

@@ -37,6 +37,13 @@ All notable user-facing changes to this project are documented here.
   the existing file's quote style (single vs double) and extension
   usage (`.ts` vs extensionless).
 
+- **`extract-common` skips value extractions that would create circular
+  imports**: When extracting a duplicate function would introduce a
+  runtime circular dependency (the canonical file already imports from
+  the duplicate's file), the extraction is skipped with a warning.
+  Type-only extractions are unaffected since `import type` is erased
+  at compile time.
+
 ## [1.5.0] - 2026-03-28
 
 ### New Features
