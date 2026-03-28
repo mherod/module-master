@@ -5,29 +5,147 @@
  * calling any command that touches the filesystem.
  */
 
-export type { MoveOptions } from "./commands/move.ts";
-// Commands
-export { moveCommand, moveModule } from "./commands/move.ts";
+// ── Commands: alias ─────────────────────────────────────────────────
 export type {
-	RenameOptions,
-	RenameResult,
-} from "./commands/rename.ts";
+	AliasChange,
+	AliasOptions,
+	AliasResult,
+} from "./commands/alias.ts";
+export { aliasCommand } from "./commands/alias.ts";
+// ── Commands: analyze ───────────────────────────────────────────────
+export type { AnalyzeOptions } from "./commands/analyze.ts";
+export { analyze, analyzeCommand } from "./commands/analyze.ts";
+// ── Commands: audit ─────────────────────────────────────────────────
+export type {
+	AuditOptions,
+	AuditReport,
+	Cycle,
+	FileMetrics,
+} from "./commands/audit.ts";
+export {
+	auditCommand,
+	buildAuditReport,
+	computeMetrics,
+	detectCycles,
+} from "./commands/audit.ts";
+// ── Commands: discover ──────────────────────────────────────────────
+export type { DiscoverOptions } from "./commands/discover.ts";
+export { discoverCommand } from "./commands/discover.ts";
+// ── Commands: extract-common ────────────────────────────────────────
+export type { ExtractCommonOptions } from "./commands/extract-common.ts";
+export { extractCommonCommand } from "./commands/extract-common.ts";
+// ── Commands: find ──────────────────────────────────────────────────
+export type {
+	ExportMatch,
+	FileMatch,
+	FindOptions,
+	FindResult,
+} from "./commands/find.ts";
+export { findCommand, search } from "./commands/find.ts";
+// ── Commands: move ──────────────────────────────────────────────────
+export type { MoveOptions } from "./commands/move.ts";
+export { moveCommand, moveModule } from "./commands/move.ts";
+// ── Commands: rename ────────────────────────────────────────────────
+export type { RenameOptions, RenameResult } from "./commands/rename.ts";
 export {
 	renameCommand,
 	renameInSourceFile,
 	renameSymbol,
 } from "./commands/rename.ts";
-export { buildDependencyGraph } from "./core/graph.ts";
-// Core utilities
-export { loadProject, resolveTsConfig } from "./core/project.ts";
+// ── Commands: similar ───────────────────────────────────────────────
+export type { SimilarOptions } from "./commands/similar.ts";
+export { similarCommand } from "./commands/similar.ts";
+// ── Commands: workspace ─────────────────────────────────────────────
+export type { WorkspaceOptions } from "./commands/workspace.ts";
+export { workspaceCommand } from "./commands/workspace.ts";
+export type { DependencyGraph } from "./core/graph.ts";
+export {
+	buildDependencyGraph,
+	findAllReferences,
+	findBarrelReExports,
+	getImports,
+	isBarrelFile,
+} from "./core/graph.ts";
+// ── Core: project & graph ───────────────────────────────────────────
+export {
+	createProgram,
+	getProjectFiles,
+	loadProject,
+	resolveTsConfig,
+} from "./core/project.ts";
+// ── Core: resolver ──────────────────────────────────────────────────
+export {
+	calculateNewSpecifier,
+	calculateRelativeSpecifier,
+	findAliasForPath,
+	findCrossPackageImport,
+	findPackageForPath,
+	isBareImport,
+	isCrossPackageMove,
+	isRelativeImport,
+	normalizePath,
+	resolveModuleSpecifier,
+} from "./core/resolver.ts";
+// ── Core: scanner ───────────────────────────────────────────────────
+export {
+	scanBarrelExports,
+	scanExports,
+	scanModuleReferences,
+} from "./core/scanner.ts";
+// ── Core: similarity ────────────────────────────────────────────────
+export type {
+	AnalyzeSimilarityOptions,
+	SimilarityDiscoveryOptions,
+	SimilarityFilterOptions,
+} from "./core/similarity.ts";
+export { analyzeSimilarity } from "./core/similarity.ts";
+// ── Core: tsconfig discovery ────────────────────────────────────────
+export type {
+	ProjectDiscovery,
+	TsConfigInfo,
+} from "./core/tsconfig-discovery.ts";
+export {
+	discoverProject,
+	findOwningConfig,
+} from "./core/tsconfig-discovery.ts";
+// ── Core: verification ──────────────────────────────────────────────
+export {
+	canTypeCheck,
+	runTypeCheck,
+	verifyTypeChecking,
+} from "./core/verify.ts";
+// ── Core: workspace ─────────────────────────────────────────────────
 export type { WorkspaceInfo, WorkspacePackage } from "./core/workspace.ts";
 export { discoverWorkspace } from "./core/workspace.ts";
+// ── Runtime abstraction ─────────────────────────────────────────────
 export type { FileSystem, GlobRunner, Runtime } from "./runtime/index.ts";
-// Runtime abstraction
 export {
 	bunRuntime,
 	getRuntime,
 	nodeRuntime,
 	setRuntime,
 } from "./runtime/index.ts";
-export type { ProjectConfig } from "./types.ts";
+export type { AnalysisResult, ExportInfo } from "./types/analysis.ts";
+export type { MutatingCommandOptions } from "./types/commands.ts";
+export type {
+	BarrelExport,
+	BarrelExportEntry,
+	ImportBinding,
+	ModuleReference,
+	ReferenceType,
+} from "./types/graph.ts";
+export type {
+	MoveError,
+	MoveOperation,
+	MoveResult,
+	UpdatedReference,
+} from "./types/move.ts";
+export type {
+	DeclarationKind,
+	FunctionInfo,
+	SimilarityBucket,
+	SimilarityGroup,
+	SimilarityReport,
+} from "./types/similar.ts";
+// ── Core types ──────────────────────────────────────────────────────
+export type { ProjectConfig, ProjectReference } from "./types.ts";

@@ -128,7 +128,7 @@ export async function findCommand(options: FindOptions): Promise<void> {
 	printResults(result, absoluteProject, verbose);
 }
 
-function search(
+export function search(
 	query: string,
 	fileOwnership: Map<string, unknown>,
 	baseDir: string,
