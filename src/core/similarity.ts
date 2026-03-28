@@ -519,12 +519,11 @@ export function findSimilarGroups(
 				score *= 0.85;
 			}
 
-			// Penalise small cross-file interface pairs with low member name overlap.
+			// Penalise small interface pairs with low member name overlap.
 			// Interfaces with ≤5 members that share generic field names (file, line,
 			// name, etc.) produce inflated Jaccard scores from coincidental shape.
 			// Blend in the member name similarity to reduce these false positives.
 			if (
-				fnI.file !== fnJ.file &&
 				fnI.kind === "interface" &&
 				fnJ.kind === "interface" &&
 				fnI.memberNames.length > 0 &&
