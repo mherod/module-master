@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
 import {
 	analyzeSimilarity,
 	collectFunctions,
@@ -1597,5 +1598,44 @@ interface FetchOptions {
 			threshold: 0.7,
 		});
 		expect(groups.length).toBeGreaterThanOrEqual(1);
+	});
+});
+
+describe("e2e: analyzeSimilarity on project src", () => {
+	test("no group contains interfaces that both extend base types", async () => {
+		const projectSrc = path.resolve(import.meta.dir, "..");
+		const report = await analyzeSimilarity({
+			directory: projectSrc,
+			threshold: 0.8,
+			kinds: ["interface"],
+		});
+		for (const group of report.groups) {
+			const withExtends = group.functions.filter(
+				(f) => f.extendsNames.length > 0
+			);
+			// At most one interface in a group may have extends — if two or more
+			// both extend base types, the heritage filter should have excluded them
+			expect(withExtends.length).toBeLessThanOrEqual(1);
+		}
+	});
+
+	test("no group contains composed interface pairs", async () => {
+		const projectSrc = path.resolve(import.meta.dir, "..");
+		const report = await analyzeSimilarity({
+			directory: projectSrc,
+			threshold: 0.8,
+			kinds: ["interface"],
+		});
+		for (const group of report.groups) {
+			const names = new Set(group.functions.map((f) => f.name));
+			for (const fn of group.functions) {
+				// No function's memberNames should reference another group member by name
+				for (const memberName of fn.memberNames) {
+					if (memberName !== fn.name) {
+						expect(names.has(memberName)).toBe(false);
+					}
+				}
+			}
+		}
 	});
 });
