@@ -168,6 +168,41 @@ describe("calculateRelativeSpecifier", () => {
 		);
 		expect(result).toBe(".");
 	});
+
+	test("preserves .ts extension when old specifier had .ts", () => {
+		const result = calculateRelativeSpecifier(
+			"/project/src/a.ts",
+			"/project/src/b.ts",
+			"./old.ts"
+		);
+		expect(result).toBe("./b.ts");
+	});
+
+	test("strips extension when old specifier had no extension", () => {
+		const result = calculateRelativeSpecifier(
+			"/project/src/a.ts",
+			"/project/src/b.ts",
+			"./old"
+		);
+		expect(result).toBe("./b");
+	});
+
+	test("strips extension when no old specifier provided", () => {
+		const result = calculateRelativeSpecifier(
+			"/project/src/a.ts",
+			"/project/src/b.ts"
+		);
+		expect(result).toBe("./b");
+	});
+
+	test("preserves .tsx extension when old specifier had .tsx", () => {
+		const result = calculateRelativeSpecifier(
+			"/project/src/a.tsx",
+			"/project/src/b.tsx",
+			"../components/old.tsx"
+		);
+		expect(result).toBe("./b.tsx");
+	});
 });
 
 // ─── matchPathAlias ────────────────────────────────────────────────────────
