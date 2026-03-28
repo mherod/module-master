@@ -712,4 +712,60 @@ export function otherHelper(): number {
 
 		await rm(dir, { recursive: true, force: true });
 	});
+
+	test("skips value extraction that would create circular import", async () => {
+		const dir = nextFixtureDir();
+		await Bun.write(
+			path.join(dir, "tsconfig.json"),
+			JSON.stringify({
+				compilerOptions: { target: "ES2020", module: "ESNext", strict: true },
+				include: ["*.ts"],
+			})
+		);
+		// a.ts imports from b.ts — extracting a duplicate from b→a would create a cycle
+		await Bun.write(
+			path.join(dir, "a.ts"),
+			`import { helperB } from "./b";
+
+export function formatDate(input: Date): string {
+  const iso = input.toISOString();
+  const parts = iso.split("T");
+  return parts[0] ?? "";
+}
+
+export function useHelper(): string {
+  return helperB();
+}
+`
+		);
+		await Bun.write(
+			path.join(dir, "b.ts"),
+			`export function helperB(): string {
+  return "hello";
+}
+
+function formatDate(input: Date): string {
+  const iso = input.toISOString();
+  const parts = iso.split("T");
+  return parts[0] ?? "";
+}
+`
+		);
+
+		await extractCommonCommand({
+			directory: dir,
+			threshold: 0.95,
+			force: true,
+			dryRun: false,
+		});
+
+		const bContent = await Bun.file(path.join(dir, "b.ts")).text();
+
+		// formatDate should NOT be removed from b.ts — extracting it would
+		// require b.ts to import from a.ts, creating a circular dependency
+		// since a.ts already imports from b.ts.
+		expect(bContent).toContain("function formatDate");
+
+		await rm(dir, { recursive: true, force: true });
+	});
 });
