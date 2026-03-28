@@ -119,7 +119,44 @@ describe("generateBarrelExport", () => {
 			"/repo/packages/a/src/components/Thing.vue",
 			barrelPath
 		);
-		expect(exportStatement).toBe('export * from "./components/Thing";\n');
+		// Empty barrel defaults to single quotes
+		expect(exportStatement).toBe("export * from './components/Thing';\n");
+	});
+
+	test("matches existing double-quote style", () => {
+		const barrelPath = "/repo/packages/a/src/index.ts";
+		const barrelContent = 'export * from "./existing";\n';
+
+		const { exportStatement } = generateBarrelExport(
+			barrelContent,
+			"/repo/packages/a/src/foo.ts",
+			barrelPath
+		);
+		expect(exportStatement).toBe('export * from "./foo";\n');
+	});
+
+	test("matches existing single-quote style", () => {
+		const barrelPath = "/repo/packages/a/src/index.ts";
+		const barrelContent = "export * from './existing';\n";
+
+		const { exportStatement } = generateBarrelExport(
+			barrelContent,
+			"/repo/packages/a/src/bar.ts",
+			barrelPath
+		);
+		expect(exportStatement).toBe("export * from './bar';\n");
+	});
+
+	test("preserves extension when existing barrel uses extensions", () => {
+		const barrelPath = "/repo/packages/a/src/index.ts";
+		const barrelContent = "export * from './existing.ts';\n";
+
+		const { exportStatement } = generateBarrelExport(
+			barrelContent,
+			"/repo/packages/a/src/foo.ts",
+			barrelPath
+		);
+		expect(exportStatement).toBe("export * from './foo.ts';\n");
 	});
 });
 

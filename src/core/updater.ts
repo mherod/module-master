@@ -5,7 +5,7 @@ import type { ExportInfo } from "../types/analysis.ts";
 import type { ImportBinding, ModuleReference } from "../types/graph.ts";
 import type { UpdatedReference } from "../types/move.ts";
 import type { ProjectConfig } from "../types.ts";
-import { removeExtension } from "./constants.ts";
+import { removeExtension, TS_JS_VUE_EXTENSIONS } from "./constants.ts";
 import {
 	calculateNewSpecifier,
 	findCrossPackageImport,
@@ -672,13 +672,25 @@ export function generateBarrelExport(
 	// Calculate relative path from barrel to target
 	const barrelDir = path.dirname(barrelPath);
 	let relativePath = path.relative(barrelDir, targetPath);
-	relativePath = removeExtension(relativePath);
+
+	// Detect existing barrel style: quote character and extension usage
+	const quoteMatch = barrelContent.match(/from\s+(['"])/);
+	const quote = quoteMatch?.[1] ?? "'";
+	const specifierMatches = [
+		...barrelContent.matchAll(/from\s+['"]([^'"]+)['"]/g),
+	];
+	const usesExtensions = specifierMatches.some(
+		(m) => m[1] && TS_JS_VUE_EXTENSIONS.test(m[1])
+	);
+
+	if (!usesExtensions) {
+		relativePath = removeExtension(relativePath);
+	}
 	if (!relativePath.startsWith(".")) {
 		relativePath = `./${relativePath}`;
 	}
 
-	// Use star export as default style
-	const exportStatement = `export * from "${relativePath}";\n`;
+	const exportStatement = `export * from ${quote}${relativePath}${quote};\n`;
 
 	// Find insertion position - after the last export statement
 	const lines = barrelContent.split("\n");
@@ -723,8 +735,11 @@ export function addExportToDestinationBarrel(
 	);
 
 	// Check if this export already exists
-	const relativePath = exportStatement.match(/"([^"]+)"/)?.[1];
-	if (relativePath && barrelContent.includes(`from "${relativePath}"`)) {
+	const relativePath = exportStatement.match(/['"]([^'"]+)['"]/)?.[1];
+	if (
+		(relativePath && barrelContent.includes(`from '${relativePath}'`)) ||
+		(relativePath && barrelContent.includes(`from "${relativePath}"`))
+	) {
 		// Export already exists, no change needed
 		return {
 			newContent: barrelContent,

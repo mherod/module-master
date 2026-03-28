@@ -32,6 +32,11 @@ All notable user-facing changes to this project are documented here.
   when analyzing projects outside the working directory. Paths are now
   relative to the tsconfig project root.
 
+- **Barrel insertion now preserves quote style and extension conventions**:
+  When `move` adds `export *` to a destination barrel, it now matches
+  the existing file's quote style (single vs double) and extension
+  usage (`.ts` vs extensionless).
+
 ## [1.5.0] - 2026-03-28
 
 ### New Features
