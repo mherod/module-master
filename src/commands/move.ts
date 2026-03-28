@@ -525,7 +525,7 @@ export async function moveModule(
 	}
 
 	// For cross-package moves, add export to destination barrel
-	if (workspace) {
+	if (workspace && crossPackage) {
 		const destBarrelPath = findDestinationBarrel(targetPath, workspace);
 		if (destBarrelPath) {
 			try {

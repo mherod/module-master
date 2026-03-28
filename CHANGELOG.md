@@ -2,6 +2,16 @@
 
 All notable user-facing changes to this project are documented here.
 
+## [Unreleased]
+
+### Bug Fixes
+
+- **`move` no longer adds spurious barrel re-exports for same-package
+  moves**: When moving a file within the same package in a workspace
+  project, the destination barrel (`index.ts`) was incorrectly receiving
+  a new `export *` line even though the source was never re-exported
+  from it. This changed the package's public API surface unintentionally.
+
 ## [1.5.0] - 2026-03-28
 
 ### New Features
