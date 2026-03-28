@@ -26,6 +26,12 @@ All notable user-facing changes to this project are documented here.
   intentional aliases and left untouched. Previously they were merged,
   breaking export statements that referenced the removed alias.
 
+- **File paths in command output are now relative to the project root**:
+  `analyze`, `move`, and `rename` output previously used `process.cwd()`
+  as the base for relative paths, producing long `../../../../` chains
+  when analyzing projects outside the working directory. Paths are now
+  relative to the tsconfig project root.
+
 ## [1.5.0] - 2026-03-28
 
 ### New Features

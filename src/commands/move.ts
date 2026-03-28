@@ -158,7 +158,7 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 		logger.info("\n✅ Type checking passed - no errors introduced");
 	}
 
-	printCommandResult(result, "move", "Moved", dryRun, verbose);
+	printCommandResult(result, "move", "Moved", dryRun, verbose, project.rootDir);
 
 	if (!result.success) {
 		process.exit(1);

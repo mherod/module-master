@@ -104,7 +104,14 @@ export async function renameCommand(options: RenameOptions): Promise<void> {
 		extraProjects
 	);
 
-	printCommandResult(result, "rename", "Renamed", dryRun, verbose);
+	printCommandResult(
+		result,
+		"rename",
+		"Renamed",
+		dryRun,
+		verbose,
+		project.rootDir
+	);
 
 	if (!result.success) {
 		process.exit(1);

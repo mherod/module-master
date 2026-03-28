@@ -98,7 +98,7 @@ export async function analyzeCommand(options: AnalyzeOptions): Promise<void> {
 		);
 	}
 
-	printAnalysis(result, verbose);
+	printAnalysis(result, project.rootDir, verbose);
 
 	const projectDiagnostics = collectUnresolvableDiagnostics(project);
 	if (projectDiagnostics.length > 0) {
@@ -158,7 +158,11 @@ export async function analyze(
 	};
 }
 
-function printAnalysis(result: AnalysisResult, verbose?: boolean): void {
+function printAnalysis(
+	result: AnalysisResult,
+	projectRoot: string,
+	verbose?: boolean
+): void {
 	const fileName = path.basename(result.file);
 
 	logger.info(`\n📄 ${fileName}`);
@@ -214,7 +218,7 @@ function printAnalysis(result: AnalysisResult, verbose?: boolean): void {
 		}
 
 		for (const [sourceFile, refs] of grouped) {
-			const relativePath = path.relative(process.cwd(), sourceFile);
+			const relativePath = path.relative(projectRoot, sourceFile);
 			logger.info(`   • ${relativePath}`);
 			if (verbose) {
 				for (const ref of refs) {
@@ -242,7 +246,7 @@ function printAnalysis(result: AnalysisResult, verbose?: boolean): void {
 	if (result.barrelExports.length > 0) {
 		logger.info("📦 Barrel file re-exports:");
 		for (const barrel of result.barrelExports) {
-			const relativePath = path.relative(process.cwd(), barrel.barrelPath);
+			const relativePath = path.relative(projectRoot, barrel.barrelPath);
 			logger.info(`   • ${relativePath}`);
 			if (verbose && barrel.exports.length > 0) {
 				for (const exp of barrel.exports) {

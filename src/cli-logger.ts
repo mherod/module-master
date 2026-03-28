@@ -124,8 +124,10 @@ export function printCommandResult(
 	verb: string,
 	pastVerb: string,
 	dryRun: boolean,
-	verbose: boolean
+	verbose: boolean,
+	projectRoot?: string
 ): void {
+	const pathBase = projectRoot ?? process.cwd();
 	if (result.success) {
 		logger.info(`✅ ${dryRun ? `Would ${verb}` : pastVerb} successfully!\n`);
 	} else {
@@ -145,7 +147,7 @@ export function printCommandResult(
 		}
 
 		for (const [file, refs] of byFile) {
-			const relativePath = path.relative(process.cwd(), file);
+			const relativePath = path.relative(pathBase, file);
 			logger.info(`   • ${relativePath}`);
 			if (verbose) {
 				for (const ref of refs) {
