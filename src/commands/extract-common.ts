@@ -501,6 +501,15 @@ function planExtractions(groups: SimilarityGroup[]): ExtractionPlan[] {
 		const canonicalRefs = canonical.capturedModuleRefs.join(",");
 
 		const safeDuplicates = duplicates.filter((dup) => {
+			// Same-file, different-name declarations are intentional aliases
+			// (e.g. type FlushCallbacks = (s: Store) => void and
+			//       type RecomputeInvalidatedAtoms = (s: Store) => void)
+			if (
+				dup.info.file === canonical.info.file &&
+				dup.info.name !== canonical.info.name
+			) {
+				return false;
+			}
 			const dupRefs = dup.capturedModuleRefs.join(",");
 			if (dupRefs === canonicalRefs) {
 				return true;

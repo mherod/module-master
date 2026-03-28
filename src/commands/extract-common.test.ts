@@ -205,10 +205,10 @@ export function otherUtil(): number {
 
 		const content = await Bun.file(path.join(dir, "utils.ts")).text();
 
-		// The exported canonical should still be present
+		// Same-file, different-name declarations are intentional aliases —
+		// both should remain untouched.
 		expect(content).toContain("export function formatDate");
-		// The duplicate should be removed
-		expect(content).not.toContain("function parseDate");
+		expect(content).toContain("function parseDate");
 		// No self-import from the same file
 		expect(content).not.toContain('from "./utils"');
 		// Other exports should be untouched

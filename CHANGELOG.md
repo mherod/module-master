@@ -19,6 +19,13 @@ All notable user-facing changes to this project are documented here.
   prevents `alias --prefer=shortest` from stripping `.ts` extensions in
   codebases that use `allowImportingTsExtensions`.
 
+- **`extract-common` no longer merges same-file intentional aliases**:
+  Structurally identical declarations with different names in the same
+  file (e.g. `type FlushCallbacks` and `type RecomputeInvalidatedAtoms`
+  both defined as `(store: Store) => void`) are now treated as
+  intentional aliases and left untouched. Previously they were merged,
+  breaking export statements that referenced the removed alias.
+
 ## [1.5.0] - 2026-03-28
 
 ### New Features
