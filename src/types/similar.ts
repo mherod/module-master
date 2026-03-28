@@ -27,6 +27,10 @@ export interface FunctionInfo {
 	isWrapper: boolean;
 	/** Whether the function is a type predicate (return type `value is SomeType`) */
 	isTypeGuard: boolean;
+	/** For interfaces: names from `extends` clauses (e.g. `["BaseOptions"]`) */
+	extendsNames: string[];
+	/** For interfaces/types: property and type-reference names used in the body */
+	memberNames: string[];
 }
 
 export type SimilarityBucket = "exact" | "high" | "medium";

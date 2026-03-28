@@ -80,7 +80,9 @@ function makeFunctionInfo(
 	tokens: string[],
 	hasDirective: boolean,
 	isWrapper: boolean,
-	isTypeGuard: boolean
+	isTypeGuard: boolean,
+	extendsNames: string[] = [],
+	memberNames: string[] = []
 ): FunctionInfo {
 	// For type/interface declarations, use all non-keyword identifiers (including
 	// camelCase property names) as content tokens. This prevents structurally
@@ -105,6 +107,8 @@ function makeFunctionInfo(
 		contentTokens,
 		isWrapper,
 		isTypeGuard,
+		extendsNames,
+		memberNames,
 	};
 }
 
@@ -223,6 +227,40 @@ export function collectFunctions(
 				const { line, character } = sourceFile.getLineAndCharacterOfPosition(
 					stmt.getStart(sourceFile)
 				);
+				// Extract extends clause names
+				const extendsNames: string[] = [];
+				if (heritageClauses) {
+					for (const clause of heritageClauses) {
+						for (const type of clause.types) {
+							if (ts.isIdentifier(type.expression)) {
+								extendsNames.push(type.expression.text);
+							}
+						}
+					}
+				}
+				// Extract member property names and type reference names
+				const memberNames: string[] = [];
+				for (const member of stmt.members) {
+					if (
+						ts.isPropertySignature(member) &&
+						member.name &&
+						ts.isIdentifier(member.name)
+					) {
+						memberNames.push(member.name.text);
+					}
+					// Capture type references used in member types (e.g. SimilarityGroup[])
+					if (ts.isPropertySignature(member) && member.type) {
+						ts.forEachChild(member.type, function visit(node: ts.Node) {
+							if (
+								ts.isTypeReferenceNode(node) &&
+								ts.isIdentifier(node.typeName)
+							) {
+								memberNames.push(node.typeName.text);
+							}
+							ts.forEachChild(node, visit);
+						});
+					}
+				}
 				functions.push(
 					makeFunctionInfo(
 						filePath,
@@ -235,7 +273,9 @@ export function collectFunctions(
 						tokens,
 						false,
 						false,
-						false
+						false,
+						extendsNames,
+						memberNames
 					)
 				);
 			}
@@ -387,6 +427,26 @@ export function findSimilarGroups(
 				continue;
 			}
 
+			// Skip interface pairs that share a common extends base — they are
+			// already consolidated via inheritance, not candidates for extraction.
+			// e.g. MoveOptions extends MutatingCommandOptions and
+			//      RenameOptions extends MutatingCommandOptions.
+			// Also skip pairs where both extend different bases — the similarity
+			// comes from inherited fields, not from the interfaces themselves.
+			if (fnI.extendsNames.length > 0 && fnJ.extendsNames.length > 0) {
+				continue;
+			}
+
+			// Skip composed type pairs — when one interface references the other
+			// by name in its members (e.g. SimilarityReport has a field of type
+			// SimilarityGroup[]), they are parent/child, not duplicates.
+			if (
+				fnI.memberNames.includes(fnJ.name) ||
+				fnJ.memberNames.includes(fnI.name)
+			) {
+				continue;
+			}
+
 			// Skip if original body sizes are very different — avoids false
 			// positives where normalization collapses large and small functions
 			// to the same token set (e.g. a 40-line template vs a 1-liner).
@@ -457,6 +517,25 @@ export function findSimilarGroups(
 			// and pairs with any shared name token unaffected.
 			if (fnI.file !== fnJ.file && nameSimilarity(fnI.name, fnJ.name) < 0.1) {
 				score *= 0.85;
+			}
+
+			// Penalise small cross-file interface pairs with low member name overlap.
+			// Interfaces with ≤5 members that share generic field names (file, line,
+			// name, etc.) produce inflated Jaccard scores from coincidental shape.
+			// Blend in the member name similarity to reduce these false positives.
+			if (
+				fnI.file !== fnJ.file &&
+				fnI.kind === "interface" &&
+				fnJ.kind === "interface" &&
+				fnI.memberNames.length > 0 &&
+				fnJ.memberNames.length > 0 &&
+				fnI.memberNames.length <= 5 &&
+				fnJ.memberNames.length <= 5
+			) {
+				const memberSim = jaccardSimilarity(fnI.memberNames, fnJ.memberNames);
+				if (memberSim < 0.5) {
+					score *= 0.7 + 0.3 * memberSim;
+				}
 			}
 
 			if (score >= threshold) {

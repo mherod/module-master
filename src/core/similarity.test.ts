@@ -424,6 +424,8 @@ describe("findSimilarGroups", () => {
 				hasDirective: false,
 				isWrapper: false,
 				isTypeGuard: false,
+				extendsNames: [],
+				memberNames: [],
 				contentTokens: extractContentTokens(body),
 			};
 		}
@@ -536,6 +538,8 @@ describe("findSimilarGroups", () => {
 			hasDirective: false,
 			isWrapper: false,
 			isTypeGuard: false,
+			extendsNames: [],
+			memberNames: [],
 			contentTokens: [],
 		};
 		const fnE2: ReturnType<typeof collectFunctions>[number] = {
@@ -551,6 +555,8 @@ describe("findSimilarGroups", () => {
 			hasDirective: false,
 			isWrapper: false,
 			isTypeGuard: false,
+			extendsNames: [],
+			memberNames: [],
 			contentTokens: [],
 		};
 
@@ -572,6 +578,8 @@ describe("findSimilarGroups", () => {
 			hasDirective: false,
 			isWrapper: false,
 			isTypeGuard: false,
+			extendsNames: [],
+			memberNames: [],
 			contentTokens: [],
 		};
 		const fnL2: ReturnType<typeof collectFunctions>[number] = {
@@ -587,6 +595,8 @@ describe("findSimilarGroups", () => {
 			hasDirective: false,
 			isWrapper: false,
 			isTypeGuard: false,
+			extendsNames: [],
+			memberNames: [],
 			contentTokens: [],
 		};
 
@@ -1051,6 +1061,8 @@ describe("findSimilarGroups onlyRelatedTo", () => {
 				hasDirective: false,
 				isWrapper: false,
 				isTypeGuard: false,
+				extendsNames: [],
+				memberNames: [],
 				contentTokens: extractContentTokens(body),
 			};
 		}
@@ -1125,6 +1137,8 @@ describe("directive detection", () => {
 				hasDirective: false,
 				isWrapper: false,
 				isTypeGuard: false,
+				extendsNames: [],
+				memberNames: [],
 				contentTokens: extractContentTokens(body),
 			};
 		}
@@ -1386,6 +1400,8 @@ type ChannelType = "email" | "push" | "sms";
 			hasDirective: false,
 			isWrapper: false,
 			isTypeGuard: false,
+			extendsNames: [],
+			memberNames: [],
 			contentTokens: ["pending", "approved", "rejected"],
 		};
 		const other: ReturnType<typeof collectFunctions>[number] = {
@@ -1443,5 +1459,143 @@ export interface ClickInput {
 		if (groups.length > 0) {
 			expect(groups[0]?.bucket).not.toBe("exact");
 		}
+	});
+
+	// ── Category 5: interfaces sharing a common extends base (false positive filter) ──
+	test("does not group interfaces that extend the same base type", () => {
+		const code = `
+interface MutatingCommandOptions {
+  dryRun?: boolean;
+  force?: boolean;
+  verbose?: boolean;
+  project?: string;
+  workspace?: boolean;
+}
+interface MoveOptions extends MutatingCommandOptions {
+  source: string;
+  target: string;
+  verify?: boolean;
+}
+interface RenameOptions extends MutatingCommandOptions {
+  file: string;
+  oldName: string;
+  newName: string;
+}
+`;
+		const sf = makeSourceFile(code);
+		const fns = collectFunctions(sf, "commands.ts");
+		const moveOpts = fns.find((f) => f.name === "MoveOptions");
+		const renameOpts = fns.find((f) => f.name === "RenameOptions");
+		if (!(moveOpts && renameOpts)) {
+			throw new Error("Expected both interfaces to be collected");
+		}
+		// Both should record their extends base
+		expect(moveOpts.extendsNames).toContain("MutatingCommandOptions");
+		expect(renameOpts.extendsNames).toContain("MutatingCommandOptions");
+		// Should NOT be grouped — they share a base, already consolidated
+		const groups = findSimilarGroups([moveOpts, renameOpts], {
+			threshold: 0.5,
+		});
+		expect(groups).toHaveLength(0);
+	});
+
+	// ── Category 6: composed types (parent references child) ──
+	test("does not group interfaces where one references the other as a member type", () => {
+		const code = `
+interface SimilarityGroup {
+  bucket: string;
+  score: number;
+  functions: FunctionInfo[];
+}
+interface SimilarityReport {
+  groups: SimilarityGroup[];
+  totalFunctions: number;
+  totalFiles: number;
+}
+`;
+		const sf = makeSourceFile(code);
+		const fns = collectFunctions(sf, "types.ts");
+		const group = fns.find((f) => f.name === "SimilarityGroup");
+		const report = fns.find((f) => f.name === "SimilarityReport");
+		if (!(group && report)) {
+			throw new Error("Expected both interfaces to be collected");
+		}
+		// Report references SimilarityGroup in its members
+		expect(report.memberNames).toContain("SimilarityGroup");
+		// Should NOT be grouped — parent/child composition
+		const groups = findSimilarGroups([group, report], { threshold: 0.5 });
+		expect(groups).toHaveLength(0);
+	});
+
+	test("does not group interfaces that extend different base types", () => {
+		const code = `
+interface MutatingCommandOptions {
+  dryRun?: boolean;
+  force?: boolean;
+  verbose?: boolean;
+  project?: string;
+  workspace?: boolean;
+}
+interface SimilarityFilterOptions {
+  threshold?: number;
+  sameNameOnly?: boolean;
+  skipSameFile?: boolean;
+  onlyRelatedTo?: string;
+  workspace?: boolean;
+}
+interface MoveOptions extends MutatingCommandOptions {
+  source: string;
+  target: string;
+  verify?: boolean;
+}
+interface SimilarityDiscoveryOptions extends SimilarityFilterOptions {
+  directory: string;
+  project?: string;
+  workspace?: boolean;
+}
+`;
+		const sf = makeSourceFile(code);
+		const fns = collectFunctions(sf, "commands.ts");
+		const moveOpts = fns.find((f) => f.name === "MoveOptions");
+		const simOpts = fns.find((f) => f.name === "SimilarityDiscoveryOptions");
+		if (!(moveOpts && simOpts)) {
+			throw new Error("Expected both interfaces to be collected");
+		}
+		expect(moveOpts.extendsNames).toContain("MutatingCommandOptions");
+		expect(simOpts.extendsNames).toContain("SimilarityFilterOptions");
+		// Should NOT be grouped — both extend bases, similarity comes from inheritance
+		const groups = findSimilarGroups([moveOpts, simOpts], { threshold: 0.5 });
+		expect(groups).toHaveLength(0);
+	});
+
+	test("still groups interfaces with no heritage or composition relationship", () => {
+		const code = `
+interface RequestOptions {
+  method: string;
+  headers: Record<string, string>;
+  timeout: number;
+  retry: boolean;
+}
+interface FetchOptions {
+  method: string;
+  headers: Record<string, string>;
+  timeout: number;
+  retry: boolean;
+}
+`;
+		const sf = makeSourceFile(code);
+		const fns = collectFunctions(sf, "test.ts");
+		const reqOpts = fns.find((f) => f.name === "RequestOptions");
+		const fetchOpts = fns.find((f) => f.name === "FetchOptions");
+		if (!(reqOpts && fetchOpts)) {
+			throw new Error("Expected both interfaces to be collected");
+		}
+		expect(reqOpts.extendsNames).toHaveLength(0);
+		expect(fetchOpts.extendsNames).toHaveLength(0);
+		// Should still be grouped — genuine duplicates
+		const groups = findSimilarGroups([reqOpts, fetchOpts], {
+			threshold: 0.7,
+		});
+		expect(groups.length).toBeGreaterThanOrEqual(1);
 	});
 });

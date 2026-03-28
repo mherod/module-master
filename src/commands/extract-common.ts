@@ -392,6 +392,8 @@ function findFunctionNode(
 				contentTokens: [],
 				isWrapper: false,
 				isTypeGuard: false,
+				extendsNames: [],
+				memberNames: [],
 			},
 			start: fullStart,
 			actualStart,
