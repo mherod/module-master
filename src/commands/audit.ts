@@ -6,12 +6,11 @@ import { normalizePath } from "../core/resolver.ts";
 import { scanExports } from "../core/scanner.ts";
 import { withSourceFile } from "../core/source-file.ts";
 import { discoverWorkspace } from "../core/workspace.ts";
+import type { ReadOnlyCommandOptions } from "../types/commands.ts";
 
-export interface AuditOptions {
+export interface AuditOptions extends ReadOnlyCommandOptions {
 	directory: string;
-	project?: string;
 	json?: boolean;
-	workspace?: boolean;
 	/** Fan-out threshold to flag (default: 10) */
 	fanOutThreshold?: number;
 	/** Fan-in threshold to flag (default: 10) */

@@ -8,13 +8,12 @@ import {
 	filterToWorkspaceBoundary,
 } from "../core/workspace.ts";
 import type { ExportInfo } from "../types/analysis.ts";
+import type { ReadOnlyCommandOptions } from "../types/commands.ts";
 
-export interface FindOptions {
+export interface FindOptions extends ReadOnlyCommandOptions {
 	query: string;
 	project: string;
 	type?: "file" | "export" | "all";
-	verbose?: boolean;
-	workspace?: boolean;
 	onlyRelatedTo?: string;
 }
 

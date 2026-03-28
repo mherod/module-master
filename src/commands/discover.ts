@@ -9,11 +9,10 @@ import {
 	discoverWorkspace,
 	filterToWorkspaceBoundary,
 } from "../core/workspace.ts";
+import type { ReadOnlyCommandOptions } from "../types/commands.ts";
 
-export interface DiscoverOptions {
+export interface DiscoverOptions extends ReadOnlyCommandOptions {
 	directory: string;
-	verbose?: boolean;
-	workspace?: boolean;
 	onlyRelatedTo?: string;
 }
 

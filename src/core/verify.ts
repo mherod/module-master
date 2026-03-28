@@ -3,13 +3,13 @@ import { logger } from "../cli-logger.ts";
 import type { ProjectConfig } from "../types.ts";
 import { TSC_ERROR_PATTERN } from "./constants.ts";
 import { createProgram } from "./project.ts";
-import { scanUnresolvableImports } from "./scanner.ts";
+import {
+	scanUnresolvableImports,
+	type UnresolvableDiagnostic,
+} from "./scanner.ts";
 
-export interface UnresolvableDiagnosticWithFile {
+export interface UnresolvableDiagnosticWithFile extends UnresolvableDiagnostic {
 	file: string;
-	specifier: string;
-	line: number;
-	diagnostic: string;
 }
 
 /**

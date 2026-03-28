@@ -1,4 +1,16 @@
 /**
+ * Shared options for read-only commands (find, analyze, discover, audit).
+ */
+export interface ReadOnlyCommandOptions {
+	/** Enable detailed per-file logging */
+	verbose?: boolean;
+	/** Path to project directory or tsconfig.json */
+	project?: string;
+	/** Scan across all workspace packages */
+	workspace?: boolean;
+}
+
+/**
  * Shared options for commands that write source files.
  * All mutating commands (move, rename, alias, extract-common) extend this.
  */
