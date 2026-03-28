@@ -2,6 +2,19 @@
 
 All notable user-facing changes to this project are documented here.
 
+## [1.5.0] - 2026-03-28
+
+### New Features
+
+- **Full library API**: All CLI capabilities are now importable as a
+  programmatic library via `import { ... } from "@mherod/resect"`.
+  Every command, core utility, and type is exported from the package
+  entry point. Programmatic functions like `analyze()`, `search()`,
+  `analyzeSimilarity()`, `moveModule()`, `renameSymbol()`,
+  `buildAuditReport()`, `computeMetrics()`, and `detectCycles()`
+  return structured data without side effects, making resect
+  embeddable in other tools and scripts.
+
 ## [1.3.1] - 2026-03-14
 
 ### Bug Fixes
