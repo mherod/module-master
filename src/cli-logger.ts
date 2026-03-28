@@ -163,7 +163,7 @@ export function printCommandResult(
 	if (result.errors.length > 0) {
 		logger.info(`⚠️  Errors (${result.errors.length}):`);
 		for (const error of result.errors) {
-			const relativePath = path.relative(process.cwd(), error.file);
+			const relativePath = path.relative(pathBase, error.file);
 			if (error.recoverable === undefined) {
 				logger.info(`   ${relativePath}: ${error.message}`);
 			} else {
