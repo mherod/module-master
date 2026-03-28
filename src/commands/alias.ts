@@ -215,7 +215,8 @@ function normalizeImports(
 				file,
 				ref.resolvedPath,
 				prefer,
-				project
+				project,
+				ref.specifier
 			);
 
 			if (newSpecifier && newSpecifier !== ref.specifier) {
@@ -357,9 +358,14 @@ function calculatePreferredSpecifier(
 	fromFile: string,
 	toFile: string,
 	prefer: "alias" | "relative" | "shortest",
-	project: ProjectConfig
+	project: ProjectConfig,
+	oldSpecifier?: string
 ): string | null {
-	const relativeSpecifier = calculateRelativeSpecifier(fromFile, toFile);
+	const relativeSpecifier = calculateRelativeSpecifier(
+		fromFile,
+		toFile,
+		oldSpecifier
+	);
 	const aliasSpecifier = findAliasForPath(toFile, project);
 
 	if (prefer === "relative") {

@@ -1,7 +1,11 @@
 import path from "node:path";
 import ts from "typescript";
 import type { ProjectConfig } from "../types.ts";
-import { removeExtension, VUE_EXTENSION } from "./constants.ts";
+import {
+	removeExtension,
+	TS_JS_VUE_EXTENSIONS,
+	VUE_EXTENSION,
+} from "./constants.ts";
 import type { WorkspaceInfo } from "./workspace.ts";
 
 export type ResolveResult =
@@ -120,7 +124,7 @@ export function calculateNewSpecifier(
 		if (crossPackageAlias) {
 			return crossPackageAlias;
 		}
-		return calculateRelativeSpecifier(fromFile, newTargetPath);
+		return calculateRelativeSpecifier(fromFile, newTargetPath, oldSpecifier);
 	}
 
 	// For bare specifiers (packages), return unchanged
@@ -227,7 +231,7 @@ export function matchPathAlias(
  * Update an aliased import specifier after a file move
  */
 function updateAliasedSpecifier(
-	_oldSpecifier: string,
+	oldSpecifier: string,
 	aliasMatch: { alias: string; paths: string[]; remainder: string },
 	oldTargetPath: string,
 	newTargetPath: string,
@@ -274,7 +278,7 @@ function updateAliasedSpecifier(
 	}
 
 	// Last resort: fall back to relative path from the importing file
-	return calculateRelativeSpecifier(fromFile, newTargetPath);
+	return calculateRelativeSpecifier(fromFile, newTargetPath, oldSpecifier);
 }
 
 /**
@@ -282,13 +286,22 @@ function updateAliasedSpecifier(
  */
 export function calculateRelativeSpecifier(
 	fromFile: string,
-	toFile: string
+	toFile: string,
+	oldSpecifier?: string
 ): string {
 	const fromDir = path.dirname(fromFile);
 	let relativePath = path.relative(fromDir, toFile);
 
-	// Remove extension
-	relativePath = removeExtension(relativePath);
+	// Preserve the original specifier's extension style:
+	// if the old specifier had a .ts/.tsx/etc extension, keep it;
+	// otherwise strip extensions as before.
+	const oldHasExtension = oldSpecifier
+		? TS_JS_VUE_EXTENSIONS.test(oldSpecifier)
+		: false;
+
+	if (!oldHasExtension) {
+		relativePath = removeExtension(relativePath);
+	}
 
 	// Handle index files
 	if (relativePath.endsWith("/index") || relativePath === "index") {

@@ -12,6 +12,13 @@ All notable user-facing changes to this project are documented here.
   a new `export *` line even though the source was never re-exported
   from it. This changed the package's public API surface unintentionally.
 
+- **`move` and `alias` now preserve import extension style**: Generated
+  specifiers match the original extension style. If the original import
+  used `.ts` extensions (e.g. `'./vanilla.ts'`), the updated specifier
+  keeps the extension. Extensionless imports stay extensionless. This
+  prevents `alias --prefer=shortest` from stripping `.ts` extensions in
+  codebases that use `allowImportingTsExtensions`.
+
 ## [1.5.0] - 2026-03-28
 
 ### New Features
