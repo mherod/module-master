@@ -87,7 +87,12 @@ export async function similarCommand(options: SimilarOptions): Promise<void> {
 	if (format === "compact") {
 		printCompact(report, absoluteDir, maxGroups);
 	} else {
-		printReport(report, absoluteDir, maxGroups);
+		printReport(
+			report,
+			absoluteDir,
+			maxGroups,
+			project ? path.resolve(project) : undefined
+		);
 	}
 
 	if (strict && report.groups.length > 0) {
@@ -148,7 +153,8 @@ function printCompact(
 function printReport(
 	report: SimilarityReport,
 	baseDir: string,
-	maxGroups: number
+	maxGroups: number,
+	projectRoot?: string
 ): void {
 	logger.info(
 		`📊 Scanned ${report.totalFunctions} declaration(s) across ${report.totalFiles} file(s)\n`
@@ -191,7 +197,8 @@ function printReport(
 	}
 
 	// Suggest extract-common commands
-	const dir = path.relative(process.cwd(), baseDir) || ".";
+	const pathBase = projectRoot ?? process.cwd();
+	const dir = path.relative(pathBase, baseDir) || ".";
 	logger.info("💡 To extract duplicates, run:");
 	logger.info(`   resect extract-common ${dir} --dry-run`);
 	if (totalGroups > 1) {
