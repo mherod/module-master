@@ -115,10 +115,14 @@ export async function analyze(
 	filePath: string,
 	project: ProjectConfig
 ): Promise<AnalysisResult> {
-	// .vue files cannot be parsed via createProgram — use the Vue-aware parseSourceFile instead
+	// .vue files cannot be parsed via createProgram — use the Vue-aware parseSourceFile instead.
+	// For non-vue files, fall back to parseSourceFile if the program can't resolve the file
+	// (e.g., file is outside the tsconfig scope).
 	const sourceFile = filePath.endsWith(".vue")
 		? (parseSourceFile(filePath) ?? undefined)
-		: createProgram(project, [filePath]).getSourceFile(filePath);
+		: (createProgram(project, [filePath]).getSourceFile(filePath) ??
+			parseSourceFile(filePath) ??
+			undefined);
 
 	if (!sourceFile) {
 		throw new Error(`Could not parse file: ${filePath}`);
