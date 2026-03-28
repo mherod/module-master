@@ -99,6 +99,7 @@ Types are organised into per-domain modules under `src/types/`. Root `src/types.
 - **`src/types/graph.ts`** - `ModuleReference`, `ReferenceType`, `ImportBinding`, `BarrelExport`, `BarrelExportEntry`
 - **`src/types/move.ts`** - `MoveOperation`, `MoveResult`, `UpdatedReference`, `MoveError`
 - **`src/types/analysis.ts`** - `AnalysisResult`, `ExportInfo`
+- **`src/types/commands.ts`** - `ReadOnlyCommandOptions` (base for find, analyze, discover, audit), `MutatingCommandOptions` (base for move, rename, alias, extract-common)
 - **`src/types/similar.ts`** - `FunctionInfo`, `SimilarityBucket`, `SimilarityGroup`, `SimilarityReport`
 
 Import from the specific domain module, not the root barrel:
@@ -470,15 +471,15 @@ DON'T: Implement text change application logic inline. Use `applyTextChanges()` 
 
 Use shared constants instead of inline patterns:
 
-- `TSC_ERROR_PATTERN` - String `": error TS"` for detecting TypeScript errors
-- `EXPORT_STATEMENT_PATTERN` - Regex for detecting export statements in barrel files
-- `removeExtension()` - Strips `.ts`, `.tsx`, `.js`, `.jsx`, `.mts`, `.cts`, `.mjs`, `.cjs` extensions from paths
-- `TS_JS_EXTENSIONS` - Regex `/\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/` — the full extension pattern including modern variants
-- `TS_JS_EXTENSION_PATTERN` - Narrow legacy regex `/\.[tj]sx?$/` that misses `.mts/.cts/.mjs/.cjs`
+- `TSC_ERROR_PATTERN` - `": error TS"` string for detecting TypeScript errors
+- `EXPORT_STATEMENT_PATTERN` - Regex for export statements in barrel files
+- `removeExtension()` - Strips `.ts/.tsx/.js/.jsx/.mts/.cts/.mjs/.cjs` extensions
+- `TS_JS_EXTENSIONS` - Full extension regex including modern variants (`.mts/.cts/.mjs/.cjs`)
+- `TS_JS_EXTENSION_PATTERN` - Legacy regex `/\.[tj]sx?$/` — misses modern variants
 
-DON'T: Use inline regex like `/\.[tj]sx?$/` or `": error TS"` strings. Import from `constants.ts`.
+DON'T: Use inline regex or string literals. Import from `constants.ts`.
 
-DON'T: Use `TS_JS_EXTENSION_PATTERN` for extension stripping in new code — it misses `.mts/.cts/.mjs/.cjs`. Use `TS_JS_EXTENSIONS` or `removeExtension()` instead.
+DON'T: Use `TS_JS_EXTENSION_PATTERN` in new code. Use `TS_JS_EXTENSIONS` or `removeExtension()`.
 
 ## Biome Configuration
 
