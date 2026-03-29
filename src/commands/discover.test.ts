@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { CLI, cleanup, makeFixture as makeFixtureBase } from "./__test-helpers";
 
-function makeFixture(name: string, files: Record<string, string>) {
+async function makeFixture(name: string, files: Record<string, string>) {
 	return makeFixtureBase(`discover-${name}`, files);
 }
 
