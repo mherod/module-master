@@ -304,6 +304,52 @@ describe("unused command", () => {
 		await cleanup(dir);
 	});
 
+	test("dynamic import marks all exports as used", async () => {
+		const dir = await makeFixture("dynamic-import", {
+			"utils.ts":
+				"export function a() { return 1; }\nexport function b() { return 2; }",
+			"loader.ts":
+				'async function load() { const mod = await import("./utils"); return mod.a(); }',
+		});
+
+		const proc = Bun.spawn([...CLI, "unused", dir, "--json"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+		const utilsUnused = report.unused.filter((u: { file: string }) =>
+			u.file.includes("utils.ts")
+		);
+		expect(utilsUnused).toHaveLength(0);
+
+		await cleanup(dir);
+	});
+
+	test("--json report includes totalExports and totalFiles", async () => {
+		const dir = await makeFixture("report-fields", {
+			"a.ts": "export function fnA() { return 1; }",
+			"b.ts": "export function fnB() { return 2; }",
+			"c.ts":
+				'import { fnA } from "./a";\nimport { fnB } from "./b";\nconsole.log(fnA(), fnB());',
+		});
+
+		const proc = Bun.spawn([...CLI, "unused", dir, "--json"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+		expect(report.totalExports).toBeGreaterThanOrEqual(2);
+		expect(report.totalFiles).toBeGreaterThanOrEqual(3);
+
+		await cleanup(dir);
+	});
+
 	test("export-all-as marks all exports as used", async () => {
 		const dir = await makeFixture("export-all-as", {
 			"math.ts":
