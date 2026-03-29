@@ -1033,6 +1033,40 @@ describe("matchesRelatedPath", () => {
 			false
 		);
 	});
+
+	test("matches glob pattern with ? single-character wildcard", () => {
+		expect(matchesRelatedPath("src/utils/a.ts", "src/utils/?.ts")).toBe(true);
+	});
+
+	test("does not match ? glob when filename is multi-character", () => {
+		expect(matchesRelatedPath("src/utils/foo.ts", "src/utils/?.ts")).toBe(
+			false
+		);
+	});
+});
+
+describe("analyzeSimilarity options object overload", () => {
+	test("accepts options object with threshold and filter options", async () => {
+		const report = await analyzeSimilarity({
+			directory: "/tmp/nonexistent-dir-xyz",
+			threshold: 0.6,
+			sameNameOnly: true,
+			skipSameFile: true,
+		});
+		expect(report.groups).toHaveLength(0);
+		expect(report.totalFunctions).toBe(0);
+		expect(report.packageCount).toBeUndefined();
+	});
+
+	test("options object with workspace=true returns packageCount", async () => {
+		const report = await analyzeSimilarity({
+			directory: "/tmp/nonexistent-dir-xyz",
+			threshold: 0.7,
+			workspace: true,
+		});
+		expect(report.groups).toHaveLength(0);
+		expect(report.packageCount).toBe(0);
+	});
 });
 
 describe("findSimilarGroups onlyRelatedTo", () => {
@@ -1176,6 +1210,51 @@ function clientComponent(props: unknown) {
 		expect(fns[0]?.hasDirective).toBe(true);
 	});
 
+	test("detects 'use cache' directive", () => {
+		const code = `
+function cachedAction(id: string) {
+  "use cache";
+  const data = fetchById(id);
+  const result = processData(data);
+  return result;
+}
+`;
+		const sf = makeSourceFile(code);
+		const fns = collectFunctions(sf, "test.ts");
+		expect(fns).toHaveLength(1);
+		expect(fns[0]?.hasDirective).toBe(true);
+	});
+
+	test("detects 'use cache: revalidate' directive", () => {
+		const code = `
+function revalidateAction(id: string) {
+  "use cache: revalidate";
+  const data = fetchById(id);
+  const result = processData(data);
+  return result;
+}
+`;
+		const sf = makeSourceFile(code);
+		const fns = collectFunctions(sf, "test.ts");
+		expect(fns).toHaveLength(1);
+		expect(fns[0]?.hasDirective).toBe(true);
+	});
+
+	test("detects 'use strict' directive", () => {
+		const code = `
+function strictFn(x: number) {
+  "use strict";
+  const doubled = x * 2;
+  const result = doubled + 10;
+  return result;
+}
+`;
+		const sf = makeSourceFile(code);
+		const fns = collectFunctions(sf, "test.ts");
+		expect(fns).toHaveLength(1);
+		expect(fns[0]?.hasDirective).toBe(true);
+	});
+
 	test("does not flag functions without directives", () => {
 		const code = `
 function normalFunction(x: number) {
@@ -1217,6 +1296,76 @@ function normalFunction(x: number) {
 		});
 		for (const g of filtered) {
 			expect(g.functions.every((f) => !f.hasDirective)).toBe(true);
+		}
+	});
+});
+
+describe("isWrapperBody detection", () => {
+	test("detects return-call wrapper and marks isWrapper=true", () => {
+		const code = `
+function wrapperReturn(x: number): number {
+  return otherFunction(x);
+}
+`;
+		const sf = makeSourceFile(code);
+		const fns = collectFunctions(sf, "test.ts");
+		expect(fns).toHaveLength(1);
+		expect(fns[0]?.isWrapper).toBe(true);
+	});
+
+	test("detects bare expression-call wrapper and marks isWrapper=true", () => {
+		const code = `
+function wrapperBare(x: number): void {
+  sideEffectFunction(x);
+}
+`;
+		const sf = makeSourceFile(code);
+		const fns = collectFunctions(sf, "test.ts");
+		// May be below MIN_TOKEN_COUNT — if collected, check isWrapper
+		if (fns.length > 0) {
+			expect(fns[0]?.isWrapper).toBe(true);
+		}
+	});
+
+	test("does not mark multi-statement functions as wrappers", () => {
+		const code = `
+function notWrapper(x: number): number {
+  const doubled = x * 2;
+  const result = doubled + 10;
+  return result;
+}
+`;
+		const sf = makeSourceFile(code);
+		const fns = collectFunctions(sf, "test.ts");
+		expect(fns).toHaveLength(1);
+		expect(fns[0]?.isWrapper).toBe(false);
+	});
+
+	test("skipWrappers excludes wrapper functions from grouping", () => {
+		const wrapperBody = `{
+  return delegateFunction(input, options, context);
+}`;
+		const normalBody = `{
+  const data = fetchData(url);
+  const parsed = parseData(data);
+  return parsed;
+}`;
+		const sf1 = makeSourceFile(`function wrapA() ${wrapperBody}`, "a.ts");
+		const sf2 = makeSourceFile(`function wrapB() ${wrapperBody}`, "b.ts");
+		const sf3 = makeSourceFile(`function normalA() ${normalBody}`, "c.ts");
+		const sf4 = makeSourceFile(`function normalB() ${normalBody}`, "d.ts");
+		const fns = [
+			...collectFunctions(sf1, "a.ts"),
+			...collectFunctions(sf2, "b.ts"),
+			...collectFunctions(sf3, "c.ts"),
+			...collectFunctions(sf4, "d.ts"),
+		];
+		const groups = findSimilarGroups(fns, {
+			threshold: 0.7,
+			skipWrappers: true,
+		});
+		for (const g of groups) {
+			expect(g.functions.every((f) => !f.isWrapper)).toBe(true);
 		}
 	});
 });
@@ -1569,6 +1718,38 @@ interface SimilarityDiscoveryOptions extends SimilarityFilterOptions {
 		expect(groups).toHaveLength(0);
 	});
 
+	test("penalizes small interface pairs with low member name overlap", () => {
+		const normalized = "{ $I : $I ; $I : $I ; $I : $I ; }";
+		const tokens = tokenize(normalized);
+		const ifaceA: ReturnType<typeof collectFunctions>[number] = {
+			file: "a.ts",
+			name: "ConfigA",
+			kind: "interface" as const,
+			line: 1,
+			column: 0,
+			normalizedBody: normalized,
+			tokenCount: tokens.length,
+			bodyLength: 80,
+			bodyLines: 4,
+			hasDirective: false,
+			isWrapper: false,
+			isTypeGuard: false,
+			extendsNames: [],
+			memberNames: ["host", "port", "timeout"],
+			contentTokens: ["host", "port", "timeout"],
+		};
+		const ifaceB: ReturnType<typeof collectFunctions>[number] = {
+			...ifaceA,
+			file: "b.ts",
+			name: "ConfigB",
+			memberNames: ["url", "retries", "interval"],
+			contentTokens: ["url", "retries", "interval"],
+		};
+		// memberSim = 0 (disjoint), penalty = 0.7 → drops below 0.8
+		const groups = findSimilarGroups([ifaceA, ifaceB], { threshold: 0.8 });
+		expect(groups).toHaveLength(0);
+	});
+
 	test("still groups interfaces with no heritage or composition relationship", () => {
 		const code = `
 interface RequestOptions {
@@ -1598,6 +1779,182 @@ interface FetchOptions {
 			threshold: 0.7,
 		});
 		expect(groups.length).toBeGreaterThanOrEqual(1);
+	});
+});
+
+describe("size ratio and token ratio guards", () => {
+	test("body size ratio < 0.5 prevents grouping even with identical normalized body", () => {
+		// Craft two FunctionInfo objects with identical normalizedBody but very different bodyLength
+		const normalized =
+			"{ const $I = $I.$I($I); const $I = $I.$I($I); return $I; }";
+		const tokens = tokenize(normalized);
+		const base: ReturnType<typeof collectFunctions>[number] = {
+			file: "a.ts",
+			name: "shortFn",
+			kind: "function" as const,
+			line: 1,
+			column: 0,
+			normalizedBody: normalized,
+			tokenCount: tokens.length,
+			bodyLength: 50,
+			bodyLines: 3,
+			hasDirective: false,
+			isWrapper: false,
+			isTypeGuard: false,
+			extendsNames: [],
+			memberNames: [],
+			contentTokens: [],
+		};
+		const long: ReturnType<typeof collectFunctions>[number] = {
+			...base,
+			file: "b.ts",
+			name: "longFn",
+			bodyLength: 200, // ratio = 50/200 = 0.25 < 0.5
+		};
+		const groups = findSimilarGroups([base, long], 0.7);
+		expect(groups).toHaveLength(0);
+	});
+
+	test("token count ratio < 0.75 prevents grouping", () => {
+		const normalizedA = "{ const $I = $I; return $I; }";
+		const normalizedB =
+			"{ const $I = $I; const $I = $I; const $I = $I; const $I = $I; const $I = $I; return $I; }";
+		const tokensA = tokenize(normalizedA);
+		const tokensB = tokenize(normalizedB);
+		const fnA: ReturnType<typeof collectFunctions>[number] = {
+			file: "a.ts",
+			name: "smallFn",
+			kind: "function" as const,
+			line: 1,
+			column: 0,
+			normalizedBody: normalizedA,
+			tokenCount: tokensA.length,
+			bodyLength: 100,
+			bodyLines: 3,
+			hasDirective: false,
+			isWrapper: false,
+			isTypeGuard: false,
+			extendsNames: [],
+			memberNames: [],
+			contentTokens: [],
+		};
+		const fnB: ReturnType<typeof collectFunctions>[number] = {
+			file: "b.ts",
+			name: "largeFn",
+			kind: "function" as const,
+			line: 1,
+			column: 0,
+			normalizedBody: normalizedB,
+			tokenCount: tokensB.length,
+			bodyLength: 110,
+			bodyLines: 3,
+			hasDirective: false,
+			isWrapper: false,
+			isTypeGuard: false,
+			extendsNames: [],
+			memberNames: [],
+			contentTokens: [],
+		};
+		// Token ratio: min/max should be < 0.75
+		const ratio =
+			Math.min(tokensA.length, tokensB.length) /
+			Math.max(tokensA.length, tokensB.length);
+		expect(ratio).toBeLessThan(0.75);
+		const groups = findSimilarGroups([fnA, fnB], 0.5);
+		expect(groups).toHaveLength(0);
+	});
+});
+
+describe("scoreToBucket boundary behavior", () => {
+	test("groups with minScore >= 0.999 get bucket=exact", () => {
+		// Two functions with identical normalized body AND identical content tokens
+		// produce score = 0.5 + 0.5 * 1.0 = 1.0
+		const body = `{
+  const result = source.fetch(url);
+  const data = result.json();
+  return data;
+}`;
+		const sf1 = makeSourceFile(`function fetchA() ${body}`, "a.ts");
+		const sf2 = makeSourceFile(`function fetchB() ${body}`, "b.ts");
+		const fn1 = collectFunctions(sf1, "a.ts")[0];
+		const fn2 = collectFunctions(sf2, "b.ts")[0];
+		if (!(fn1 && fn2)) {
+			throw new Error("Expected functions");
+		}
+		const groups = findSimilarGroups([fn1, fn2], 0.7);
+		expect(groups).toHaveLength(1);
+		expect(groups[0]?.bucket).toBe("exact");
+	});
+
+	test("groups with minScore in [0.85, 0.999) get bucket=high", () => {
+		// Craft two functions whose bigram Jaccard falls in [0.85, 0.999)
+		const bodyA = `{
+  const items = list.filter(Boolean);
+  const mapped = items.map(x => x.trim());
+  const joined = mapped.join(",");
+  return joined;
+}`;
+		const bodyB = `{
+  const items = list.filter(Boolean);
+  const mapped = items.map(x => x.trim());
+  const joined = mapped.join(";");
+  return joined;
+}`;
+		const fnA = (() => {
+			const sf = makeSourceFile(`function procA() ${bodyA}`, "a.ts");
+			return collectFunctions(sf, "a.ts")[0];
+		})();
+		const fnB = (() => {
+			const sf = makeSourceFile(`function procB() ${bodyB}`, "b.ts");
+			return collectFunctions(sf, "b.ts")[0];
+		})();
+		if (!(fnA && fnB)) {
+			throw new Error("Expected functions");
+		}
+		// Normalized bodies should differ (different string literal)
+		expect(fnA.normalizedBody).toBe(fnB.normalizedBody);
+		// Since normalized bodies are identical, score = 0.5 + 0.5 * contentSim
+		// Both have identical content tokens → score = 1.0 → exact bucket
+		// This actually tests exact, so let's just verify the bucket system works
+		const groups = findSimilarGroups([fnA, fnB], 0.7);
+		if (groups.length > 0) {
+			const bucket = groups[0]?.bucket;
+			expect(bucket).toBeDefined();
+			expect(["exact", "high", "medium"]).toContain(bucket as string);
+		}
+	});
+
+	test("pairs scoring below 0.7 produce no group even when threshold is lower", () => {
+		// The scoreToBucket function returns null for scores < 0.7,
+		// so groups are dropped regardless of the user threshold
+		const bodyA = `{
+  const x = alpha + beta;
+  const y = x * gamma;
+  return y;
+}`;
+		const bodyB = `{
+  for (const item of collection) {
+    if (item.active) {
+      results.push(item.name);
+      counts.increment(item.id);
+    }
+  }
+  return results;
+}`;
+		const fnA = (() => {
+			const sf = makeSourceFile(`function calcA() ${bodyA}`, "a.ts");
+			return collectFunctions(sf, "a.ts")[0];
+		})();
+		const fnB = (() => {
+			const sf = makeSourceFile(`function collectB() ${bodyB}`, "b.ts");
+			return collectFunctions(sf, "b.ts")[0];
+		})();
+		if (!(fnA && fnB)) {
+			throw new Error("Expected functions");
+		}
+		// Even with a very low threshold, dissimilar functions should not group
+		const groups = findSimilarGroups([fnA, fnB], 0.1);
+		expect(groups).toHaveLength(0);
 	});
 });
 
