@@ -1,37 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, rm, writeFile } from "node:fs/promises";
-import path from "node:path";
+import { CLI, cleanup, makeFixture as makeFixtureBase } from "./__test-helpers";
 
-const CLI = ["bun", path.resolve(import.meta.dir, "../cli.ts")];
-
-async function makeFixture(
-	name: string,
-	files: Record<string, string>
-): Promise<string> {
-	const dir = path.join(
-		import.meta.dir,
-		"__fixtures__",
-		`similar-${name}-${Date.now()}`
-	);
-	await mkdir(dir, { recursive: true });
-	// Write tsconfig so discoverProject finds files
-	await writeFile(
-		path.join(dir, "tsconfig.json"),
-		JSON.stringify({
-			compilerOptions: { strict: true },
-			include: ["**/*.ts"],
-		})
-	);
-	for (const [filePath, content] of Object.entries(files)) {
-		const full = path.join(dir, filePath);
-		await mkdir(path.dirname(full), { recursive: true });
-		await writeFile(full, content);
-	}
-	return dir;
-}
-
-async function cleanup(dir: string) {
-	await rm(dir, { recursive: true, force: true });
+function makeFixture(name: string, files: Record<string, string>) {
+	return makeFixtureBase(`similar-${name}`, files, { tsconfig: true });
 }
 
 // Two files with identical functions (different variable names) to guarantee a group
