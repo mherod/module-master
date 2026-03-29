@@ -328,30 +328,14 @@ The command is read-only and composes existing `DependencyGraph` infrastructure 
 
 ## Unused Exports Command
 
-The `unused` command (`src/commands/unused.ts`) finds exports never imported by other files:
+The `unused` command (`src/commands/unused.ts`) finds exports never imported by other files. Uses `resolveTsConfig()` → `buildDependencyGraph()` → `scanExports()` pipeline, comparing each export against an imported-bindings map.
 
 ```bash
-bun src/cli.ts unused <directory>                    # Scan project for unused exports
-bun src/cli.ts unused src --json                     # JSON output for tooling
-bun src/cli.ts unused src --ignore="*.test.ts"       # Exclude test files
-bun src/cli.ts unused src --verbose                  # Detailed output
+bun src/cli.ts unused src                        # Scan for unused exports
+bun src/cli.ts unused src --json --ignore="*.test.ts"  # JSON, exclude tests
 ```
 
-### How It Works
-
-1. **Resolve tsconfig** using `resolveTsConfig()` from `project.ts`
-2. **Build dependency graph** via `buildDependencyGraph()`
-3. **Build imported bindings map** — for each file, tracks which export names are consumed (named imports) or if the entire module is consumed (namespace/dynamic/re-export)
-4. **Scan exports** for each file in the target directory using `scanExports()` via `withSourceFile()`
-5. **Compare** each export against the bindings map — unused if no consumer references it
-
-### Alias Handling
-
-`ImportBinding.name` stores the **original export name** (not the local alias), so `import { foo as bar }` correctly marks `foo` as used. No special alias handling needed.
-
-### Import Types That Mark All Exports As Used
-
-`import *`, `export *`, `export * as`, `import()`, `require()`, `require.resolve()`, `jest.mock()` — these consume the entire module, so all exports are considered used.
+`ImportBinding.name` stores the original export name, so aliases (`import { foo as bar }`) are handled transparently. Whole-module imports (`import *`, `export *`, `import()`, `require()`) mark all exports as used.
 
 DON'T: Add a new import type to the scanner without updating `buildImportedBindingsMap()` in `unused.ts`.
 
@@ -432,46 +416,19 @@ DON'T: Use relative paths like `../../../packages/foo/src/bar` for cross-package
 
 ### Barrel Re-export Handling for Cross-Package Moves
 
-Source barrel re-exports (`export * from "./moved-file"`) must be **removed**, not changed to `export * from "@scope/package"` — that pulls in ALL exports from the target package, causing duplicate export conflicts.
+For cross-package moves, `updateBarrelExports()` **removes** source barrel re-exports entirely. `updateFileReferences()` also removes `export-all`/`export-from`/`export-all-as` references for cross-package moves.
 
-The `updateBarrelExports()` function in `updater.ts` handles this:
-- Resolves each export declaration's specifier to check if it points to the moved file
-- For cross-package moves: removes the re-export line entirely
-- For same-package moves: updates the path normally
-
-Similarly, `updateFileReferences()` detects `export-all`, `export-from`, and `export-all-as` reference types and removes them for cross-package moves instead of updating the specifier.
-
-DON'T: Change `export * from "./moved-file"` to `export * from "@scope/package"` for cross-package moves. This causes TS2308 errors like "Module has already exported a member named X".
+DON'T: Change `export * from "./moved-file"` to `export * from "@scope/package"` — causes TS2308 duplicate export errors.
 
 ### Import Splitting for Mixed Barrel Imports
 
-When files import multiple things from a barrel (`import { a, b } from "@/lib/utils"`) and only some bindings come from the moved file, split the import into two statements:
+When only some bindings in an import come from the moved file, `updateFileReferences()` splits the import: moved bindings get the new package specifier, remaining bindings keep the original.
 
-```typescript
-// Before: import { formatDate, makeAuthorUrl } from "@/lib/utils"
-// After (if formatDate moved to @plugg/shared-utils):
-import { formatDate } from "@plugg/shared-utils";
-import { makeAuthorUrl } from "@/lib/utils";
-```
-
-The `updateFileReferences()` function:
-1. Scans the moved file's exports using `scanExports()`
-2. Compares each import's bindings against the moved exports
-3. If mixed bindings: creates `ImportSplitChange` to replace single import with two
-4. If all bindings are moved: updates specifier normally
-5. If no bindings are moved: skips the reference
-
-DON'T: Update entire import specifiers to new package when only some bindings come from the moved file. This causes TS2305 errors like "Module has no exported member X".
+DON'T: Update entire import specifiers when only some bindings moved — causes TS2305 errors.
 
 ### Move Command File Handling
 
-The move command must handle all code paths for file copying:
-- Files with internal imports that need updating
-- Files with internal imports that don't change
-- Files with NO imports (utility functions, constants)
-- Files that fail to parse
-
-Use a `fileMoved` flag pattern to ensure the file copy always happens regardless of which code path executes. The fallback at the end catches any path that didn't move the file.
+Use a `fileMoved` flag to ensure the file copy always happens regardless of code path (imports needing update, imports unchanged, no imports, parse failure).
 
 ### DependencyGraph Barrel Tracking
 
