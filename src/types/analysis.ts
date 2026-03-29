@@ -11,6 +11,7 @@ export interface AnalysisResult {
 		line: number;
 		diagnostic: string;
 	}>;
+	unusedExports: ExportInfo[];
 }
 
 export interface ExportInfo {

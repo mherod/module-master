@@ -145,6 +145,16 @@ export async function analyze(
 					exports: [],
 				}));
 
+	// Cross-reference exports against imported-bindings map to find unused exports
+	const { buildImportedBindingsMap, isExportUsed } = await import(
+		"./unused.ts"
+	);
+	const importedBindings = buildImportedBindingsMap(graph);
+	const fileImporters = importedBindings.get(filePath);
+	const unusedExports = exports.filter(
+		(exp) => !isExportUsed(exp, filePath, fileImporters, graph)
+	);
+
 	return {
 		file: filePath,
 		imports,
@@ -152,6 +162,7 @@ export async function analyze(
 		referencedBy,
 		barrelExports: barrelsWithContext,
 		unresolvable,
+		unusedExports,
 	};
 }
 
@@ -235,6 +246,16 @@ function printAnalysis(
 			if (verbose) {
 				logger.info(`     ${diag.diagnostic}`);
 			}
+		}
+		logger.empty();
+	}
+
+	// Unused exports
+	if (result.unusedExports.length > 0) {
+		logger.info(`🚫 Unused exports (${result.unusedExports.length}):`);
+		for (const exp of result.unusedExports) {
+			const typeMarker = exp.isType ? " (type)" : "";
+			logger.info(`   • ${exp.name}${typeMarker} (line ${exp.line})`);
 		}
 		logger.empty();
 	}

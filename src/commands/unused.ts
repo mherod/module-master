@@ -100,7 +100,7 @@ export async function findUnusedExports(
  * Build a map from resolved file path to the set of binding names imported from it.
  * Also tracks wildcard imports (import *, export *) as a special "__all__" entry.
  */
-function buildImportedBindingsMap(
+export function buildImportedBindingsMap(
 	graph: DependencyGraph
 ): Map<string, Set<string>> {
 	const map = new Map<string, Set<string>>();
@@ -149,7 +149,7 @@ function buildImportedBindingsMap(
 /**
  * Check whether an export is consumed anywhere in the project.
  */
-function isExportUsed(
+export function isExportUsed(
 	exp: ExportInfo,
 	_file: string,
 	fileImporters: Set<string> | undefined,
