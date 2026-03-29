@@ -253,4 +253,77 @@ describe("unused command", () => {
 
 		await cleanup(dir);
 	});
+
+	test("aliased named import marks original export as used", async () => {
+		const dir = await makeFixture("alias-import", {
+			"utils.ts":
+				"export function original() { return 1; }\nexport function other() { return 2; }",
+			"consumer.ts":
+				'import { original as renamed } from "./utils";\nconsole.log(renamed());',
+		});
+
+		const proc = Bun.spawn([...CLI, "unused", dir, "--json"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+		const unusedNames = report.unused
+			.filter((u: { file: string }) => u.file.includes("utils.ts"))
+			.map((u: { name: string }) => u.name);
+		// "original" is used (via alias), "other" is not
+		expect(unusedNames).not.toContain("original");
+		expect(unusedNames).toContain("other");
+
+		await cleanup(dir);
+	});
+
+	test("aliased re-export marks original export as used", async () => {
+		const dir = await makeFixture("alias-reexport", {
+			"utils.ts":
+				"export function helper() { return 1; }\nexport function unused() { return 2; }",
+			"barrel.ts": 'export { helper as renamedHelper } from "./utils";',
+		});
+
+		const proc = Bun.spawn([...CLI, "unused", dir, "--json"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+		const utilsUnused = report.unused
+			.filter((u: { file: string }) => u.file.includes("utils.ts"))
+			.map((u: { name: string }) => u.name);
+		expect(utilsUnused).not.toContain("helper");
+		expect(utilsUnused).toContain("unused");
+
+		await cleanup(dir);
+	});
+
+	test("export-all-as marks all exports as used", async () => {
+		const dir = await makeFixture("export-all-as", {
+			"math.ts":
+				"export function add(a: number, b: number) { return a + b; }\nexport function sub(a: number, b: number) { return a - b; }",
+			"index.ts": 'export * as math from "./math";',
+		});
+
+		const proc = Bun.spawn([...CLI, "unused", dir, "--json"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+		const mathUnused = report.unused.filter((u: { file: string }) =>
+			u.file.includes("math.ts")
+		);
+		expect(mathUnused).toHaveLength(0);
+
+		await cleanup(dir);
+	});
 });
