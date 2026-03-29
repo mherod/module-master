@@ -11,6 +11,8 @@ All notable user-facing changes to this project are documented here.
   to exclude files (e.g. `*.test.ts`), and `--verbose` mode. Correctly
   handles aliased imports, namespace imports, dynamic imports, re-exports,
   and type-only imports.
+- **`unused` gitignore filtering**: Files matched by `.gitignore` are now
+  excluded by default, reducing noise from generated/vendored files.
 
 ### Test Coverage
 
@@ -27,6 +29,8 @@ All notable user-facing changes to this project are documented here.
   project, the destination barrel (`index.ts`) was incorrectly receiving
   a new `export *` line even though the source was never re-exported
   from it. This changed the package's public API surface unintentionally.
+- **`git.ts` floating promises**: `proc.stdin.write()` and
+  `proc.stdin.end()` are now properly awaited in `filterGitIgnoredFiles()`.
 
 - **`move` and `alias` now preserve import extension style**: Generated
   specifiers match the original extension style. If the original import

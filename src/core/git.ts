@@ -36,8 +36,8 @@ export async function filterGitignored(
 			stderr: "pipe",
 		});
 
-		proc.stdin.write(files.join("\n"));
-		proc.stdin.end();
+		await proc.stdin.write(files.join("\n"));
+		await proc.stdin.end();
 
 		const output = await new Response(proc.stdout).text();
 		await proc.exited;
