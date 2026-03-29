@@ -42,7 +42,13 @@
     "dist",
     "README.md",
     "LICENSE",
-    "NOTICE"
+    "NOTICE",
+    "!**/*.test.ts",
+    "!**/*.spec.ts",
+    "!**/__fixtures__",
+    "!**/__tests__",
+    "!**/__test-helpers*",
+    "!**/__tmp_*"
   ],
   "scripts": {
     "dev": "bun run src/cli.ts",
