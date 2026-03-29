@@ -212,6 +212,19 @@ resect extract-common src --skip-same-file --skip-directives
 
 Without `--output`, keeps one canonical copy in place and replaces all others with imports. With `--output`, writes the function to the specified destination file and rewrites all source locations to import from it.
 
+### `unused <directory>`
+
+Find exports that are never imported by any other file in the project.
+
+```bash
+resect unused src                            # Scan for unused exports
+resect unused src --json                     # JSON output for tooling
+resect unused src --ignore="*.test.ts"       # Exclude test files
+resect unused src --verbose                  # Detailed output
+```
+
+Correctly handles aliased imports, namespace imports, dynamic imports, re-exports, and type-only imports.
+
 ## Features
 
 - **AST-level precision** — Uses TypeScript Compiler API, not regex (see [AST Node Coverage](./CLAUDE.md#ast-node-coverage) for the full node-kind support matrix)
