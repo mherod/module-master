@@ -4,6 +4,22 @@ All notable user-facing changes to this project are documented here.
 
 ## [Unreleased]
 
+### New Features
+
+- **`unused` command**: Scan a project for exports that are never imported
+  by any other file. Supports `--json` output, `--ignore` glob patterns
+  to exclude files (e.g. `*.test.ts`), and `--verbose` mode. Correctly
+  handles aliased imports, namespace imports, dynamic imports, re-exports,
+  and type-only imports.
+
+### Test Coverage
+
+- Added CLI integration tests for `workspace`, `similar`, `discover`,
+  `analyze`, `find`, and `unused` commands using shared test helpers.
+- Added 17 new similarity module unit tests covering `scoreToBucket`
+  boundaries, `isWrapperBody` detection, directive variants, size/token
+  ratio guards, and small interface member penalties.
+
 ### Bug Fixes
 
 - **`move` no longer adds spurious barrel re-exports for same-package
