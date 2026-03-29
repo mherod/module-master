@@ -1,4 +1,62 @@
+import path from "node:path";
 import { logger } from "../cli-logger.ts";
+
+/**
+ * Filter out files that are ignored by .gitignore.
+ * Uses `git check-ignore` for accurate matching against all gitignore rules.
+ * Falls back to returning the full list if git is unavailable.
+ */
+export async function filterGitignored(
+	files: string[],
+	scanDir?: string
+): Promise<string[]> {
+	if (files.length === 0) {
+		return files;
+	}
+
+	try {
+		const cwd = scanDir ?? path.dirname(files[0] ?? ".");
+
+		// If the scan directory itself is gitignored, skip filtering
+		// (user explicitly targeted this directory)
+		const dirCheck = Bun.spawn(["git", "check-ignore", "-q", cwd], {
+			cwd,
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		await dirCheck.exited;
+		if (dirCheck.exitCode === 0) {
+			return files;
+		}
+
+		const proc = Bun.spawn(["git", "check-ignore", "--stdin"], {
+			cwd,
+			stdin: "pipe",
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+
+		proc.stdin.write(files.join("\n"));
+		proc.stdin.end();
+
+		const output = await new Response(proc.stdout).text();
+		await proc.exited;
+
+		if (proc.exitCode !== 0 && proc.exitCode !== 1) {
+			return files;
+		}
+
+		const ignored = new Set(
+			output
+				.trim()
+				.split("\n")
+				.filter((l) => l.length > 0)
+		);
+		return files.filter((f) => !ignored.has(f));
+	} catch {
+		return files;
+	}
+}
 
 /**
  * Check whether the git working tree at `dir` has uncommitted changes

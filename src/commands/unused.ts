@@ -1,5 +1,6 @@
 import path from "node:path";
 import { logger } from "../cli-logger.ts";
+import { filterGitignored } from "../core/git.ts";
 import type { DependencyGraph } from "../core/graph.ts";
 import { buildDependencyGraph } from "../core/graph.ts";
 import { loadProject, resolveTsConfig } from "../core/project.ts";
@@ -46,9 +47,12 @@ export async function findUnusedExports(
 	const graph = await buildDependencyGraph(project);
 
 	// Filter graph files to those under the target directory
-	const allFiles = Array.from(graph.imports.keys()).filter((f) =>
+	let allFiles = Array.from(graph.imports.keys()).filter((f) =>
 		f.startsWith(absoluteDir)
 	);
+
+	// Exclude gitignored files by default
+	allFiles = await filterGitignored(allFiles, absoluteDir);
 
 	// Build a set of all imported bindings: Map<resolvedPath, Set<bindingName>>
 	const importedBindings = buildImportedBindingsMap(graph);
