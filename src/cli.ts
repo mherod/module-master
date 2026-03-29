@@ -38,6 +38,7 @@ const { values, positionals } = parseArgs({
 		"fan-out-threshold": { type: "string" },
 		"fan-in-threshold": { type: "string" },
 		"export-threshold": { type: "string" },
+		ignore: { type: "string" },
 	},
 	allowPositionals: true,
 });
@@ -62,6 +63,7 @@ Commands:
   similar <directory>                 Find similar or duplicate functions for consolidation
   extract-common <directory>           Extract duplicate functions into shared modules
   audit <directory>                    Analyze module health: fan-out, fan-in, cycles
+  unused <directory>                   Find exports never imported by other files
 
 Options:
   -h, --help        Show this help message
@@ -91,6 +93,7 @@ Options:
   --fan-out-threshold  Flag files with more than N imports (default: 10, audit command)
   --fan-in-threshold   Flag files with more than N consumers (default: 10, audit command)
   --export-threshold   Flag files with more than N exports (default: 8, audit command)
+  --ignore          Glob pattern to exclude files (unused command, e.g. "*.test.ts")
 
 Examples:
   ${name} find Entity -p /path/to/project

@@ -13,6 +13,7 @@ import { workspaceCommand } from "./workspace.ts";
 
 export interface CliValues {
 	help?: boolean;
+	ignore?: string;
 	version?: boolean;
 	verbose?: boolean;
 	"dry-run"?: boolean;
@@ -644,6 +645,44 @@ Examples:
 				exportThreshold: values["export-threshold"]
 					? Number(values["export-threshold"])
 					: undefined,
+			});
+		},
+	},
+
+	{
+		name: "unused",
+		helpText: `
+Usage: ${name} unused <directory> [options]
+
+Find exports that are never imported by any other file in the project.
+
+Arguments:
+  directory    Path to the project directory to scan
+
+Options:
+  -p, --project    Path to project directory or tsconfig.json
+  --json           Output results as JSON
+  --verbose        Show detailed output
+  --ignore         Glob pattern to exclude files (e.g. "*.test.ts")
+
+Examples:
+  ${name} unused src
+  ${name} unused . --json
+  ${name} unused src --ignore="*.test.ts"
+`,
+		run: async ([directory], values) => {
+			if (!directory) {
+				logger.error("Error: unused requires a <directory> argument");
+				logger.error(`Run '${name} unused --help' for usage`);
+				process.exit(1);
+			}
+			const { unusedCommand: cmd } = await import("./unused.ts");
+			await cmd({
+				directory,
+				project: values.project,
+				json: values.json,
+				verbose: values.verbose,
+				ignore: values.ignore,
 			});
 		},
 	},
