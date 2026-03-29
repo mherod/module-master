@@ -41,6 +41,7 @@ bun src/cli.ts alias <target> --prefer=<strategy>  # Normalize import paths
 bun src/cli.ts move <source> <target> [--dry-run]  # Move file, update all imports
 bun src/cli.ts rename <file> <old> <new> [--dry-run]  # Rename export, update all imports
 bun src/cli.ts audit <directory>                     # Module health: fan-out, fan-in, cycles
+bun src/cli.ts unused <directory>                    # Find exports never imported by other files
 ```
 
 Use `-p <project>` to specify a project directory for find/analyze:
@@ -324,6 +325,35 @@ bun src/cli.ts audit src --fan-out-threshold=8           # Custom thresholds
 - `buildAuditReport(graph, options)` — Combines metrics and cycle detection, filters by configurable thresholds.
 
 The command is read-only and composes existing `DependencyGraph` infrastructure from `src/core/graph.ts`.
+
+## Unused Exports Command
+
+The `unused` command (`src/commands/unused.ts`) finds exports never imported by other files:
+
+```bash
+bun src/cli.ts unused <directory>                    # Scan project for unused exports
+bun src/cli.ts unused src --json                     # JSON output for tooling
+bun src/cli.ts unused src --ignore="*.test.ts"       # Exclude test files
+bun src/cli.ts unused src --verbose                  # Detailed output
+```
+
+### How It Works
+
+1. **Resolve tsconfig** using `resolveTsConfig()` from `project.ts`
+2. **Build dependency graph** via `buildDependencyGraph()`
+3. **Build imported bindings map** — for each file, tracks which export names are consumed (named imports) or if the entire module is consumed (namespace/dynamic/re-export)
+4. **Scan exports** for each file in the target directory using `scanExports()` via `withSourceFile()`
+5. **Compare** each export against the bindings map — unused if no consumer references it
+
+### Alias Handling
+
+`ImportBinding.name` stores the **original export name** (not the local alias), so `import { foo as bar }` correctly marks `foo` as used. No special alias handling needed.
+
+### Import Types That Mark All Exports As Used
+
+`import *`, `export *`, `export * as`, `import()`, `require()`, `require.resolve()`, `jest.mock()` — these consume the entire module, so all exports are considered used.
+
+DON'T: Add a new import type to the scanner without updating `buildImportedBindingsMap()` in `unused.ts`.
 
 ## Workspace Discovery
 
