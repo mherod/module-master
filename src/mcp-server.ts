@@ -285,16 +285,24 @@ server.registerTool(
 	"find",
 	{
 		description:
-			"Find files and exports by name across a TypeScript/JavaScript project (case-insensitive, partial match).",
+			"Locate where a symbol or file lives when you know its name but not its path. Searches BOTH filenames and exported symbol names with case-insensitive partial matching (e.g. 'user' matches UserService.ts and `getUserById`). Use this FIRST to turn a name into a concrete file path + line before calling `analyze`, or before a CLI move/rename. Exact matches rank ahead of partial ones. Returns matched file paths plus exports (name, file, line, kind, isType). Read-only.",
 		inputSchema: {
-			query: z.string().describe("Name to search for"),
+			query: z
+				.string()
+				.describe(
+					"Symbol or filename fragment, case-insensitive and partial (e.g. 'Entity', 'parseConfig')"
+				),
 			project: z
 				.string()
-				.describe("Path to the project directory or tsconfig.json"),
+				.describe(
+					"Absolute or cwd-relative path to the project root or a tsconfig.json; its tsconfig determines which files are in scope"
+				),
 			type: z
 				.enum(["file", "export", "all"])
 				.optional()
-				.describe("Filter results (default: all)"),
+				.describe(
+					"Restrict matches: 'file' = filenames only, 'export' = exported symbol names only, 'all' = both (default 'all')"
+				),
 		},
 	},
 	async ({ query, project, type }) => {
@@ -310,13 +318,19 @@ server.registerTool(
 	"analyze",
 	{
 		description:
-			"Analyze a module's exports, imports, the files that reference it, barrel re-exports, unresolvable imports, and unused exports.",
+			"Get the full dependency picture of ONE module before you edit, move, rename, or delete it. Reports the file's exports, its imports (with bindings and type-only flags), every file that references it (reverse dependencies — the blast radius of a change), barrel files that re-export it, imports that fail to resolve, and exports that no other file imports. Reach for this whenever you need to understand impact or wiring of a specific file; use `find` first if you only know the name. Pass a file, not a directory. Read-only.",
 		inputSchema: {
-			file: z.string().describe("Path to the file to analyze"),
+			file: z
+				.string()
+				.describe(
+					"Absolute or cwd-relative path to the single source file to analyze (e.g. 'src/core/graph.ts')"
+				),
 			project: z
 				.string()
 				.optional()
-				.describe("Path to the project directory or tsconfig.json"),
+				.describe(
+					"Optional path to the project root or tsconfig.json. Omit to auto-resolve the nearest tsconfig that owns the file (recommended)"
+				),
 		},
 	},
 	async ({ file, project }) => {
@@ -332,9 +346,13 @@ server.registerTool(
 	"discover",
 	{
 		description:
-			"Discover all tsconfig.json files in a directory and report project structure: configs, extends chains, references, path aliases, and file ownership counts.",
+			"Map the TypeScript project topology of an unfamiliar repo before doing anything else. Recursively finds every tsconfig.json and reports the root config, total owned file count, and per-config rootDir, solution-style flag, file count, extends chain, project-reference count, and path aliases. Use this to learn how a repo is laid out, where path aliases (e.g. '@/…') point, and which config owns which files — context that `analyze`/`audit` need. For monorepo PACKAGE metadata (entrypoints, published exports) use `workspace` instead. Read-only.",
 		inputSchema: {
-			directory: z.string().describe("Path to the project directory to scan"),
+			directory: z
+				.string()
+				.describe(
+					"Absolute or cwd-relative path to the directory to scan for tsconfig.json files (usually the repo root)"
+				),
 		},
 	},
 	async ({ directory }) => {
@@ -350,9 +368,13 @@ server.registerTool(
 	"workspace",
 	{
 		description:
-			"Discover pnpm/yarn/npm workspace packages and their structure (entrypoints, exports, barrels, tsconfig paths).",
+			"Enumerate the packages in a pnpm/yarn/npm monorepo and how each is wired. Reads pnpm-workspace.yaml or the package.json 'workspaces' field, then reports per package: name, main/module/types entrypoints, the 'exports' map, dependencies, detected barrel (index) files, and tsconfig path. Use this in a monorepo to see what packages exist and their public surface before a cross-package move or import. For tsconfig/path-alias topology (including single-package repos) use `discover` instead. Returns an error if the directory is not a workspace root. Read-only.",
 		inputSchema: {
-			directory: z.string().describe("Path to the workspace root"),
+			directory: z
+				.string()
+				.describe(
+					"Absolute or cwd-relative path to the workspace root (the directory containing pnpm-workspace.yaml or a package.json with a 'workspaces' field)"
+				),
 		},
 	},
 	async ({ directory }) => {
@@ -368,25 +390,37 @@ server.registerTool(
 	"audit",
 	{
 		description:
-			"Analyze module health: fan-out, fan-in, instability, large export surfaces, and circular dependencies.",
+			"Assess architectural health across a whole project and surface refactoring targets. Builds the import graph and reports: circular dependencies (cycles), files with high fan-out (import too many modules — likely doing too much), files with high fan-in (imported by many — high-blast-radius hubs), and files with large export surfaces. Use this to find god modules, over-coupled files, and dependency cycles, or to answer 'what's the riskiest/most-tangled part of this codebase?'. To drill into one file the audit flags, follow up with `analyze`. Tune thresholds to widen or narrow what gets flagged. Read-only.",
 		inputSchema: {
-			directory: z.string().describe("Path to the project directory to scan"),
+			directory: z
+				.string()
+				.describe(
+					"Absolute or cwd-relative path to the project directory to scan"
+				),
 			project: z
 				.string()
 				.optional()
-				.describe("Path to the project directory or tsconfig.json"),
+				.describe(
+					"Optional path to the project root or tsconfig.json. Omit to auto-resolve the tsconfig for `directory`"
+				),
 			fanOutThreshold: z
 				.number()
 				.optional()
-				.describe("Flag files importing more than N modules (default: 10)"),
+				.describe(
+					"Flag files that import more than N distinct modules (default 10). Lower to surface more candidates"
+				),
 			fanInThreshold: z
 				.number()
 				.optional()
-				.describe("Flag files imported by more than N files (default: 10)"),
+				.describe(
+					"Flag files imported by more than N distinct files (default 10). High fan-in marks hub modules"
+				),
 			exportThreshold: z
 				.number()
 				.optional()
-				.describe("Flag files with more than N exports (default: 8)"),
+				.describe(
+					"Flag files exporting more than N symbols (default 8). High counts suggest a module doing too much"
+				),
 		},
 	},
 	async ({
@@ -413,17 +447,25 @@ server.registerTool(
 	"unused",
 	{
 		description:
-			"Find exports that are never imported by any other file in the project.",
+			"Find dead exports — symbols a file exports that no OTHER file in the project ever imports. Use this for dead-code cleanup or to shrink a module's public surface before refactoring. Aliased imports (`import { a as b }`) count as usage; whole-module imports (`import *`, `export *`, dynamic `import()`, `require()`) mark every export of that module as used. Expect false positives for genuine entry points and intended public API (anything consumed outside this project), so confirm before deleting — use the `ignore` glob to exclude tests or known entry files. Returns total export/file counts and the unused list (name, file, line, kind, isType). Read-only.",
 		inputSchema: {
-			directory: z.string().describe("Path to the project directory to scan"),
+			directory: z
+				.string()
+				.describe(
+					"Absolute or cwd-relative path to the project directory to scan"
+				),
 			project: z
 				.string()
 				.optional()
-				.describe("Path to the project directory or tsconfig.json"),
+				.describe(
+					"Optional path to the project root or tsconfig.json. Omit to auto-resolve the tsconfig for `directory`"
+				),
 			ignore: z
 				.string()
 				.optional()
-				.describe('Glob pattern to exclude files (e.g. "*.test.ts")'),
+				.describe(
+					"Glob of files to exclude from the scan, e.g. '*.test.ts' to drop test files (which often hold the only references)"
+				),
 		},
 	},
 	async ({ directory, project, ignore }) => {
@@ -439,41 +481,61 @@ server.registerTool(
 	"similar",
 	{
 		description:
-			"Find similar or duplicate top-level functions, type aliases, and interfaces that are candidates for consolidation.",
+			"Find duplicate or near-duplicate top-level declarations (functions, type aliases, interfaces) that are candidates for consolidation. Use this to hunt copy-paste code, redundant types, or DRY opportunities across the project. Groups declarations by structural similarity and returns each group with its similarity bucket, score, and members (name, kind, file, line). Tune `threshold` for how alike members must be, and use `sameNameOnly`/`nameThreshold`/`minLines`/`kinds`/`skipSameFile` to narrow noise. Identifies candidates only — it does not merge anything. Read-only.",
 		inputSchema: {
-			directory: z.string().describe("Path to the project directory to scan"),
+			directory: z
+				.string()
+				.describe(
+					"Absolute or cwd-relative path to the project directory to scan"
+				),
 			project: z
 				.string()
 				.optional()
-				.describe("Path to the project directory or tsconfig.json"),
+				.describe(
+					"Optional path to the project root or tsconfig.json. Omit to auto-resolve the tsconfig for `directory`"
+				),
 			threshold: z
 				.number()
 				.optional()
-				.describe("Minimum similarity score 0.0–1.0 (default: 0.8)"),
+				.describe(
+					"Minimum structural similarity to group, 0.0–1.0 (default 0.8). Higher = only very-alike declarations; lower = more, looser matches"
+				),
 			maxGroups: z
 				.number()
 				.optional()
-				.describe("Max groups to return; 0 for unlimited (default: 10)"),
+				.describe(
+					"Cap on groups returned, highest-scoring first; 0 = unlimited (default 10)"
+				),
 			nameThreshold: z
 				.number()
 				.optional()
-				.describe("Only group declarations whose names also meet this score"),
+				.describe(
+					"Also require member NAME similarity to meet this score (0.0–1.0), so only similarly-named declarations group together"
+				),
 			sameNameOnly: z
 				.boolean()
 				.optional()
-				.describe("Only group declarations with identical names"),
+				.describe(
+					"Only group declarations that share an identical name (strictest name filter; overrides nameThreshold)"
+				),
 			skipSameFile: z
 				.boolean()
 				.optional()
-				.describe("Skip groups where all declarations are in the same file"),
+				.describe(
+					"Drop groups whose members all live in one file, leaving only cross-file duplication"
+				),
 			minLines: z
 				.number()
 				.optional()
-				.describe("Exclude declarations with fewer body lines"),
+				.describe(
+					"Ignore declarations whose body has fewer than N lines, to skip trivial one-liners"
+				),
 			kinds: z
 				.array(z.enum(["function", "type", "interface"]))
 				.optional()
-				.describe("Declaration kinds to include (default: all)"),
+				.describe(
+					"Limit to specific declaration kinds (default: all of function, type, interface)"
+				),
 		},
 	},
 	async ({
