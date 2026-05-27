@@ -10,6 +10,12 @@ if [ -f "src/cli.ts" ]; then
   bun src/cli.ts similar src --strict --threshold=0.95 --kinds=function
 fi
 
+# Rebuild standalone binaries (bin/resect-bin, bin/resect-mcp-bin) and
+# re-link the package globally so every commit re-installs the latest
+# changes for the resect + resect-mcp commands on PATH.
+pnpm run build
+pnpm link --global || echo "⚠️  pnpm link --global failed (global re-install skipped)"
+
 # Check if there are any staged files
 if [ -z "$(git diff --cached --name-only)" ]; then
   echo "No staged files to format"
