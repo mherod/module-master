@@ -225,6 +225,63 @@ resect unused src --verbose                  # Detailed output
 
 Correctly handles aliased imports, namespace imports, dynamic imports, re-exports, and type-only imports.
 
+## MCP Server (Claude Code)
+
+resect ships a stdio [Model Context Protocol](https://modelcontextprotocol.io) server, `resect-mcp`, that exposes its read-only analysis as MCP tools. Point Claude Code (or any MCP client) at it and let the agent explore your codebase structure directly — no copy-pasting CLI output.
+
+**Tools exposed** (all read-only — `resect-mcp` never modifies files):
+
+| Tool | Description |
+|------|-------------|
+| `find` | Find files and exports by name |
+| `analyze` | A module's exports, imports, referencing files, barrel re-exports, unresolvable + unused exports |
+| `discover` | tsconfig files, extends chains, project references, path aliases, file ownership |
+| `workspace` | Monorepo packages, entrypoints, exports maps, barrel files |
+| `audit` | Module health: fan-out, fan-in, instability, large export surfaces, cycles |
+| `unused` | Exports never imported by any other file |
+| `similar` | Similar/duplicate functions, type aliases, and interfaces |
+
+The mutating commands (`move`, `rename`, `alias`, `extract-common`) are intentionally **not** exposed over MCP — run those yourself from the CLI where you can review a `--dry-run` first.
+
+### Setup
+
+The `resect-mcp` binary is installed alongside the `resect` CLI, so a global install gives you both:
+
+```bash
+npm install -g @mherod/resect
+```
+
+Register it with Claude Code (user scope makes it available in all your projects):
+
+```bash
+claude mcp add -s user resect -- resect-mcp
+```
+
+Verify the connection:
+
+```bash
+claude mcp get resect
+# resect:
+#   Scope: User config (available in all your projects)
+#   Status: ✓ Connected
+```
+
+Claude can now call the resect tools (`find`, `analyze`, `audit`, …) directly. To scope the server to a single repo instead, drop `-s user` (local scope) or commit a `.mcp.json` at the repo root:
+
+```json
+{
+  "mcpServers": {
+    "resect": {
+      "command": "resect-mcp"
+    }
+  }
+}
+```
+
+To remove it: `claude mcp remove resect -s user`.
+
+> **Tip:** every tool accepts an absolute `directory`/`project`/`file` path, so the server's working directory doesn't matter — point it at any project on disk.
+
 ## Features
 
 - **AST-level precision** — Uses TypeScript Compiler API, not regex (see [AST Node Coverage](./CLAUDE.md#ast-node-coverage) for the full node-kind support matrix)
@@ -243,6 +300,7 @@ Correctly handles aliased imports, namespace imports, dynamic imports, re-export
 - **Similarity detection** — Find duplicate/similar functions using bigram Jaccard on normalized ASTs
 - **Automated extraction** — Consolidate duplicates by extracting to shared modules with import rewriting
 - **Smart filtering** — Name similarity, body line count, directive detection, same-file exclusion, path scoping
+- **MCP server** — Exposes read-only analysis (`find`, `analyze`, `audit`, `unused`, …) to AI agents over the Model Context Protocol
 
 ## Options
 

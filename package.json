@@ -4,7 +4,8 @@
   "description": "Surgical TypeScript/JavaScript module refactoring CLI. Move files, rename exports, and watch every import update automatically.",
   "type": "module",
   "bin": {
-    "resect": "./bin/resect.js"
+    "resect": "./bin/resect.js",
+    "resect-mcp": "./bin/resect-mcp.js"
   },
   "exports": {
     ".": {
@@ -52,7 +53,8 @@
   ],
   "scripts": {
     "dev": "bun run src/cli.ts",
-    "build": "bun build src/cli.ts --compile --outfile bin/resect-bin",
+    "build": "bun build src/cli.ts --compile --outfile bin/resect-bin && bun build src/mcp-server.ts --compile --outfile bin/resect-mcp-bin",
+    "build:mcp": "bun build src/mcp-server.ts --compile --outfile bin/resect-mcp-bin",
     "build:lib": "tsc -p tsconfig.build.json && bun build src/index.ts src/runtime/bun.ts src/runtime/node.ts src/runtime/index.ts --outdir dist --target bun --format esm --external typescript --splitting",
     "test": "bun test",
     "lint": "pnpm exec biome check --write . && pnpm run lint:eslint",
@@ -99,7 +101,9 @@
     }
   },
   "dependencies": {
-    "typescript": "^5.7.2"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "typescript": "^5.7.2",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.12",

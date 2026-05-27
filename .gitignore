@@ -6,6 +6,7 @@ out
 dist
 *.tgz
 bin/resect-bin
+bin/resect-mcp-bin
 
 # code coverage
 coverage
