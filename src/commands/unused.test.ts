@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { createSourceFileFromText } from "../core/source-file.ts";
 import { CLI, cleanup, makeFixture as makeFixtureBase } from "./__test-helpers";
+import { countInternalReferences } from "./unused.ts";
 
 async function makeFixture(name: string, files: Record<string, string>) {
 	return makeFixtureBase(`unused-${name}`, {
@@ -371,5 +373,133 @@ describe("unused command", () => {
 		expect(mathUnused).toHaveLength(0);
 
 		await cleanup(dir);
+	});
+
+	test("distinguishes internal-only exports from genuinely dead exports", async () => {
+		// Reproduces issue #58: an export referenced only within its own file
+		// must be flagged as a de-export candidate, not lumped in with exports
+		// referenced nowhere at all.
+		const dir = await makeFixture("internal-usage", {
+			"utils.ts": [
+				"export function isServerComponent(filename: string): boolean {",
+				"  return isAppRouterComponent(filename);",
+				"}",
+				"export function isAppRouterComponent(filename: string): boolean {",
+				'  return filename.includes("app/");',
+				"}",
+				"export function trulyDead(): number {",
+				"  return 42;",
+				"}",
+			].join("\n"),
+			"main.ts":
+				'import { isServerComponent } from "./utils";\nconsole.log(isServerComponent("x"));',
+		});
+
+		const proc = Bun.spawn([...CLI, "unused", dir, "--json"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+
+		interface Entry {
+			name: string;
+			internalUsage: boolean;
+			internalRefCount: number;
+		}
+		const find = (name: string): Entry | undefined =>
+			report.unused.find((u: Entry) => u.name === name);
+
+		// Used cross-file — not reported at all.
+		expect(find("isServerComponent")).toBeUndefined();
+
+		// Exported but only consumed within its own file — de-export candidate.
+		const internalOnly = find("isAppRouterComponent");
+		expect(internalOnly).toBeDefined();
+		expect(internalOnly?.internalUsage).toBe(true);
+		expect(internalOnly?.internalRefCount).toBeGreaterThanOrEqual(1);
+
+		// Referenced nowhere — safe to delete.
+		const dead = find("trulyDead");
+		expect(dead).toBeDefined();
+		expect(dead?.internalUsage).toBe(false);
+		expect(dead?.internalRefCount).toBe(0);
+
+		expect(report.internalOnlyCount).toBeGreaterThanOrEqual(1);
+		expect(report.deadCount).toBeGreaterThanOrEqual(1);
+
+		await cleanup(dir);
+	});
+});
+
+describe("countInternalReferences", () => {
+	const parse = (text: string) =>
+		createSourceFileFromText("internal-ref.ts", text);
+
+	test("counts same-file references excluding declaration and export statement", () => {
+		const sf = parse(
+			[
+				"export function caller() {",
+				"  return helper();",
+				"}",
+				"export function helper() {",
+				"  return 1;",
+				"}",
+			].join("\n")
+		);
+		const count = countInternalReferences(sf, {
+			name: "helper",
+			type: "named",
+			isType: false,
+			line: 4,
+		});
+		expect(count).toBe(1);
+	});
+
+	test("returns 0 for a symbol referenced only by its declaration", () => {
+		const sf = parse("export function lonely() {\n  return 1;\n}");
+		const count = countInternalReferences(sf, {
+			name: "lonely",
+			type: "named",
+			isType: false,
+			line: 1,
+		});
+		expect(count).toBe(0);
+	});
+
+	test("does not count property accesses of the same name", () => {
+		const sf = parse(
+			[
+				"export function value() {",
+				"  return 1;",
+				"}",
+				"const obj = { value: 2 };",
+				"export const total = obj.value;",
+			].join("\n")
+		);
+		const count = countInternalReferences(sf, {
+			name: "value",
+			type: "named",
+			isType: false,
+			line: 1,
+		});
+		expect(count).toBe(0);
+	});
+
+	test("does not count the trailing export specifier as usage", () => {
+		const sf = parse(
+			["function helper() {", "  return 1;", "}", "export { helper };"].join(
+				"\n"
+			)
+		);
+		const count = countInternalReferences(sf, {
+			name: "helper",
+			type: "named",
+			isType: false,
+			line: 4,
+		});
+		expect(count).toBe(0);
 	});
 });

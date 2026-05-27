@@ -337,7 +337,14 @@ bun src/cli.ts unused src --json --ignore="*.test.ts"  # JSON, exclude tests
 
 `ImportBinding.name` stores the original export name, so aliases (`import { foo as bar }`) are handled transparently. Whole-module imports (`import *`, `export *`, `import()`, `require()`) mark all exports as used.
 
+### De-export vs delete (issue #58)
+
+A hit means "no OTHER file imports this" — a **de-export** signal, NOT automatically a **delete** signal. `countInternalReferences(sourceFile, exp)` counts same-file references (excluding the declaration and the export statement) so each `UnusedExport` carries `internalUsage` (boolean) and `internalRefCount`. `internalUsage: false` → referenced nowhere, safe to delete; `internalUsage: true` → only the `export` keyword is redundant, dropping the symbol breaks its own module. The report exposes aggregate `deadCount` and `internalOnlyCount`, and the MCP `unused` tool surfaces all of these.
+
+`countInternalReferences` tracks parent nodes explicitly through the walk rather than reading `node.parent` — program source files are not bound until the type checker runs, so `node.parent` is undefined and reading `parent.kind` throws. It uses a name-based heuristic (no checker), biasing ambiguous matches toward "used" (safe: verify before deleting).
+
 DON'T: Add a new import type to the scanner without updating `buildImportedBindingsMap()` in `unused.ts`.
+DON'T: Read `node.parent` when walking a program source file in `unused.ts` — pass the parent down through `ts.forEachChild` instead.
 
 ## Workspace Discovery
 

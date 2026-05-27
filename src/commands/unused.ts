@@ -1,4 +1,5 @@
 import path from "node:path";
+import ts from "typescript";
 import { logger } from "../cli-logger.ts";
 import { filterGitignored } from "../core/git.ts";
 import type { DependencyGraph } from "../core/graph.ts";
@@ -21,12 +22,25 @@ export interface UnusedExport {
 	type: ExportInfo["type"];
 	isType: boolean;
 	line: number;
+	/**
+	 * True when the export is still referenced within its own file (only the
+	 * `export` keyword is redundant). Such a hit is a de-export candidate, not a
+	 * delete candidate — removing the symbol would break its own module. False
+	 * means the symbol is referenced by no file at all and is safe to delete.
+	 */
+	internalUsage: boolean;
+	/** Number of references to the symbol within its own file (excludes the declaration and export statements). */
+	internalRefCount: number;
 }
 
 export interface UnusedReport {
 	unused: UnusedExport[];
 	totalExports: number;
 	totalFiles: number;
+	/** Exports referenced by no file at all — safe deletion candidates. */
+	deadCount: number;
+	/** Exports referenced only within their own file — de-export candidates. */
+	internalOnlyCount: number;
 }
 
 /**
@@ -40,7 +54,13 @@ export async function findUnusedExports(
 
 	const tsconfigPath = resolveTsConfig(options?.project, absoluteDir);
 	if (!tsconfigPath) {
-		return { unused: [], totalExports: 0, totalFiles: 0 };
+		return {
+			unused: [],
+			totalExports: 0,
+			totalFiles: 0,
+			deadCount: 0,
+			internalOnlyCount: 0,
+		};
 	}
 
 	const project = loadProject(tsconfigPath);
@@ -71,29 +91,112 @@ export async function findUnusedExports(
 			continue;
 		}
 
-		const exports = graph.program
-			? withSourceFile(graph.program, file, scanExports, [] as ExportInfo[])
-			: withSourceFile(file, scanExports, [] as ExportInfo[]);
-
-		totalExports += exports.length;
-
 		const fileImporters = importedBindings.get(file);
 
-		for (const exp of exports) {
-			if (isExportUsed(exp, file, fileImporters, graph)) {
-				continue;
+		// Scan exports and count internal references from the same parsed
+		// source file, so the cross-file and same-file checks share one parse.
+		const collect = (sourceFile: ts.SourceFile): void => {
+			const exports = scanExports(sourceFile);
+			totalExports += exports.length;
+
+			for (const exp of exports) {
+				if (isExportUsed(exp, file, fileImporters, graph)) {
+					continue;
+				}
+				const internalRefCount = countInternalReferences(sourceFile, exp);
+				unused.push({
+					file,
+					name: exp.name,
+					type: exp.type,
+					isType: exp.isType,
+					line: exp.line,
+					internalUsage: internalRefCount > 0,
+					internalRefCount,
+				});
 			}
-			unused.push({
-				file,
-				name: exp.name,
-				type: exp.type,
-				isType: exp.isType,
-				line: exp.line,
-			});
+		};
+
+		if (graph.program) {
+			withSourceFile(graph.program, file, collect, undefined);
+		} else {
+			withSourceFile(file, collect, undefined);
 		}
 	}
 
-	return { unused, totalExports, totalFiles: allFiles.length };
+	const internalOnlyCount = unused.filter((u) => u.internalUsage).length;
+
+	return {
+		unused,
+		totalExports,
+		totalFiles: allFiles.length,
+		deadCount: unused.length - internalOnlyCount,
+		internalOnlyCount,
+	};
+}
+
+/**
+ * Count references to an exported symbol within its own defining file,
+ * excluding the declaration itself and the export statements that surface it.
+ *
+ * A positive count means the symbol is consumed inside its own module: only the
+ * `export` keyword is redundant (a de-export candidate). A zero count means the
+ * symbol is referenced by no file at all and is safe to delete.
+ *
+ * Uses a name-based AST walk rather than the type checker so it stays
+ * unit-testable against a standalone `ts.SourceFile`. Ambiguous matches (e.g. a
+ * shadowing local of the same name) are counted as usage, which biases toward
+ * the safe "verify before deleting" direction.
+ */
+export function countInternalReferences(
+	sourceFile: ts.SourceFile,
+	exp: ExportInfo
+): number {
+	let count = 0;
+
+	// Parent is tracked explicitly through the walk rather than read from
+	// `node.parent`: source files obtained from a ts.Program are not bound until
+	// the type checker runs, so their parent pointers may be undefined.
+	const isDeclarationName = (node: ts.Identifier, parent: ts.Node): boolean =>
+		(ts.isFunctionDeclaration(parent) && parent.name === node) ||
+		(ts.isClassDeclaration(parent) && parent.name === node) ||
+		(ts.isInterfaceDeclaration(parent) && parent.name === node) ||
+		(ts.isTypeAliasDeclaration(parent) && parent.name === node) ||
+		(ts.isEnumDeclaration(parent) && parent.name === node) ||
+		(ts.isVariableDeclaration(parent) && parent.name === node) ||
+		(ts.isParameter(parent) && parent.name === node) ||
+		(ts.isBindingElement(parent) && parent.name === node);
+
+	// Property/member positions (`obj.name`, `{ name: ... }`, `Ns.name`) are not
+	// references to the exported symbol.
+	const isMemberName = (node: ts.Identifier, parent: ts.Node): boolean =>
+		(ts.isPropertyAccessExpression(parent) && parent.name === node) ||
+		(ts.isQualifiedName(parent) && parent.right === node) ||
+		(ts.isPropertyAssignment(parent) && parent.name === node) ||
+		(ts.isPropertySignature(parent) && parent.name === node) ||
+		(ts.isMethodDeclaration(parent) && parent.name === node) ||
+		(ts.isMethodSignature(parent) && parent.name === node);
+
+	// The export statement itself (`export { name }`, `export default name`) is
+	// not internal usage — it is the redundant re-export we are flagging.
+	const isExportName = (node: ts.Identifier, parent: ts.Node): boolean =>
+		ts.isExportSpecifier(parent) ||
+		(ts.isExportAssignment(parent) && parent.expression === node);
+
+	const visit = (node: ts.Node, parent: ts.Node): void => {
+		if (
+			ts.isIdentifier(node) &&
+			node.text === exp.name &&
+			!isDeclarationName(node, parent) &&
+			!isMemberName(node, parent) &&
+			!isExportName(node, parent)
+		) {
+			count++;
+		}
+		ts.forEachChild(node, (child) => visit(child, node));
+	};
+
+	ts.forEachChild(sourceFile, (child) => visit(child, sourceFile));
+	return count;
 }
 
 /**
@@ -211,7 +314,10 @@ export async function unusedCommand(options: UnusedOptions): Promise<void> {
 	}
 
 	logger.info(
-		`Found ${report.unused.length} unused export(s) in ${byFile.size} file(s):\n`
+		`Found ${report.unused.length} unused export(s) in ${byFile.size} file(s):`
+	);
+	logger.info(
+		`  ${report.deadCount} referenced nowhere (safe to delete) · ${report.internalOnlyCount} referenced only within their own file (de-export candidates)\n`
 	);
 
 	for (const [file, exports] of byFile) {
@@ -219,7 +325,12 @@ export async function unusedCommand(options: UnusedOptions): Promise<void> {
 		logger.info(`  ${rel}`);
 		for (const exp of exports) {
 			const typeLabel = exp.isType ? " (type)" : "";
-			logger.info(`    • ${exp.name}${typeLabel} (line ${exp.line})`);
+			const usageLabel = exp.internalUsage
+				? ` — used internally ×${exp.internalRefCount}, de-export not delete`
+				: " — no references, safe to delete";
+			logger.info(
+				`    • ${exp.name}${typeLabel} (line ${exp.line})${usageLabel}`
+			);
 		}
 		if (verbose) {
 			logger.empty();
@@ -227,7 +338,7 @@ export async function unusedCommand(options: UnusedOptions): Promise<void> {
 	}
 
 	logger.info(
-		`\n${report.unused.length} unused export(s) in ${byFile.size} file(s)`
+		`\n${report.unused.length} unused export(s) in ${byFile.size} file(s) — ${report.deadCount} deletable, ${report.internalOnlyCount} de-export only`
 	);
 	logger.empty();
 }

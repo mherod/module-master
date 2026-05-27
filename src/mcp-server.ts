@@ -222,12 +222,16 @@ async function unusedTool(
 		totalExports: report.totalExports,
 		totalFiles: report.totalFiles,
 		unusedCount: report.unused.length,
+		deadCount: report.deadCount,
+		internalOnlyCount: report.internalOnlyCount,
 		unused: report.unused.map((u) => ({
 			name: u.name,
 			file: path.relative(absoluteDir, u.file),
 			line: u.line,
 			isType: u.isType,
 			kind: u.type,
+			internalUsage: u.internalUsage,
+			internalRefCount: u.internalRefCount,
 		})),
 	});
 }
@@ -447,7 +451,7 @@ server.registerTool(
 	"unused",
 	{
 		description:
-			"Find dead exports — symbols a file exports that no OTHER file in the project ever imports. Use this for dead-code cleanup or to shrink a module's public surface before refactoring. Aliased imports (`import { a as b }`) count as usage; whole-module imports (`import *`, `export *`, dynamic `import()`, `require()`) mark every export of that module as used. Expect false positives for genuine entry points and intended public API (anything consumed outside this project), so confirm before deleting — use the `ignore` glob to exclude tests or known entry files. Returns total export/file counts and the unused list (name, file, line, kind, isType). Read-only.",
+			"Find exports that no OTHER file in the project imports. A hit is a DE-EXPORT signal, not automatically a DELETE signal: each entry carries `internalUsage`/`internalRefCount` telling you whether the symbol is still referenced WITHIN its own file. `internalUsage:false` (`internalRefCount:0`) means referenced nowhere — safe to delete; `internalUsage:true` means only the `export` keyword is redundant — deleting the symbol would break its own module, so just drop the `export`. The report also returns `deadCount` (deletable) and `internalOnlyCount` (de-export only). Aliased imports (`import { a as b }`) count as cross-file usage; whole-module imports (`import *`, `export *`, dynamic `import()`, `require()`) mark every export of that module as used. Expect false positives for genuine entry points and intended public API (anything consumed outside this project), so confirm before acting — use the `ignore` glob to exclude tests or known entry files. Returns total export/file counts, `deadCount`, `internalOnlyCount`, and the unused list (name, file, line, kind, isType, internalUsage, internalRefCount). Read-only.",
 		inputSchema: {
 			directory: z
 				.string()

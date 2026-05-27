@@ -214,7 +214,7 @@ Without `--output`, keeps one canonical copy in place and replaces all others wi
 
 ### `unused <directory>`
 
-Find exports that are never imported by any other file in the project.
+Find exports that no other file in the project imports.
 
 ```bash
 resect unused src                            # Scan for unused exports
@@ -222,6 +222,8 @@ resect unused src --json                     # JSON output for tooling
 resect unused src --ignore="*.test.ts"       # Exclude test files
 resect unused src --verbose                  # Detailed output
 ```
+
+A hit is a **de-export** signal, not automatically a **delete** signal. Each result carries `internalUsage` / `internalRefCount`: when `internalUsage` is `false` the symbol is referenced nowhere and is safe to delete; when `true`, it is still called within its own file, so only the `export` keyword is redundant — deleting the symbol would break its own module. The report also returns aggregate `deadCount` and `internalOnlyCount`.
 
 Correctly handles aliased imports, namespace imports, dynamic imports, re-exports, and type-only imports.
 
@@ -238,7 +240,7 @@ resect ships a stdio [Model Context Protocol](https://modelcontextprotocol.io) s
 | `discover` | tsconfig files, extends chains, project references, path aliases, file ownership |
 | `workspace` | Monorepo packages, entrypoints, exports maps, barrel files |
 | `audit` | Module health: fan-out, fan-in, instability, large export surfaces, cycles |
-| `unused` | Exports never imported by any other file |
+| `unused` | Exports no other file imports, flagged as de-export vs delete (`internalUsage`, `deadCount`, `internalOnlyCount`) |
 | `similar` | Similar/duplicate functions, type aliases, and interfaces |
 
 The mutating commands (`move`, `rename`, `alias`, `extract-common`) are intentionally **not** exposed over MCP — run those yourself from the CLI where you can review a `--dry-run` first.
