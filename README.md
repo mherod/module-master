@@ -282,6 +282,26 @@ Claude can now call the resect tools (`find`, `analyze`, `audit`, …) directly.
 
 To remove it: `claude mcp remove resect -s user`.
 
+### Codex CLI
+
+Register the same `resect-mcp` binary with [Codex](https://github.com/openai/codex) as a global stdio server:
+
+```bash
+codex mcp add resect -- resect-mcp
+```
+
+Verify it's registered:
+
+```bash
+codex mcp get resect
+# resect
+#   enabled: true
+#   transport: stdio
+#   command: resect-mcp
+```
+
+To remove it: `codex mcp remove resect`.
+
 > **Tip:** every tool accepts an absolute `directory`/`project`/`file` path, so the server's working directory doesn't matter — point it at any project on disk.
 
 ## Features
