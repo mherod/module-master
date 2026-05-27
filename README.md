@@ -225,6 +225,8 @@ resect unused src --verbose                  # Detailed output
 
 A hit is a **de-export** signal, not automatically a **delete** signal. Each result carries `internalUsage` / `internalRefCount`: when `internalUsage` is `false` the symbol is referenced nowhere and is safe to delete; when `true`, it is still called within its own file, so only the `export` keyword is redundant — deleting the symbol would break its own module. The report also returns aggregate `deadCount` and `internalOnlyCount`.
 
+Usage is counted across **every tsconfig discovered in the project**, not just the one that resolves for the scan directory — so an export consumed only by a sibling config (e.g. `scripts/` on a `tsconfig.scripts.json`) is not falsely reported dead. The scanned set is returned as `scannedConfigs` / `scannedFileCount`. The `--ignore` glob excludes files only as reported *candidates*; ignored files (e.g. tests) still count as *usage* sources, so a test-only export is not reported dead.
+
 Correctly handles aliased imports, namespace imports, dynamic imports, re-exports, and type-only imports.
 
 ## MCP Server (Claude Code)

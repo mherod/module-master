@@ -224,6 +224,10 @@ async function unusedTool(
 		unusedCount: report.unused.length,
 		deadCount: report.deadCount,
 		internalOnlyCount: report.internalOnlyCount,
+		scannedConfigs: report.scannedConfigs.map((c) =>
+			path.relative(absoluteDir, c)
+		),
+		scannedFileCount: report.scannedFileCount,
 		unused: report.unused.map((u) => ({
 			name: u.name,
 			file: path.relative(absoluteDir, u.file),
@@ -451,7 +455,7 @@ server.registerTool(
 	"unused",
 	{
 		description:
-			"Find exports that no OTHER file in the project imports. A hit is a DE-EXPORT signal, not automatically a DELETE signal: each entry carries `internalUsage`/`internalRefCount` telling you whether the symbol is still referenced WITHIN its own file. `internalUsage:false` (`internalRefCount:0`) means referenced nowhere — safe to delete; `internalUsage:true` means only the `export` keyword is redundant — deleting the symbol would break its own module, so just drop the `export`. The report also returns `deadCount` (deletable) and `internalOnlyCount` (de-export only). Aliased imports (`import { a as b }`) count as cross-file usage; whole-module imports (`import *`, `export *`, dynamic `import()`, `require()`) mark every export of that module as used. Expect false positives for genuine entry points and intended public API (anything consumed outside this project), so confirm before acting — use the `ignore` glob to exclude tests or known entry files. Returns total export/file counts, `deadCount`, `internalOnlyCount`, and the unused list (name, file, line, kind, isType, internalUsage, internalRefCount). Read-only.",
+			"Find exports that no OTHER file in the project imports. A hit is a DE-EXPORT signal, not automatically a DELETE signal: each entry carries `internalUsage`/`internalRefCount` telling you whether the symbol is still referenced WITHIN its own file. `internalUsage:false` (`internalRefCount:0`) means referenced nowhere — safe to delete; `internalUsage:true` means only the `export` keyword is redundant — deleting the symbol would break its own module, so just drop the `export`. The report also returns `deadCount` (deletable) and `internalOnlyCount` (de-export only). Aliased imports (`import { a as b }`) count as cross-file usage; whole-module imports (`import *`, `export *`, dynamic `import()`, `require()`) mark every export of that module as used. Usage is counted across ALL tsconfigs discovered in the project (the scanned set is returned as `scannedConfigs`/`scannedFileCount`), so an export consumed only by a sibling config (e.g. `scripts/` on `tsconfig.scripts.json`) is not falsely reported dead. The `ignore` glob suppresses files only as reported candidates — ignored files (e.g. tests) still count as usage sources, so a test-only export is not reported dead. Expect false positives only for genuine entry points / public API consumed entirely outside this project. Returns total export/file counts, `deadCount`, `internalOnlyCount`, `scannedConfigs`, `scannedFileCount`, and the unused list (name, file, line, kind, isType, internalUsage, internalRefCount). Read-only.",
 		inputSchema: {
 			directory: z
 				.string()

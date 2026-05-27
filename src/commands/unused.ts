@@ -5,8 +5,13 @@ import { filterGitignored } from "../core/git.ts";
 import type { DependencyGraph } from "../core/graph.ts";
 import { buildDependencyGraph } from "../core/graph.ts";
 import { loadProject, resolveTsConfig } from "../core/project.ts";
+import { normalizePath } from "../core/resolver.ts";
 import { scanExports } from "../core/scanner.ts";
 import { withSourceFile } from "../core/source-file.ts";
+import {
+	discoverProject,
+	toProjectConfig,
+} from "../core/tsconfig-discovery.ts";
 import type { ExportInfo } from "../types/analysis.ts";
 import type { ReadOnlyCommandOptions } from "../types/commands.ts";
 
@@ -41,6 +46,14 @@ export interface UnusedReport {
 	deadCount: number;
 	/** Exports referenced only within their own file — de-export candidates. */
 	internalOnlyCount: number;
+	/**
+	 * Absolute paths of every tsconfig whose files were scanned for usage. Usage
+	 * is counted across ALL of these (e.g. a sibling `tsconfig.scripts.json`), so
+	 * an export consumed only by a sibling config is not falsely reported dead.
+	 */
+	scannedConfigs: string[];
+	/** Total number of files (across all scanned configs) contributing to the usage graph. */
+	scannedFileCount: number;
 }
 
 /**
@@ -60,30 +73,50 @@ export async function findUnusedExports(
 			totalFiles: 0,
 			deadCount: 0,
 			internalOnlyCount: 0,
+			scannedConfigs: [],
+			scannedFileCount: 0,
 		};
 	}
 
-	const project = loadProject(tsconfigPath);
-	const graph = await buildDependencyGraph(project);
+	// Build the usage graph from EVERY tsconfig discovered in the project, not
+	// just the one that resolves for the scan directory. Otherwise an export
+	// consumed only by files owned by a sibling config (e.g. a CLI/migration
+	// script on tsconfig.scripts.json) is falsely reported dead (#59).
+	const graphs = await buildProjectGraphs(tsconfigPath);
 
-	// Filter graph files to those under the target directory
-	let allFiles = Array.from(graph.imports.keys()).filter((f) =>
+	// Merge per-config usage maps and map each file to a graph that contains it
+	// (for export scanning + internal-reference counting).
+	const importedBindings = new Map<string, Set<string>>();
+	const fileToGraph = new Map<string, DependencyGraph>();
+	const scannedConfigs: string[] = [];
+
+	for (const { tsconfigPath: configPath, graph } of graphs) {
+		scannedConfigs.push(configPath);
+		mergeImportedBindings(importedBindings, buildImportedBindingsMap(graph));
+		for (const file of graph.imports.keys()) {
+			if (!fileToGraph.has(file)) {
+				fileToGraph.set(file, graph);
+			}
+		}
+	}
+
+	// Candidate files: those under the target directory, across all configs.
+	let candidateFiles = Array.from(fileToGraph.keys()).filter((f) =>
 		f.startsWith(absoluteDir)
 	);
 
 	// Exclude gitignored files by default
-	allFiles = await filterGitignored(allFiles, absoluteDir);
+	candidateFiles = await filterGitignored(candidateFiles, absoluteDir);
 
-	// Build a set of all imported bindings: Map<resolvedPath, Set<bindingName>>
-	const importedBindings = buildImportedBindingsMap(graph);
-
-	// Build ignore pattern
+	// Build ignore pattern. The ignore glob suppresses files as REPORTED
+	// CANDIDATES only — ignored files (e.g. tests) still contribute to the usage
+	// graph above, so a test-only export is not falsely reported dead.
 	const ignorePattern = options?.ignore ? new Bun.Glob(options.ignore) : null;
 
 	const unused: UnusedExport[] = [];
 	let totalExports = 0;
 
-	for (const file of allFiles) {
+	for (const file of candidateFiles) {
 		if (
 			ignorePattern?.match(file) ||
 			ignorePattern?.match(path.basename(file))
@@ -91,7 +124,11 @@ export async function findUnusedExports(
 			continue;
 		}
 
-		const fileImporters = importedBindings.get(file);
+		const graph = fileToGraph.get(file);
+		if (!graph) {
+			continue;
+		}
+		const fileImporters = importedBindings.get(normalizePath(file));
 
 		// Scan exports and count internal references from the same parsed
 		// source file, so the cross-file and same-file checks share one parse.
@@ -128,10 +165,58 @@ export async function findUnusedExports(
 	return {
 		unused,
 		totalExports,
-		totalFiles: allFiles.length,
+		totalFiles: candidateFiles.length,
 		deadCount: unused.length - internalOnlyCount,
 		internalOnlyCount,
+		scannedConfigs,
+		scannedFileCount: fileToGraph.size,
 	};
+}
+
+/**
+ * Build a dependency graph for every non-solution tsconfig discovered in the
+ * project that owns `tsconfigPath`. Falls back to the single resolved config
+ * when discovery finds nothing. Each graph is cached per tsconfig by
+ * `buildDependencyGraph`, so repeated configs are cheap.
+ */
+async function buildProjectGraphs(
+	tsconfigPath: string
+): Promise<{ tsconfigPath: string; graph: DependencyGraph }[]> {
+	const discovery = discoverProject(path.dirname(tsconfigPath));
+	const configs = discovery.configs.filter((c) => !c.isSolution);
+
+	const projects =
+		configs.length > 0
+			? configs.map(toProjectConfig)
+			: [loadProject(tsconfigPath)];
+
+	const results: { tsconfigPath: string; graph: DependencyGraph }[] = [];
+	for (const project of projects) {
+		const graph = await buildDependencyGraph(project);
+		results.push({ tsconfigPath: project.tsconfigPath, graph });
+	}
+	return results;
+}
+
+/**
+ * Merge a per-config imported-bindings map into the accumulating union map.
+ * Keys are normalized so the same resolved file from different configs lines up.
+ */
+function mergeImportedBindings(
+	target: Map<string, Set<string>>,
+	source: Map<string, Set<string>>
+): void {
+	for (const [resolvedPath, bindings] of source) {
+		const key = normalizePath(resolvedPath);
+		const existing = target.get(key);
+		if (existing) {
+			for (const binding of bindings) {
+				existing.add(binding);
+			}
+		} else {
+			target.set(key, new Set(bindings));
+		}
+	}
 }
 
 /**

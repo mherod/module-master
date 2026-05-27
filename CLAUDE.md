@@ -339,12 +339,19 @@ bun src/cli.ts unused src --json --ignore="*.test.ts"  # JSON, exclude tests
 
 ### De-export vs delete (issue #58)
 
-A hit means "no OTHER file imports this" — a **de-export** signal, NOT automatically a **delete** signal. `countInternalReferences(sourceFile, exp)` counts same-file references (excluding the declaration and the export statement) so each `UnusedExport` carries `internalUsage` (boolean) and `internalRefCount`. `internalUsage: false` → referenced nowhere, safe to delete; `internalUsage: true` → only the `export` keyword is redundant, dropping the symbol breaks its own module. The report exposes aggregate `deadCount` and `internalOnlyCount`, and the MCP `unused` tool surfaces all of these.
+A hit means "no OTHER file imports this" — a **de-export** signal, NOT a **delete** signal. `countInternalReferences(sourceFile, exp)` counts same-file references (excluding the declaration and export statement); each `UnusedExport` carries `internalUsage` + `internalRefCount`. `internalUsage: false` → referenced nowhere, safe to delete; `true` → only the `export` keyword is redundant. Report exposes aggregate `deadCount`/`internalOnlyCount`; MCP `unused` surfaces all of these.
 
-`countInternalReferences` tracks parent nodes explicitly through the walk rather than reading `node.parent` — program source files are not bound until the type checker runs, so `node.parent` is undefined and reading `parent.kind` throws. It uses a name-based heuristic (no checker), biasing ambiguous matches toward "used" (safe: verify before deleting).
+`countInternalReferences` tracks parent nodes through the walk rather than reading `node.parent` — program source files are unbound until the type checker runs, so `node.parent` is undefined and `parent.kind` throws. Name-based heuristic (no checker), biasing ambiguous matches toward "used".
+
+### Cross-tsconfig usage scope (issue #59)
+
+Usage is counted across EVERY non-solution tsconfig discovered, not just the one `resolveTsConfig` picks. `buildProjectGraphs(tsconfigPath)` calls `discoverProject(dir)`, builds a graph per config (each cached by `buildDependencyGraph`), and `mergeImportedBindings()` unions their imported-bindings maps (keys normalized via `normalizePath`). Without this, an export consumed only by a sibling config (`scripts/` on `tsconfig.scripts.json`) is falsely reported dead. Report exposes `scannedConfigs`/`scannedFileCount`.
+
+The `ignore` glob suppresses reported CANDIDATES only — ignored files still feed the usage graph (`importedBindings` is built from the full graph), so a test-only export is not reported dead.
 
 DON'T: Add a new import type to the scanner without updating `buildImportedBindingsMap()` in `unused.ts`.
 DON'T: Read `node.parent` when walking a program source file in `unused.ts` — pass the parent down through `ts.forEachChild` instead.
+DON'T: Build the `unused` usage graph from one tsconfig — use `buildProjectGraphs()`.
 
 ## Workspace Discovery
 

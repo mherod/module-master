@@ -503,3 +503,74 @@ describe("countInternalReferences", () => {
 		expect(count).toBe(0);
 	});
 });
+
+describe("unused command — cross-tsconfig and ignore scope (#59)", () => {
+	test("export consumed only by a sibling tsconfig is not reported dead", async () => {
+		// tsconfig.json owns src/**; tsconfig.scripts.json owns scripts/**.
+		// `foo` is imported only from scripts/, which lives outside the config
+		// that resolves for the scan directory.
+		const dir = await makeFixture("sibling-tsconfig", {
+			"tsconfig.json": JSON.stringify({
+				compilerOptions: { strict: true },
+				include: ["src/**/*.ts"],
+			}),
+			"tsconfig.scripts.json": JSON.stringify({
+				compilerOptions: { strict: true },
+				include: ["scripts/**/*.ts"],
+			}),
+			"src/utils/helper.ts":
+				"export function foo() {\n  return 1;\n}\nexport function dead() {\n  return 2;\n}",
+			"scripts/migrate.ts":
+				'import { foo } from "../src/utils/helper";\nconsole.log(foo());',
+		});
+
+		const proc = Bun.spawn([...CLI, "unused", dir, "--json"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+
+		const names = report.unused.map((u: { name: string }) => u.name);
+		// foo is live (used by scripts/) — must not be reported.
+		expect(names).not.toContain("foo");
+		// dead is referenced nowhere — still reported.
+		expect(names).toContain("dead");
+		// Both configs were scanned for usage.
+		expect(report.scannedConfigs.length).toBeGreaterThanOrEqual(2);
+
+		await cleanup(dir);
+	});
+
+	test("ignored test files still count as usage, not just dropped as candidates", async () => {
+		// clearCacheForTesting is imported only by an ignored test file in the
+		// same tsconfig — it must stay counted as used, not reported dead.
+		const dir = await makeFixture("ignore-as-usage", {
+			"cache.ts":
+				"let c = 0;\nexport function getCache() {\n  return c;\n}\nexport function clearCacheForTesting() {\n  c = 0;\n}",
+			"cache.test.ts":
+				'import { clearCacheForTesting, getCache } from "./cache";\nclearCacheForTesting();\nconsole.log(getCache());',
+			"orphan.ts": "export function trulyDead() {\n  return 1;\n}",
+		});
+
+		const proc = Bun.spawn(
+			[...CLI, "unused", dir, "--ignore=*.test.ts", "--json"],
+			{ stdout: "pipe", stderr: "pipe" }
+		);
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+
+		const names = report.unused.map((u: { name: string }) => u.name);
+		// Used only by the ignored test — must NOT be reported dead.
+		expect(names).not.toContain("clearCacheForTesting");
+		expect(names).not.toContain("getCache");
+		// Referenced nowhere — still reported.
+		expect(names).toContain("trulyDead");
+
+		await cleanup(dir);
+	});
+});
