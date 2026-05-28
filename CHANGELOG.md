@@ -38,9 +38,12 @@ All notable user-facing changes to this project are documented here.
   safe case-only rename/import-specifier support lands (#72/#73).
 - **Experimental `tidy` command**: `resect tidy --experimental <dir>`
   composes the existing `unused`, `similar`, and `audit` analyses into one
-  read-only grouped report. JSON output uses schema version
-  `1-experimental`, which may change during the 1.x experimental window.
-  The command is also exposed as a read-only MCP tool.
+  grouped report. JSON output uses schema version `1-experimental`, which may
+  change during the 1.x experimental window. `--fix` now applies safe tidy
+  fixes with a dirty-worktree guard, `--max-changes`, one batch typecheck gate,
+  and rollback on new errors or incomplete verification. The first safe fix is
+  `dead-exports`, which removes redundant `export` keywords from internally
+  used unused exports. The MCP tool defaults to `dryRun: true`.
 
 ## [1.7.0] — 2026-05-28
 

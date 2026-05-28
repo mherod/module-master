@@ -1,7 +1,9 @@
 import path from "node:path";
+import ts from "typescript";
 import { logger } from "../cli-logger.ts";
 import { mapConcurrent } from "../core/concurrency.ts";
 import { TS_JS_VUE_EXTENSIONS } from "../core/constants.ts";
+import { ensureCleanWorktree, isWorktreeDirty } from "../core/git.ts";
 import {
 	buildProjectGraphs,
 	type DependencyGraph,
@@ -12,24 +14,35 @@ import {
 	isWithinPath,
 	toRelativePath,
 } from "../core/path-utils.ts";
-import { resolveTsConfig } from "../core/project.ts";
+import { loadProject, resolveTsConfig } from "../core/project.ts";
 import {
 	collectFunctionsFromFiles,
 	findSimilarGroups,
 	type SimilarityFilterOptions,
 } from "../core/similarity.ts";
+import { createSourceFileFromText } from "../core/source-file.ts";
+import {
+	applyTextChanges,
+	deduplicateChanges,
+	type TextChange,
+} from "../core/text-changes.ts";
+import { runTypeCheckDetailed } from "../core/verify.ts";
 import {
 	discoverWorkspace,
 	filterToWorkspaceBoundary,
 } from "../core/workspace.ts";
 import type {
+	TidyAppliedFix,
 	TidyAuditFinding,
+	TidyFixCategory,
 	TidyOptions,
 	TidyReport,
 	TidySimilarFinding,
 	TidySimilarMember,
 	TidyUnusedFinding,
+	TypecheckDelta,
 } from "../types/tidy.ts";
+import type { ProjectConfig } from "../types.ts";
 import { buildAuditReport, type FileMetrics } from "./audit.ts";
 import {
 	findUnusedExportsFromGraphs,
@@ -41,6 +54,40 @@ const DEFAULT_FAN_OUT_THRESHOLD = 10;
 const DEFAULT_FAN_IN_THRESHOLD = 10;
 const DEFAULT_EXPORT_THRESHOLD = 8;
 const DEFAULT_SIMILARITY_THRESHOLD = 0.8;
+const DEFAULT_MAX_CHANGES = 50;
+const FIX_WRITE_CONCURRENCY = 4;
+
+export const SAFE_TIDY_FIX_CATEGORIES = [
+	"dead-exports",
+	"alias-normalisation",
+] as const satisfies readonly TidyFixCategory[];
+
+export const ALL_TIDY_FIX_CATEGORIES = [
+	...SAFE_TIDY_FIX_CATEGORIES,
+	"file-moves",
+	"mock-cleanup",
+	"case-renames",
+	"layout-relocations",
+] as const satisfies readonly TidyFixCategory[];
+
+interface TidyApplyResult {
+	report: TidyReport;
+	success: boolean;
+	errors: string[];
+	worktreeDirtyRollbackDisabled: boolean;
+}
+
+interface PlannedTidyChange {
+	category: TidyFixCategory;
+	file: string;
+	exportName: string;
+	changes: TextChange[];
+}
+
+interface TidyProjectContext {
+	project: ProjectConfig;
+	reportDirectory: string;
+}
 
 function assertExperimental(enabled: boolean | undefined): void {
 	if (enabled) {
@@ -309,6 +356,8 @@ export async function buildTidyReport(
 			similar: similar.findings,
 			audit: audit.findings,
 		},
+		applied: [],
+		typecheckDelta: null,
 		summary: {
 			totalFindings: categories.unused + categories.similar + categories.audit,
 			filesTouched: 0,
@@ -319,6 +368,386 @@ export async function buildTidyReport(
 				auditFiles: audit.totalFiles,
 			},
 		},
+	};
+}
+
+export function parseTidyFixCategories(
+	values: readonly string[] | undefined
+): TidyFixCategory[] {
+	if (!values || values.length === 0) {
+		return [...SAFE_TIDY_FIX_CATEGORIES];
+	}
+
+	const requested = values.flatMap((value) =>
+		value
+			.split(",")
+			.map((part) => part.trim())
+			.filter((part) => part.length > 0)
+	);
+	const allowed = new Set<string>(ALL_TIDY_FIX_CATEGORIES);
+	const invalid = requested.filter((category) => !allowed.has(category));
+	if (invalid.length > 0) {
+		throw new Error(
+			`Invalid tidy fix category: ${invalid.join(", ")}. Expected one of: ${ALL_TIDY_FIX_CATEGORIES.join(", ")}`
+		);
+	}
+
+	return Array.from(new Set(requested)) as TidyFixCategory[];
+}
+
+function resolveTidyProjectContext(options: TidyOptions): TidyProjectContext {
+	const reportDirectory = path.resolve(options.directory);
+	const tsconfigPath = resolveTsConfig(options.project, reportDirectory);
+	if (!tsconfigPath) {
+		throw new Error(`Could not find tsconfig.json for ${reportDirectory}`);
+	}
+	return {
+		project: loadProject(tsconfigPath, reportDirectory),
+		reportDirectory,
+	};
+}
+
+function selectedFixCategories(options: TidyOptions): TidyFixCategory[] {
+	return options.fixCategories && options.fixCategories.length > 0
+		? options.fixCategories
+		: [...SAFE_TIDY_FIX_CATEGORIES];
+}
+
+function getLine(sourceFile: ts.SourceFile, node: ts.Node): number {
+	return (
+		sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1
+	);
+}
+
+function getExportModifier(node: ts.Node): ts.Modifier | undefined {
+	if (!ts.canHaveModifiers(node)) {
+		return undefined;
+	}
+	return ts
+		.getModifiers(node)
+		?.find((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword);
+}
+
+function hasDefaultModifier(node: ts.Node): boolean {
+	const modifiers = ts.canHaveModifiers(node)
+		? ts.getModifiers(node)
+		: undefined;
+	return (
+		modifiers?.some(
+			(modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword
+		) === true
+	);
+}
+
+function identifierNameForExportedStatement(
+	node: ts.Statement
+): string | undefined {
+	if (ts.isVariableStatement(node)) {
+		const [declaration] = node.declarationList.declarations;
+		if (
+			node.declarationList.declarations.length === 1 &&
+			declaration &&
+			ts.isIdentifier(declaration.name)
+		) {
+			return declaration.name.text;
+		}
+		return undefined;
+	}
+
+	if (
+		(ts.isFunctionDeclaration(node) ||
+			ts.isClassDeclaration(node) ||
+			ts.isInterfaceDeclaration(node) ||
+			ts.isTypeAliasDeclaration(node) ||
+			ts.isEnumDeclaration(node)) &&
+		node.name
+	) {
+		return node.name.text;
+	}
+
+	return undefined;
+}
+
+function exportModifierChange(
+	content: string,
+	node: ts.Statement,
+	sourceFile: ts.SourceFile
+): TextChange | null {
+	const modifier = getExportModifier(node);
+	if (!modifier || hasDefaultModifier(node)) {
+		return null;
+	}
+
+	let end = modifier.end;
+	while (end < content.length && /[ \t]/.test(content[end] ?? "")) {
+		end++;
+	}
+
+	return {
+		start: modifier.getStart(sourceFile),
+		end,
+		newText: "",
+	};
+}
+
+function planDeadExportChangesForFile(options: {
+	file: string;
+	content: string;
+	findings: TidyUnusedFinding[];
+}): PlannedTidyChange[] {
+	const sourceFile = createSourceFileFromText(options.file, options.content);
+	const planned: PlannedTidyChange[] = [];
+
+	for (const finding of options.findings) {
+		const statement = sourceFile.statements.find((candidate) => {
+			if (finding.exportKind !== "named") {
+				return false;
+			}
+			const name = identifierNameForExportedStatement(candidate);
+			return (
+				name === finding.name &&
+				getLine(sourceFile, candidate) === finding.line &&
+				!!getExportModifier(candidate) &&
+				!hasDefaultModifier(candidate)
+			);
+		});
+		if (!statement) {
+			continue;
+		}
+
+		const change = exportModifierChange(options.content, statement, sourceFile);
+		if (!change) {
+			continue;
+		}
+
+		planned.push({
+			category: "dead-exports",
+			file: options.file,
+			exportName: finding.name,
+			changes: [change],
+		});
+	}
+
+	return planned;
+}
+
+async function planTidyFixes(
+	report: TidyReport,
+	options: TidyOptions,
+	reportDirectory: string
+): Promise<PlannedTidyChange[]> {
+	const categories = new Set(selectedFixCategories(options));
+	if (!categories.has("dead-exports")) {
+		return [];
+	}
+
+	const byFile = new Map<string, TidyUnusedFinding[]>();
+	for (const finding of report.findings.unused) {
+		if (!finding.internalUsage || finding.exportKind !== "named") {
+			continue;
+		}
+		const file = path.resolve(reportDirectory, finding.sourceFile);
+		const findings = byFile.get(file) ?? [];
+		findings.push(finding);
+		byFile.set(file, findings);
+	}
+
+	const plannedByFile = await mapConcurrent(
+		Array.from(byFile.entries()),
+		async ([file, findings]) => {
+			const content = await Bun.file(file).text();
+			return planDeadExportChangesForFile({
+				file,
+				content,
+				findings,
+			});
+		},
+		{ concurrency: FIX_WRITE_CONCURRENCY }
+	);
+
+	return plannedByFile.flat();
+}
+
+function typecheckDelta(options: {
+	before: Awaited<ReturnType<typeof runTypeCheckDetailed>>;
+	after: Awaited<ReturnType<typeof runTypeCheckDetailed>>;
+}): TypecheckDelta {
+	const newErrors = options.after.errors.filter(
+		(error) => !options.before.errors.includes(error)
+	);
+	const fixedErrors = options.before.errors.filter(
+		(error) => !options.after.errors.includes(error)
+	);
+	const verificationIncomplete =
+		options.before.incomplete || options.after.incomplete;
+	const incompleteReason = verificationIncomplete
+		? options.after.errors.slice(0, 5)
+		: undefined;
+
+	return {
+		errorsBefore: options.before.errors.length,
+		errorsAfter: options.after.errors.length,
+		newErrors,
+		fixedCount: fixedErrors.length,
+		verificationIncomplete,
+		incompleteReason,
+	};
+}
+
+async function applyPlannedTidyFixes(
+	planned: PlannedTidyChange[],
+	reportDirectory: string
+): Promise<TidyAppliedFix[]> {
+	const byFile = new Map<string, PlannedTidyChange[]>();
+	for (const change of planned) {
+		const changes = byFile.get(change.file) ?? [];
+		changes.push(change);
+		byFile.set(change.file, changes);
+	}
+
+	const appliedByFile = await mapConcurrent(
+		Array.from(byFile.entries()),
+		async ([file, changes]) => {
+			const content = await Bun.file(file).text();
+			const textChanges = deduplicateChanges(
+				changes.flatMap((change) => change.changes)
+			);
+			const next = applyTextChanges(content, textChanges);
+			if (next !== content) {
+				await Bun.write(file, next);
+			}
+			return changes.map<TidyAppliedFix>((change) => ({
+				category: change.category,
+				file: toRelativePath(reportDirectory, change.file),
+				mutationKind: "de-export",
+				target: change.exportName,
+				wasRolledBack: false,
+			}));
+		},
+		{ concurrency: FIX_WRITE_CONCURRENCY }
+	);
+
+	return appliedByFile.flat();
+}
+
+async function rollbackFiles(
+	projectRoot: string,
+	files: readonly string[]
+): Promise<void> {
+	if (files.length === 0) {
+		return;
+	}
+
+	const proc = Bun.spawn(
+		["git", "restore", "--staged", "--worktree", "--", ...files],
+		{
+			cwd: projectRoot,
+			stdout: "pipe",
+			stderr: "pipe",
+		}
+	);
+	await new Response(proc.stdout).text();
+	const stderr = await new Response(proc.stderr).text();
+	await proc.exited;
+	if (proc.exitCode !== 0) {
+		throw new Error(
+			`Rollback failed: ${stderr.trim() || `git restore exited ${proc.exitCode}`}`
+		);
+	}
+}
+
+function markRolledBack(applied: TidyAppliedFix[]): TidyAppliedFix[] {
+	return applied.map((fix) => ({ ...fix, wasRolledBack: true }));
+}
+
+function applyReportMutation(
+	report: TidyReport,
+	applied: TidyAppliedFix[],
+	delta: TypecheckDelta | null
+): TidyReport {
+	const filesTouched = new Set(
+		applied.filter((fix) => !fix.wasRolledBack).map((fix) => fix.file)
+	).size;
+	return {
+		...report,
+		applied,
+		typecheckDelta: delta,
+		summary: {
+			...report.summary,
+			filesTouched,
+		},
+	};
+}
+
+export async function applyTidyFixes(
+	report: TidyReport,
+	options: TidyOptions,
+	context = resolveTidyProjectContext(options)
+): Promise<TidyApplyResult> {
+	const maxChanges = options.maxChanges ?? DEFAULT_MAX_CHANGES;
+	const dirty = await isWorktreeDirty(context.project.rootDir);
+	await ensureCleanWorktree(context.project.rootDir, options.force);
+	const rollbackEnabled = !(options.force && dirty);
+	if (!rollbackEnabled) {
+		logger.error(
+			"Warning: --force bypasses the dirty-worktree guard; tidy rollback is disabled."
+		);
+	}
+
+	const planned = await planTidyFixes(report, options, context.reportDirectory);
+	if (planned.length > maxChanges) {
+		return {
+			report,
+			success: false,
+			errors: [
+				`tidy planned ${planned.length} change(s), which exceeds --max-changes ${maxChanges}. Re-run with a larger limit to apply.`,
+			],
+			worktreeDirtyRollbackDisabled: !rollbackEnabled,
+		};
+	}
+	if (planned.length === 0) {
+		return {
+			report: applyReportMutation(report, [], null),
+			success: true,
+			errors: [],
+			worktreeDirtyRollbackDisabled: !rollbackEnabled,
+		};
+	}
+
+	const before = await runTypeCheckDetailed(context.project);
+	let applied = await applyPlannedTidyFixes(planned, context.reportDirectory);
+	const after = await runTypeCheckDetailed(context.project);
+	const delta = typecheckDelta({ before, after });
+	const shouldRollback =
+		delta.verificationIncomplete || delta.newErrors.length > 0;
+	if (shouldRollback) {
+		if (rollbackEnabled) {
+			const touchedFiles = Array.from(
+				new Set(
+					planned.map((item) =>
+						path.relative(context.project.rootDir, item.file)
+					)
+				)
+			);
+			await rollbackFiles(context.project.rootDir, touchedFiles);
+			applied = markRolledBack(applied);
+		}
+		const reason = delta.verificationIncomplete
+			? "type checking did not complete"
+			: "type checking introduced new errors";
+		return {
+			report: applyReportMutation(report, applied, delta),
+			success: false,
+			errors: [`tidy rolled back because ${reason}.`],
+			worktreeDirtyRollbackDisabled: !rollbackEnabled,
+		};
+	}
+
+	return {
+		report: applyReportMutation(report, applied, delta),
+		success: true,
+		errors: [],
+		worktreeDirtyRollbackDisabled: !rollbackEnabled,
 	};
 }
 
@@ -385,23 +814,59 @@ export function formatTidyReport(report: TidyReport): string {
 	}
 	lines.push("");
 
+	if (report.applied.length > 0) {
+		lines.push(`Applied fixes (${report.applied.length})`);
+		for (const fix of report.applied) {
+			const rollback = fix.wasRolledBack ? " rolled back" : "";
+			lines.push(
+				`  - ${fix.file} ${fix.category} ${fix.mutationKind} ${fix.target}${rollback}`
+			);
+		}
+		lines.push("");
+	}
+
+	if (report.typecheckDelta) {
+		lines.push(
+			`Typecheck: ${report.typecheckDelta.errorsBefore} before, ${report.typecheckDelta.errorsAfter} after, ${report.typecheckDelta.newErrors.length} new, ${report.typecheckDelta.fixedCount} fixed`
+		);
+		if (report.typecheckDelta.verificationIncomplete) {
+			lines.push("  verification incomplete");
+		}
+		lines.push("");
+	}
+
 	return `${lines.join("\n")}\n`;
 }
 
 export async function tidyCommand(options: TidyOptions): Promise<void> {
 	assertExperimental(options.experimental);
 	const report = await buildTidyReport(options);
+	const result = options.fix
+		? await applyTidyFixes(report, options)
+		: { report, success: true, errors: [] };
 	const output = options.json
-		? `${JSON.stringify(report, null, 2)}\n`
-		: formatTidyReport(report);
+		? `${JSON.stringify(result.report, null, 2)}\n`
+		: formatTidyReport(result.report);
 
 	if (options.out) {
 		await Bun.write(path.resolve(options.out), output);
 		if (options.verbose) {
 			logger.info(`Wrote tidy report to ${path.resolve(options.out)}`);
 		}
+		if (!result.success) {
+			for (const error of result.errors) {
+				logger.error(error);
+			}
+			process.exit(1);
+		}
 		return;
 	}
 
 	process.stdout.write(output);
+	if (!result.success) {
+		for (const error of result.errors) {
+			logger.error(error);
+		}
+		process.exit(1);
+	}
 }

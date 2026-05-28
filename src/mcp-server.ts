@@ -56,7 +56,7 @@ import {
 	applyRelocations,
 	buildTestRelocationReport,
 } from "./commands/test-relocation.ts";
-import { buildTidyReport } from "./commands/tidy.ts";
+import { applyTidyFixes, buildTidyReport } from "./commands/tidy.ts";
 import { findUnusedExports } from "./commands/unused.ts";
 import { isWorktreeDirty } from "./core/git.ts";
 import { buildDependencyGraph } from "./core/graph.ts";
@@ -397,6 +397,17 @@ async function tidyTool(
 		experimental?: boolean;
 		scope?: string;
 		workspace?: boolean;
+		dryRun?: boolean;
+		force?: boolean;
+		fixCategories?: Array<
+			| "dead-exports"
+			| "alias-normalisation"
+			| "file-moves"
+			| "mock-cleanup"
+			| "case-renames"
+			| "layout-relocations"
+		>;
+		maxChanges?: number;
 		fanOutThreshold?: number;
 		fanInThreshold?: number;
 		exportThreshold?: number;
@@ -407,8 +418,21 @@ async function tidyTool(
 			"`tidy` is experimental in resect 1.x. Set experimental=true to opt in."
 		);
 	}
+	const absoluteDir = path.resolve(directory);
+	const tsconfigPath = resolveTsConfig(options.project, absoluteDir);
+	if (!tsconfigPath) {
+		return errorText(`Could not find tsconfig.json for ${absoluteDir}`);
+	}
+	const project = loadProject(tsconfigPath, absoluteDir);
+	const dryRun = options.dryRun ?? true;
+	const wt = await checkWorktree(project.rootDir, options.force ?? false);
+	if (wt.blocked && !dryRun) {
+		return errorText(
+			"Working tree has uncommitted changes. Commit/stash first, or rerun with force=true."
+		);
+	}
 	const report = await buildTidyReport({
-		directory,
+		directory: absoluteDir,
 		project: options.project,
 		experimental: options.experimental,
 		scope: options.scope,
@@ -417,7 +441,36 @@ async function tidyTool(
 		fanInThreshold: options.fanInThreshold,
 		exportThreshold: options.exportThreshold,
 	});
-	return jsonText(report);
+	if (dryRun) {
+		return jsonText({ dryRun, force: options.force ?? false, report });
+	}
+	const result = await applyTidyFixes(
+		report,
+		{
+			directory: absoluteDir,
+			project: options.project,
+			experimental: options.experimental,
+			scope: options.scope,
+			workspace: options.workspace,
+			fix: true,
+			fixCategories: options.fixCategories,
+			force: options.force,
+			maxChanges: options.maxChanges,
+			fanOutThreshold: options.fanOutThreshold,
+			fanInThreshold: options.fanInThreshold,
+			exportThreshold: options.exportThreshold,
+		},
+		{ project, reportDirectory: absoluteDir }
+	);
+	return jsonText({
+		dryRun,
+		force: options.force ?? false,
+		worktreeDirty: wt.dirty,
+		rollbackDisabled: result.worktreeDirtyRollbackDisabled,
+		success: result.success,
+		errors: result.errors,
+		report: result.report,
+	});
 }
 
 async function namingTool(
@@ -825,7 +878,7 @@ server.registerTool(
 	"tidy",
 	{
 		description:
-			"Run the experimental read-only tidy orchestrator over a TypeScript project. Composes the existing unused, similar, and audit analyses into one versioned grouped report with per-category findings and a summary. Requires experimental=true in resect 1.x because the JSON schema is unstable until 2.0. No files are changed.",
+			"Run the experimental tidy orchestrator over a TypeScript project. Composes the existing unused, similar, and audit analyses into one versioned grouped report with per-category findings and a summary. Defaults to dryRun:true. When dryRun:false, applies safe fixes, refuses a dirty worktree unless force:true, runs type checking after the batch, and rolls back on new errors or incomplete verification.",
 		inputSchema: {
 			directory: z
 				.string()
@@ -852,6 +905,35 @@ server.registerTool(
 				.boolean()
 				.optional()
 				.describe("Scan across all workspace packages where supported"),
+			dryRun: z
+				.boolean()
+				.optional()
+				.describe("Preview only by default; set false to apply tidy fixes"),
+			force: z
+				.boolean()
+				.optional()
+				.describe("Allow mutation when the git worktree is dirty"),
+			fixCategories: z
+				.array(
+					z.enum([
+						"dead-exports",
+						"alias-normalisation",
+						"file-moves",
+						"mock-cleanup",
+						"case-renames",
+						"layout-relocations",
+					])
+				)
+				.optional()
+				.describe(
+					"Fix categories to apply. Omit for safe defaults: dead-exports and alias-normalisation"
+				),
+			maxChanges: z
+				.number()
+				.int()
+				.positive()
+				.optional()
+				.describe("Abort mutation if planned changes exceed this limit"),
 			fanOutThreshold: z
 				.number()
 				.optional()
@@ -872,6 +954,10 @@ server.registerTool(
 		project,
 		scope,
 		workspace,
+		dryRun,
+		force,
+		fixCategories,
+		maxChanges,
 		fanOutThreshold,
 		fanInThreshold,
 		exportThreshold,
@@ -882,6 +968,10 @@ server.registerTool(
 				project,
 				scope,
 				workspace,
+				dryRun,
+				force,
+				fixCategories,
+				maxChanges,
 				fanOutThreshold,
 				fanInThreshold,
 				exportThreshold,

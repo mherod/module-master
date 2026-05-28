@@ -11,9 +11,38 @@ export interface TidyOptions {
 	experimental?: boolean;
 	scope?: string;
 	out?: string;
+	fix?: boolean;
+	fixCategories?: TidyFixCategory[];
+	force?: boolean;
+	maxChanges?: number;
 	fanOutThreshold?: number;
 	fanInThreshold?: number;
 	exportThreshold?: number;
+}
+
+export type TidyFixCategory =
+	| "dead-exports"
+	| "alias-normalisation"
+	| "file-moves"
+	| "mock-cleanup"
+	| "case-renames"
+	| "layout-relocations";
+
+export interface TidyAppliedFix {
+	category: TidyFixCategory;
+	file: string;
+	mutationKind: "de-export";
+	target: string;
+	wasRolledBack: boolean;
+}
+
+export interface TypecheckDelta {
+	errorsBefore: number;
+	errorsAfter: number;
+	newErrors: string[];
+	fixedCount: number;
+	verificationIncomplete: boolean;
+	incompleteReason?: string[];
 }
 
 export interface TidyUnusedFinding {
@@ -74,9 +103,11 @@ export interface TidyReport {
 		similar: TidySimilarFinding[];
 		audit: TidyAuditFinding[];
 	};
+	applied: TidyAppliedFix[];
+	typecheckDelta: TypecheckDelta | null;
 	summary: {
 		totalFindings: number;
-		filesTouched: 0;
+		filesTouched: number;
 		categories: {
 			unused: number;
 			similar: number;

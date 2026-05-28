@@ -12,7 +12,7 @@ import { namingCommand } from "./naming.ts";
 import { renameCommand } from "./rename.ts";
 import { similarCommand } from "./similar.ts";
 import { testRelocationCommand } from "./test-relocation.ts";
-import { tidyCommand } from "./tidy.ts";
+import { parseTidyFixCategories, tidyCommand } from "./tidy.ts";
 import { workspaceCommand } from "./workspace.ts";
 
 export interface CliValues {
@@ -28,9 +28,11 @@ export interface CliValues {
 	force?: boolean;
 	"no-verify"?: boolean;
 	fix?: boolean;
+	"fix-category"?: string[];
 	json?: boolean;
 	threshold?: string;
 	"max-groups"?: string;
+	"max-changes"?: string;
 	strict?: boolean;
 	"name-threshold"?: string;
 	"same-name-only"?: boolean;
@@ -814,7 +816,7 @@ Examples:
 		helpText: `
 Usage: ${name} tidy <directory> --experimental [options]
 
-Run a read-only structural tidyup report by composing unused, similar, and audit.
+Run a structural tidyup report by composing unused, similar, and audit.
 
 Arguments:
   directory    Path to the project directory to scan
@@ -825,11 +827,17 @@ Options:
   --scope                Only show findings whose source file is under this path
   --out                  Write the report to a file instead of stdout
   --workspace            Scan across all workspace packages where supported
+  --fix                  Apply safe fixes (dead-exports, alias-normalisation)
+  --fix=<categories>     Apply comma-separated tidy fix categories
+  --max-changes          Abort --fix when planned changes exceed this limit (default: 50)
+  --force                Allow --fix when the git worktree is dirty
   --verbose              Show extra operational messages
 
 Examples:
   ${name} tidy src --experimental
   ${name} tidy src --experimental --json
+  ${name} tidy src --experimental --fix
+  ${name} tidy src --experimental --fix=dead-exports
   ${name} tidy src --experimental --scope src/core
   ${name} tidy src --experimental --out tidy-report.json --json
 `,
@@ -840,6 +848,20 @@ Examples:
 				process.exit(1);
 			}
 			try {
+				const fixCategories =
+					values.fix || values["fix-category"]
+						? parseTidyFixCategories(values["fix-category"])
+						: undefined;
+				const maxChanges = values["max-changes"]
+					? Number(values["max-changes"])
+					: undefined;
+				if (
+					maxChanges !== undefined &&
+					(!Number.isInteger(maxChanges) || maxChanges < 1)
+				) {
+					logger.error("Error: --max-changes must be a positive integer");
+					process.exit(1);
+				}
 				await tidyCommand({
 					directory,
 					project: values.project,
@@ -849,6 +871,10 @@ Examples:
 					experimental: values.experimental,
 					scope: values.scope,
 					out: values.out,
+					fix: values.fix,
+					fixCategories,
+					force: values.force,
+					maxChanges,
 					fanOutThreshold: values["fan-out-threshold"]
 						? Number(values["fan-out-threshold"])
 						: undefined,

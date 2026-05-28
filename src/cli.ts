@@ -6,8 +6,16 @@ import { logger } from "./cli-logger.ts";
 import type { CliValues } from "./commands/registry.ts";
 import { COMMANDS } from "./commands/registry.ts";
 
+const cliArgs = Bun.argv.slice(2);
+const rawArgs = cliArgs.flatMap((arg) => {
+	if (cliArgs[0] === "tidy" && arg.startsWith("--fix=")) {
+		return ["--fix", "--fix-category", arg.slice("--fix=".length)];
+	}
+	return [arg];
+});
+
 const { values, positionals } = parseArgs({
-	args: Bun.argv.slice(2),
+	args: rawArgs,
 	options: {
 		help: { type: "boolean", short: "h" },
 		version: { type: "boolean", short: "v" },
@@ -20,9 +28,11 @@ const { values, positionals } = parseArgs({
 		force: { type: "boolean" },
 		"no-verify": { type: "boolean" },
 		fix: { type: "boolean" },
+		"fix-category": { type: "string", multiple: true },
 		json: { type: "boolean" },
 		threshold: { type: "string" },
 		"max-groups": { type: "string" },
+		"max-changes": { type: "string" },
 		strict: { type: "boolean" },
 		"name-threshold": { type: "string" },
 		"same-name-only": { type: "boolean" },
@@ -115,6 +125,8 @@ Options:
   --include-tests      Include *.test.* and *.spec.* files in naming audit
   --convention-threshold Required __tests__ majority for test relocation (default: 0.7)
   --fix                Attempt command fix mode where supported
+  --fix=<categories>  Comma-separated tidy fix categories
+  --max-changes       Abort tidy --fix above this planned change count
   --ignore          Glob pattern to exclude files (unused command, e.g. "*.test.ts")
 
 Examples:

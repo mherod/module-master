@@ -278,16 +278,18 @@ The report groups files by directory, finds the local majority casing (`camelCas
 
 ### `tidy <directory>`
 
-Compose the existing read-only analyses into one structural tidyup report.
+Compose structural findings into one tidyup report, with guarded fix mode.
 
 ```bash
 resect tidy src --experimental
 resect tidy src --experimental --json
+resect tidy src --experimental --fix
+resect tidy src --experimental --fix=dead-exports
 resect tidy src --experimental --scope src/core
 resect tidy src --experimental --json --out tidy-report.json
 ```
 
-In the 1.x series, `--experimental` is required. The JSON schema is versioned as `1-experimental` and may change before 2.0. The MVP is report-only: it runs `unused`, `similar`, and `audit` as one pipeline, emits grouped findings plus a summary, supports `--scope` filtering, and does not mutate files.
+In the 1.x series, `--experimental` is required. The JSON schema is versioned as `1-experimental` and may change before 2.0. By default it runs `unused`, `similar`, and `audit` as one read-only pipeline, emits grouped findings plus a summary, and supports `--scope` filtering. `--fix` applies safe categories only: currently `dead-exports` de-exports internally-used unused symbols, while `alias-normalisation` is reserved for the alias cleanup slice. Pass `--fix=<comma-separated-categories>` to opt into an explicit category list. Fix mode refuses dirty worktrees unless `--force`, aborts when planned writes exceed `--max-changes`, runs a closing typecheck, and rolls back if verification regresses or is incomplete.
 
 ## MCP Server (Claude Code)
 
@@ -306,7 +308,6 @@ resect ships a stdio [Model Context Protocol](https://modelcontextprotocol.io) s
 | `similar` | Similar/duplicate functions, type aliases, and interfaces |
 | `test-relocation` | Stranded or misnamed tests with suggested colocated moves; dry-run by default |
 | `naming` | Per-directory filename casing outliers with suggested filenames |
-| `tidy` | Experimental grouped report composing unused, similar, and audit |
 
 **Mutating tools** (default to `dryRun: true` — callers preview before applying):
 
@@ -316,6 +317,7 @@ resect ships a stdio [Model Context Protocol](https://modelcontextprotocol.io) s
 | `rename` | Rename an exported symbol and every import binding across the project |
 | `alias` | Normalize import specifiers to `alias`, `relative`, or `shortest` style |
 | `mock-cleanup` | Remove orphan mock factory keys with typecheck rollback |
+| `tidy` | Apply safe grouped tidy fixes with typecheck rollback |
 
 Each mutating tool:
 
@@ -403,7 +405,7 @@ To remove it: `codex mcp remove resect`.
 - **Similarity detection** — Find duplicate/similar functions using bigram Jaccard on normalized ASTs
 - **Automated extraction** — Consolidate duplicates by extracting to shared modules with import rewriting
 - **Smart filtering** — Name similarity, body line count, directive detection, same-file exclusion, path scoping
-- **MCP server** — Exposes analysis (`find`, `analyze`, `audit`, `unused`, …) and refactoring (`move`, `rename`, `alias`) to AI agents over the Model Context Protocol, with `dryRun` defaults and before/after typecheck gates on every mutation
+- **MCP server** — Exposes analysis (`find`, `analyze`, `audit`, `unused`, …) and refactoring (`move`, `rename`, `alias`, `tidy`) to AI agents over the Model Context Protocol, with `dryRun` defaults and typecheck gates on every mutation
 
 ## Options
 
