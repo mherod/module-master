@@ -45,6 +45,13 @@ All notable user-facing changes to this project are documented here.
   `dead-exports`, which removes redundant `export` keywords from internally
   used unused exports. The MCP tool defaults to `dryRun: true`.
 
+### Bug Fixes
+
+- **`audit` no longer reports deleted files**: Long-lived MCP `audit`
+  runs cached dependency graphs across invocations, so files removed
+  between calls kept appearing as ghost entries. The cache is now
+  invalidated when the project's file set changes (#78).
+
 ## [1.7.0] — 2026-05-28
 
 ### New Features
