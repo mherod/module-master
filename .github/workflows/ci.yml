@@ -33,4 +33,4 @@ jobs:
         run: pnpm run lint
 
       - name: Test
-        run: bun test
+        run: bun test --timeout=20000

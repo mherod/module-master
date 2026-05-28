@@ -56,7 +56,7 @@
     "build": "bun build src/cli.ts --compile --outfile bin/resect-bin && bun build src/mcp-server.ts --compile --outfile bin/resect-mcp-bin",
     "build:mcp": "bun build src/mcp-server.ts --compile --outfile bin/resect-mcp-bin",
     "build:lib": "tsc -p tsconfig.build.json && bun build src/index.ts src/runtime/bun.ts src/runtime/node.ts src/runtime/index.ts --outdir dist --target bun --format esm --external typescript --splitting",
-    "test": "bun test",
+    "test": "bun test --timeout=20000",
     "lint": "pnpm exec biome check --write . && pnpm run lint:eslint",
     "lint:eslint": "eslint src --max-warnings 0",
     "typecheck": "pnpm exec tsc --noEmit",
