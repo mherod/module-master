@@ -60,6 +60,16 @@ interface FileScanResult {
 /** Per-invocation cache for dependency graphs, keyed by tsconfig path */
 const graphCache = new Map<string, DependencyGraph>();
 
+function hasSameFileSet(
+	cached: DependencyGraph,
+	currentFiles: readonly string[]
+): boolean {
+	if (cached.imports.size !== currentFiles.length) {
+		return false;
+	}
+	return currentFiles.every((file) => cached.imports.has(file));
+}
+
 /**
  * Build a complete dependency graph for the project.
  * Results are cached per tsconfig path for the lifetime of the process.
@@ -67,11 +77,11 @@ const graphCache = new Map<string, DependencyGraph>();
 export async function buildDependencyGraph(
 	project: ProjectConfig
 ): Promise<DependencyGraph> {
+	const files = getProjectFiles(project).map(normalizePath);
 	const cached = graphCache.get(project.tsconfigPath);
-	if (cached) {
+	if (cached && hasSameFileSet(cached, files)) {
 		return cached;
 	}
-	const files = getProjectFiles(project);
 	const program = createProgram(project, files);
 
 	// Scan all files concurrently — each scan is independent

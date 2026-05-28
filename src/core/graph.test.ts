@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type { ModuleReference } from "../types/graph";
-import { type DependencyGraph, findAllReferences } from "./graph";
+import {
+	buildDependencyGraph,
+	type DependencyGraph,
+	findAllReferences,
+} from "./graph";
+import { loadProject } from "./project";
+import { normalizePath } from "./resolver";
 
 describe("findAllReferences", () => {
 	// Mock graph helper
@@ -133,5 +142,53 @@ describe("findAllReferences", () => {
 		// Should find consumer twice (two different import statements)
 		const consumerRefs = refs.filter((r) => r.sourceFile === "src/consumer.ts");
 		expect(consumerRefs).toHaveLength(2);
+	});
+
+	test("evicts cached dependency graph when the project file set changes", async () => {
+		const dir = await mkdtemp(path.join(tmpdir(), "resect-graph-cache-"));
+		try {
+			const srcDir = path.join(dir, "src");
+			await mkdir(srcDir, { recursive: true });
+			const tsconfigPath = path.join(dir, "tsconfig.json");
+			await writeFile(
+				tsconfigPath,
+				JSON.stringify({
+					compilerOptions: { strict: true },
+					include: ["src/**/*.ts"],
+				})
+			);
+			const deletedFile = path.join(srcDir, "deleted.ts");
+			const liveFile = path.join(srcDir, "live.ts");
+			await writeFile(
+				deletedFile,
+				'import { live } from "./live";\nexport const deleted = live;\n'
+			);
+			await writeFile(liveFile, "export const live = 1;\n");
+
+			const firstGraph = await buildDependencyGraph(
+				loadProject(tsconfigPath, dir)
+			);
+			expect(firstGraph.imports.has(normalizePath(deletedFile))).toBe(true);
+			expect(
+				firstGraph.importedBy
+					.get(normalizePath(liveFile))
+					?.some((ref) => ref.sourceFile === normalizePath(deletedFile))
+			).toBe(true);
+
+			await unlink(deletedFile);
+
+			const secondGraph = await buildDependencyGraph(
+				loadProject(tsconfigPath, dir)
+			);
+			expect(secondGraph.imports.has(normalizePath(deletedFile))).toBe(false);
+			expect(
+				secondGraph.importedBy
+					.get(normalizePath(liveFile))
+					?.some((ref) => ref.sourceFile === normalizePath(deletedFile)) ??
+					false
+			).toBe(false);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
 	});
 });
