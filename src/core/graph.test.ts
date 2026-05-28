@@ -169,9 +169,16 @@ describe("findAllReferences", () => {
 				loadProject(tsconfigPath, dir)
 			);
 			expect(firstGraph.imports.has(normalizePath(deletedFile))).toBe(true);
+			const firstDeletedRef = firstGraph.imports
+				.get(normalizePath(deletedFile))
+				?.at(0);
+			expect(firstDeletedRef).toBeDefined();
+			const resolvedLivePath = normalizePath(
+				firstDeletedRef?.resolvedPath ?? liveFile
+			);
 			expect(
 				firstGraph.importedBy
-					.get(normalizePath(liveFile))
+					.get(resolvedLivePath)
 					?.some((ref) => ref.sourceFile === normalizePath(deletedFile))
 			).toBe(true);
 
@@ -183,7 +190,7 @@ describe("findAllReferences", () => {
 			expect(secondGraph.imports.has(normalizePath(deletedFile))).toBe(false);
 			expect(
 				secondGraph.importedBy
-					.get(normalizePath(liveFile))
+					.get(resolvedLivePath)
 					?.some((ref) => ref.sourceFile === normalizePath(deletedFile)) ??
 					false
 			).toBe(false);
