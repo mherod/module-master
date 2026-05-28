@@ -231,9 +231,9 @@ Correctly handles aliased imports, namespace imports, dynamic imports, re-export
 
 ## MCP Server (Claude Code)
 
-resect ships a stdio [Model Context Protocol](https://modelcontextprotocol.io) server, `resect-mcp`, that exposes its read-only analysis as MCP tools. Point Claude Code (or any MCP client) at it and let the agent explore your codebase structure directly — no copy-pasting CLI output.
+resect ships a stdio [Model Context Protocol](https://modelcontextprotocol.io) server, `resect-mcp`, that exposes both its analysis and refactoring capabilities as MCP tools. Point Claude Code (or any MCP client) at it and let the agent explore — and safely refactor — your codebase directly.
 
-**Tools exposed** (all read-only — `resect-mcp` never modifies files):
+**Read-only tools:**
 
 | Tool | Description |
 |------|-------------|
@@ -245,7 +245,22 @@ resect ships a stdio [Model Context Protocol](https://modelcontextprotocol.io) s
 | `unused` | Exports no other file imports, flagged as de-export vs delete (`internalUsage`, `deadCount`, `internalOnlyCount`) |
 | `similar` | Similar/duplicate functions, type aliases, and interfaces |
 
-The mutating commands (`move`, `rename`, `alias`, `extract-common`) are intentionally **not** exposed over MCP — run those yourself from the CLI where you can review a `--dry-run` first.
+**Mutating tools** (default to `dryRun: true` — callers preview before applying):
+
+| Tool | Description |
+|------|-------------|
+| `move` | Move a file and rewrite every import (relative, alias, cross-package barrel) |
+| `rename` | Rename an exported symbol and every import binding across the project |
+| `alias` | Normalize import specifiers to `alias`, `relative`, or `shortest` style |
+
+Each mutating tool:
+
+- Defaults to `dryRun: true`; pass `dryRun: false` to apply.
+- Returns a structured diff (`updatedReferences`, `changes`, `errors`, `worktreeDirty`).
+- When `dryRun: false` and `verify: true` (the default), runs `tsc --noEmit` before AND after and returns the diagnostic delta as `typecheck: { errorsBefore, errorsAfter, newErrors, fixedCount }` — the caller sees exactly which type errors the refactor introduced or fixed.
+- Refuses to mutate a dirty worktree unless `force: true` (returned as a structured error, never as a process exit).
+
+`extract-common` is intentionally still CLI-only — its output shape needs a structured-result rewrite first. Tracked in [#60](https://github.com/mherod/resect/issues/60).
 
 ### Setup
 
@@ -324,7 +339,7 @@ To remove it: `codex mcp remove resect`.
 - **Similarity detection** — Find duplicate/similar functions using bigram Jaccard on normalized ASTs
 - **Automated extraction** — Consolidate duplicates by extracting to shared modules with import rewriting
 - **Smart filtering** — Name similarity, body line count, directive detection, same-file exclusion, path scoping
-- **MCP server** — Exposes read-only analysis (`find`, `analyze`, `audit`, `unused`, …) to AI agents over the Model Context Protocol
+- **MCP server** — Exposes analysis (`find`, `analyze`, `audit`, `unused`, …) and refactoring (`move`, `rename`, `alias`) to AI agents over the Model Context Protocol, with `dryRun` defaults and before/after typecheck gates on every mutation
 
 ## Options
 
