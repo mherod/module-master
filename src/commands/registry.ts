@@ -751,13 +751,16 @@ Options:
   --min-siblings          Minimum files in a directory before auditing (default: 3)
   --majority-threshold    Required casing majority 0.0-1.0 (default: 0.6)
   --include-tests         Include *.test.* and *.spec.* files
-  --fix                   Blocked until safe case-only move support lands (#72/#73)
-  --force                 Allow --fix past dirty-worktree guard before the blocked gate
+  --fix                   Rename flagged files to their suggested names
+  -n, --dry-run           Preview planned renames without writing files
+  --force                 Allow --fix when the git worktree is dirty
 
 Examples:
   ${name} naming src
   ${name} naming src --json
   ${name} naming src --majority-threshold=0.8
+  ${name} naming src --fix --dry-run
+  ${name} naming src --fix
 `,
 		run: async ([directory], values) => {
 			if (!directory) {

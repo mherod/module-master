@@ -270,11 +270,13 @@ resect naming src
 resect naming src --json
 resect naming src --majority-threshold=0.8
 resect naming src --include-tests
+resect naming src --fix --dry-run
+resect naming src --fix
 ```
 
 The report groups files by directory, finds the local majority casing (`camelCase`, `PascalCase`, `kebab-case`, or `snake_case`), and flags files whose basename does not match that convention unless the primary export kind justifies the current casing. For example, a `PascalCase` class file can sit in a mostly `camelCase` directory without being reported, while a `PascalCase` function file is suggested as `camelCase`.
 
-`--fix` is intentionally gated until safe case-only move and import-specifier rewrite support lands (#72/#73). Use the default read-only mode for audits.
+`--fix` renames the flagged files to their suggested names through the move pipeline — case-only renames use the two-step rename, and relative and alias importers are rewritten. It refuses a dirty worktree unless `--force`, runs a single closing `tsc --noEmit` gate, and rolls back every rename on new type errors or incomplete verification. Preview with `--fix --dry-run`. The MCP `naming` tool exposes `fix`/`dryRun`/`force` and defaults `dryRun` to `true`.
 
 ### `tidy <directory>`
 

@@ -33,9 +33,14 @@ All notable user-facing changes to this project are documented here.
   orphaned file.
 - **`naming` command**: `resect naming <dir>` audits per-directory
   filename casing conventions and reports outliers with suggested
-  names, primary export kind, sibling majority, and confidence. The
-  read-only MCP tool is registered as `naming`; `--fix` is gated until
-  safe case-only rename/import-specifier support lands (#72/#73).
+  names, primary export kind, sibling majority, and confidence. `--fix`
+  applies the suggested renames through the move pipeline (case-only
+  renames via the two-step rename, relative and alias importers
+  rewritten), guarded by a dirty-worktree check, a single closing
+  `tsc --noEmit` gate, and rollback on new type errors or incomplete
+  verification. `--dry-run` previews the planned renames. The MCP
+  `naming` tool exposes `fix`/`dryRun`/`force` and defaults
+  `dryRun: true`.
 - **Experimental `tidy` command**: `resect tidy --experimental <dir>`
   composes the existing `unused`, `similar`, and `audit` analyses into one
   grouped report. JSON output uses schema version `1-experimental`, which may
