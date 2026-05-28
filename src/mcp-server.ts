@@ -481,8 +481,38 @@ async function namingTool(
 		minSiblings?: number;
 		majorityThreshold?: number;
 		includeTests?: boolean;
+		fix?: boolean;
+		dryRun?: boolean;
+		force?: boolean;
 	}
 ): Promise<CallToolResult> {
+	if (options.fix && !options.dryRun) {
+		const { applyNamingFix } = await import("./commands/naming.ts");
+		const absoluteDir = path.resolve(directory);
+		const tsconfigPath = resolveTsConfig(options.project, absoluteDir);
+		if (!tsconfigPath) {
+			return errorText(`Could not find tsconfig.json for ${absoluteDir}`);
+		}
+		const project = loadProject(tsconfigPath, absoluteDir);
+		const wt = await checkWorktree(project.rootDir, options.force ?? false);
+		if (wt.blocked) {
+			return errorText(
+				"Working tree has uncommitted changes. Commit/stash first, or rerun with force=true."
+			);
+		}
+		const result = await applyNamingFix({
+			directory: absoluteDir,
+			project: options.project,
+			workspace: options.workspace,
+			minSiblings: options.minSiblings,
+			majorityThreshold: options.majorityThreshold,
+			includeTests: options.includeTests,
+			fix: true,
+			force: options.force,
+			dryRun: false,
+		});
+		return jsonText(result);
+	}
 	const report = await buildNamingReport({
 		directory,
 		project: options.project,
@@ -986,7 +1016,7 @@ server.registerTool(
 	"naming",
 	{
 		description:
-			"Audit per-directory filename casing conventions and report files whose basename casing is an outlier not justified by the primary export kind. Groups files by directory, finds a casing majority across camelCase, PascalCase, kebab-case, and snake_case, and returns suggested filenames plus confidence. Read-only; fix mode is intentionally not exposed until safe case-only rename support lands.",
+			"Audit per-directory filename casing conventions and report files whose basename casing is an outlier not justified by the primary export kind. Groups files by directory, finds a casing majority across camelCase, PascalCase, kebab-case, and snake_case, and returns suggested filenames plus confidence. When fix=true and dryRun=false, applies safe case-only renames via the move pipeline, runs a closing tsc --noEmit gate, and rolls back on new type errors. Mutating when fix=true and dryRun=false; read-only otherwise.",
 		inputSchema: {
 			directory: z
 				.string()
@@ -1017,6 +1047,24 @@ server.registerTool(
 				.boolean()
 				.optional()
 				.describe("Include *.test.* and *.spec.* files in the audit"),
+			fix: z
+				.boolean()
+				.optional()
+				.describe(
+					"Apply renames for all flagged files. Defaults to false (read-only). Requires a clean git worktree unless force=true."
+				),
+			dryRun: z
+				.boolean()
+				.optional()
+				.describe(
+					"When fix=true, preview planned renames without writing files (default true for MCP safety)"
+				),
+			force: z
+				.boolean()
+				.optional()
+				.describe(
+					"Bypass the dirty-worktree guard when fix=true. Rollback is disabled when force=true on a dirty tree."
+				),
 		},
 	},
 	async ({
@@ -1026,6 +1074,9 @@ server.registerTool(
 		minSiblings,
 		majorityThreshold,
 		includeTests,
+		fix,
+		dryRun,
+		force,
 	}) => {
 		try {
 			return await namingTool(directory, {
@@ -1034,6 +1085,9 @@ server.registerTool(
 				minSiblings,
 				majorityThreshold,
 				includeTests,
+				fix,
+				dryRun: fix ? (dryRun ?? true) : undefined,
+				force,
 			});
 		} catch (error) {
 			return toError(error);

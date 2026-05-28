@@ -1,11 +1,60 @@
 import { describe, expect, test } from "bun:test";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
 	cleanup,
 	makeFixture as makeFixtureBase,
 	runCli,
 } from "./__test-helpers";
+
+async function makeGitFixture(name: string, files: Record<string, string>) {
+	const dir = await makeFixtureBase(`naming-${name}`, files, {
+		tsconfig: true,
+		outsideRepo: true,
+	});
+	const gitSetup = Bun.spawn(["git", "init", "-b", "main"], {
+		cwd: dir,
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	await gitSetup.exited;
+	const gitConfig1 = Bun.spawn(["git", "config", "user.email", "resect-test"], {
+		cwd: dir,
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	await gitConfig1.exited;
+	const gitConfig2 = Bun.spawn(["git", "config", "user.name", "Test User"], {
+		cwd: dir,
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	await gitConfig2.exited;
+	const gitAdd = Bun.spawn(["git", "add", "."], {
+		cwd: dir,
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	await gitAdd.exited;
+	const gitCommit = Bun.spawn(["git", "commit", "-m", "initial"], {
+		cwd: dir,
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	await gitCommit.exited;
+	return dir;
+}
+
+// Case-only renames are invisible to stat() on case-insensitive filesystems
+// (macOS APFS), so compare the exact on-disk basename via a directory listing.
+async function hasExactFile(filePath: string): Promise<boolean> {
+	try {
+		const entries = await readdir(path.dirname(filePath));
+		return entries.includes(path.basename(filePath));
+	} catch {
+		return false;
+	}
+}
 
 const CAMEL_NAMES = [
 	"alphaOne",
@@ -152,31 +201,167 @@ describe("naming command", () => {
 		await cleanup(dir);
 	});
 
-	test("--fix is gated until safe case-only renames land", async () => {
-		const dir = await makeFixture("fix-gate", {
+	test("--fix --dry-run lists planned renames without applying them", async () => {
+		const dir = await makeGitFixture("fix-dryrun", {
 			"src/group/BuildReport.ts": functionFile("BuildReport"),
-			"src/group/alphaOne.ts": functionFile("alphaOne"),
-			"src/group/betaTwo.ts": functionFile("betaTwo"),
+			"src/group/LoadAccount.ts": functionFile("LoadAccount"),
+			"src/group/ParseConfig.ts": functionFile("ParseConfig"),
+			"src/group/RenderPanel.ts": functionFile("RenderPanel"),
+			...withFiles(CAMEL_NAMES, functionFile),
 		});
 
 		const result = await runCli([
 			"naming",
 			path.join(dir, "src"),
 			"--fix",
-			"--force",
+			"--dry-run",
+			"--json",
 		]);
-		expect(result.exitCode).toBe(1);
-		expect(result.stderr).toContain("blocked on #72");
+		expect(result.exitCode).toBe(0);
+		const out = JSON.parse(result.stdout) as {
+			renames: Array<{ from: string; to: string }>;
+			dryRun: boolean;
+		};
+		expect(out.dryRun).toBe(true);
+		expect(out.renames.length).toBeGreaterThan(0);
+
+		// Files must not have been renamed
+		expect(await hasExactFile(path.join(dir, "src/group/BuildReport.ts"))).toBe(
+			true
+		);
+		expect(await hasExactFile(path.join(dir, "src/group/buildReport.ts"))).toBe(
+			false
+		);
 
 		await cleanup(dir);
 	});
 
-	test("registers the read-only MCP tool", async () => {
+	test("--fix renames a single PascalCase file in a camelCase-majority directory", async () => {
+		const dir = await makeGitFixture("fix-single", {
+			"src/group/BuildReport.ts": functionFile("BuildReport"),
+			...withFiles(CAMEL_NAMES, functionFile),
+		});
+
+		const result = await runCli([
+			"naming",
+			path.join(dir, "src"),
+			"--fix",
+			"--json",
+		]);
+		expect(result.exitCode).toBe(0);
+		const out = JSON.parse(result.stdout) as {
+			success: boolean;
+			renames: Array<{ from: string; to: string }>;
+		};
+		expect(out.success).toBe(true);
+		expect(out.renames.length).toBe(1);
+
+		expect(await hasExactFile(path.join(dir, "src/group/BuildReport.ts"))).toBe(
+			false
+		);
+		expect(await hasExactFile(path.join(dir, "src/group/buildReport.ts"))).toBe(
+			true
+		);
+
+		await cleanup(dir);
+	});
+
+	test("--fix renames multiple PascalCase files in one pass", async () => {
+		const dir = await makeGitFixture("fix-multi", {
+			...withFiles(PASCAL_FUNCTION_NAMES, functionFile),
+			...withFiles(CAMEL_NAMES, functionFile),
+		});
+
+		const result = await runCli([
+			"naming",
+			path.join(dir, "src"),
+			"--fix",
+			"--json",
+		]);
+		expect(result.exitCode).toBe(0);
+		const out = JSON.parse(result.stdout) as {
+			success: boolean;
+			renames: Array<{ from: string; to: string }>;
+		};
+		expect(out.success).toBe(true);
+		expect(out.renames.length).toBe(PASCAL_FUNCTION_NAMES.length);
+
+		for (const name of PASCAL_FUNCTION_NAMES) {
+			const lower = `${name.charAt(0).toLowerCase()}${name.slice(1)}`;
+			expect(await hasExactFile(path.join(dir, `src/group/${name}.ts`))).toBe(
+				false
+			);
+			expect(await hasExactFile(path.join(dir, `src/group/${lower}.ts`))).toBe(
+				true
+			);
+		}
+
+		await cleanup(dir);
+	});
+
+	test("--fix rolls back when closing typecheck cannot complete", async () => {
+		const dir = await makeGitFixture("fix-rollback", {
+			"tsconfig.json": JSON.stringify({
+				compilerOptions: {
+					strict: true,
+					types: ["missing-resect-test-types"],
+				},
+				include: ["**/*.ts"],
+			}),
+			"src/group/BuildReport.ts": functionFile("BuildReport"),
+			...withFiles(CAMEL_NAMES, functionFile),
+		});
+
+		const result = await runCli([
+			"naming",
+			path.join(dir, "src"),
+			"--fix",
+			"--json",
+		]);
+		expect(result.exitCode).toBe(1);
+		const out = JSON.parse(result.stdout) as {
+			success: boolean;
+			rolledBack: boolean;
+		};
+		expect(out.success).toBe(false);
+		expect(out.rolledBack).toBe(true);
+
+		// Rollback must restore the original file and remove the renamed one.
+		expect(await hasExactFile(path.join(dir, "src/group/BuildReport.ts"))).toBe(
+			true
+		);
+		expect(await hasExactFile(path.join(dir, "src/group/buildReport.ts"))).toBe(
+			false
+		);
+
+		await cleanup(dir);
+	});
+
+	test("--fix refuses on dirty worktree without --force", async () => {
+		const dir = await makeGitFixture("fix-dirty", {
+			"src/group/BuildReport.ts": functionFile("BuildReport"),
+			...withFiles(CAMEL_NAMES, functionFile),
+		});
+		// Make the worktree dirty
+		await Bun.write(
+			path.join(dir, "src/group/alphaOne.ts"),
+			`// dirty\n${functionFile("alphaOne")}`
+		);
+
+		const result = await runCli(["naming", path.join(dir, "src"), "--fix"]);
+		expect(result.exitCode).toBe(1);
+
+		await cleanup(dir);
+	});
+
+	test("registers the MCP naming tool with fix parameter", async () => {
 		const serverSource = await readFile(
 			path.resolve(import.meta.dir, "../mcp-server.ts"),
 			"utf8"
 		);
 		expect(serverSource).toContain('server.registerTool(\n\t"naming"');
 		expect(serverSource).toContain("buildNamingReport");
+		expect(serverSource).toContain("applyNamingFix");
+		expect(serverSource).toContain("fix: z");
 	});
 });

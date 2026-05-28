@@ -32,6 +32,7 @@ export interface NamingOptions
 	json?: boolean;
 	fix?: boolean;
 	force?: boolean;
+	dryRun?: boolean;
 }
 
 export interface NamingViolation {
@@ -54,7 +55,7 @@ export interface NamingReport {
 	findings: NamingViolation[];
 	summary: {
 		totalFindings: number;
-		filesTouched: 0;
+		filesTouched: number;
 		totalFiles: number;
 		totalDirectories: number;
 		minSiblings: number;

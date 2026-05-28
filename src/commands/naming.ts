@@ -676,12 +676,185 @@ export function formatNamingReport(report: NamingReport): string {
 	return `${lines.join("\n")}\n`;
 }
 
+export interface NamingFixResult {
+	dryRun: boolean;
+	success: boolean;
+	report: NamingReport;
+	renames: Array<{ from: string; to: string }>;
+	rolledBack: boolean;
+	errors: string[];
+}
+
+async function isSameInode(a: string, b: string): Promise<boolean> {
+	try {
+		const { stat } = await import("node:fs/promises");
+		const [statA, statB] = await Promise.all([stat(a), stat(b)]);
+		return statA.ino === statB.ino && statA.dev === statB.dev;
+	} catch {
+		return false;
+	}
+}
+
+async function rollbackNamingFix(
+	projectRoot: string,
+	renames: Array<{ from: string; to: string }>,
+	importerFiles: Set<string>
+): Promise<void> {
+	const { unlink } = await import("node:fs/promises");
+	const { getRuntime } = await import("../runtime/index.ts");
+	const rt = getRuntime();
+
+	const runGit = async (args: string[]): Promise<void> => {
+		const proc = Bun.spawn(["git", ...args], {
+			cwd: projectRoot,
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		await new Response(proc.stdout).text();
+		const stderr = await new Response(proc.stderr).text();
+		await proc.exited;
+		if (proc.exitCode !== 0 && stderr.trim()) {
+			logger.error(`Rollback step failed (git ${args[0]}): ${stderr.trim()}`);
+		}
+	};
+
+	// Restore the original files in both the index and worktree. For a case-only
+	// rename this also rewrites the on-disk basename back to the original casing.
+	const restorePaths = [
+		...renames.map((r) => path.relative(projectRoot, r.from)),
+		...Array.from(importerFiles).map((f) => path.relative(projectRoot, f)),
+	];
+	if (restorePaths.length > 0) {
+		await runGit(["restore", "--staged", "--worktree", "--", ...restorePaths]);
+	}
+
+	// Clean up the new-name entries. Unstage them from the index ONLY — running
+	// `git restore --worktree` on the new path would, on a case-insensitive
+	// filesystem, delete the original we just restored (same inode). Physically
+	// remove the new file only when it is a genuinely distinct inode (e.g. a
+	// kebab/snake rename, or a case-only rename on a case-sensitive filesystem).
+	for (const { from, to } of renames) {
+		const toRel = path.relative(projectRoot, to);
+		await runGit(["restore", "--staged", "--", toRel]);
+		if ((await rt.fs.exists(to)) && !(await isSameInode(from, to))) {
+			await unlink(to);
+		}
+	}
+}
+
+export async function applyNamingFix(
+	options: NamingOptions
+): Promise<NamingFixResult> {
+	const { loadProject } = await import("../core/project.ts");
+	const { runTypeCheckDetailed } = await import("../core/verify.ts");
+	const { moveModule } = await import("./move.ts");
+
+	const reportDirectory = path.resolve(options.directory);
+	const tsconfigPath = resolveTsConfig(options.project, reportDirectory);
+	if (!tsconfigPath) {
+		throw new Error(`Could not find tsconfig.json for ${reportDirectory}`);
+	}
+	const project = loadProject(tsconfigPath, reportDirectory);
+	const report = await buildNamingReport(options);
+
+	const emptyResult: NamingFixResult = {
+		dryRun: options.dryRun ?? false,
+		success: true,
+		report,
+		renames: [],
+		rolledBack: false,
+		errors: [],
+	};
+
+	if (report.findings.length === 0) {
+		return emptyResult;
+	}
+
+	const computedRenames = report.findings.map((v) => {
+		const oldAbs = path.resolve(reportDirectory, v.file);
+		return {
+			from: oldAbs,
+			to: path.join(path.dirname(oldAbs), v.suggestedName),
+		};
+	});
+
+	if (options.dryRun) {
+		return { ...emptyResult, dryRun: true, renames: computedRenames };
+	}
+
+	const before = await runTypeCheckDetailed(project);
+	const importerFiles = new Set<string>();
+	const errors: string[] = [];
+
+	for (const { from: oldAbs, to: newAbs } of computedRenames) {
+		const result = await moveModule(oldAbs, newAbs, project, false, false);
+		if (!result.success) {
+			for (const e of result.errors) {
+				errors.push(`${path.relative(reportDirectory, oldAbs)}: ${e.message}`);
+			}
+		}
+		for (const ref of result.updatedReferences) {
+			if (ref.file !== oldAbs && ref.file !== newAbs) {
+				importerFiles.add(ref.file);
+			}
+		}
+	}
+
+	const after = await runTypeCheckDetailed(project);
+	const newTypeErrors = after.errors.filter((e) => !before.errors.includes(e));
+	const shouldRollback = after.incomplete || newTypeErrors.length > 0;
+
+	if (shouldRollback) {
+		await rollbackNamingFix(project.rootDir, computedRenames, importerFiles);
+		const reason = after.incomplete
+			? "type checking did not complete"
+			: "type checking introduced new errors";
+		return {
+			dryRun: false,
+			success: false,
+			report,
+			renames: computedRenames,
+			rolledBack: true,
+			errors: [`naming --fix rolled back because ${reason}.`, ...newTypeErrors],
+		};
+	}
+
+	const updatedReport: NamingReport = {
+		...report,
+		summary: { ...report.summary, filesTouched: computedRenames.length },
+	};
+
+	return {
+		dryRun: false,
+		success: true,
+		report: updatedReport,
+		renames: computedRenames,
+		rolledBack: false,
+		errors,
+	};
+}
+
 export async function namingCommand(options: NamingOptions): Promise<void> {
 	if (options.fix) {
 		await ensureCleanWorktree(path.resolve(options.directory), options.force);
-		throw new Error(
-			"`naming --fix` is blocked on #72 and #73. Run without --fix for the read-only audit."
-		);
+		const result = await applyNamingFix(options);
+		if (options.json) {
+			process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+		}
+		if (!result.success) {
+			for (const err of result.errors) {
+				logger.error(err);
+			}
+			process.exitCode = 1;
+			return;
+		}
+		if (!options.json) {
+			const summary = result.dryRun
+				? `Would rename ${result.renames.length} file(s) (dry run). Re-run without --dry-run to apply.`
+				: `Renamed ${result.renames.length} file(s). Run \`git diff --stat\` to review.`;
+			process.stdout.write(`${summary}\n`);
+		}
+		return;
 	}
 
 	const report = await buildNamingReport(options);

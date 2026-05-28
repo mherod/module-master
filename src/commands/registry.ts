@@ -800,6 +800,7 @@ Examples:
 					json: values.json,
 					fix: values.fix,
 					force: values.force,
+					dryRun: values["dry-run"],
 					minSiblings,
 					majorityThreshold,
 					includeTests: values["include-tests"],
