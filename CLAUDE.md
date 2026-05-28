@@ -322,7 +322,7 @@ bun src/cli.ts audit src --fan-out-threshold=8           # Custom thresholds
 
 ## Tidy Command
 
-`bun src/cli.ts tidy src --experimental [--json]` runs the 1.x experimental read-only orchestrator in `src/commands/tidy.ts`: `unused` + `similar` + `audit`, schema `1-experimental`. Keep mutation gates for later `tidy --fix`.
+`bun src/cli.ts tidy src --experimental [--json]` runs the 1.x experimental orchestrator in `src/commands/tidy.ts`: `unused` + `similar` + `audit`, schema `1-experimental`. `--fix` applies safe mutations (currently `dead-exports` category) with a dirty-worktree guard, `--max-changes` ceiling, one closing `tsc --noEmit` gate, and rollback via `git restore` on new errors or `verificationIncomplete`. MCP tool defaults to `dryRun:true`.
 
 ### Metrics
 
