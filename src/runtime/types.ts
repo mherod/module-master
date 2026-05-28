@@ -3,6 +3,7 @@ export interface FileSystem {
 	writeFile(path: string, content: string | Uint8Array): Promise<void>;
 	exists(path: string): Promise<boolean>;
 	deleteFile(path: string): Promise<void>;
+	rename(from: string, to: string): Promise<void>;
 }
 
 export interface GlobRunner {

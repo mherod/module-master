@@ -2,6 +2,11 @@ import path from "node:path";
 import { logger, printCommandResult } from "../cli-logger.ts";
 import type ts from "../core/ast-utils.ts";
 import { checkAllConflicts } from "../core/conflict-detection.ts";
+import {
+	isSameDirectoryCaseOnlyRename,
+	safeCaseRename,
+	shouldUseSafeCaseRename,
+} from "../core/filesystem-case.ts";
 import { ensureCleanWorktree } from "../core/git.ts";
 import {
 	buildDependencyGraph,
@@ -37,6 +42,7 @@ import {
 	type WorkspaceInfo,
 } from "../core/workspace.ts";
 import { getRuntime } from "../runtime/index.ts";
+import type { Runtime } from "../runtime/types.ts";
 import type { MoveError, MoveResult, UpdatedReference } from "../types/move.ts";
 import type { MutatingCommandOptions, ProjectConfig } from "../types.ts";
 
@@ -106,6 +112,9 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 	logger.info(`\n${dryRun ? "🔍 Dry run:" : "🚀"} Moving module...`);
 	logger.info(`   From: ${absoluteSource}`);
 	logger.info(`   To:   ${absoluteTarget}`);
+	if (await shouldUseSafeCaseRename(absoluteSource, absoluteTarget)) {
+		logger.info("   Case-only rename: via two-step git mv");
+	}
 	if (verify && !dryRun) {
 		logger.info("   Verification: enabled");
 	}
@@ -282,8 +291,12 @@ export async function moveModule(
 		};
 	}
 
-	// Check target doesn't exist
-	if (await rt.fs.exists(targetPath)) {
+	// Check target doesn't exist. On case-insensitive filesystems, the target
+	// path for a same-directory case-only rename aliases the source path.
+	const targetAliasesSource =
+		isSameDirectoryCaseOnlyRename(sourcePath, targetPath) &&
+		(await shouldUseSafeCaseRename(sourcePath, targetPath));
+	if ((await rt.fs.exists(targetPath)) && !targetAliasesSource) {
 		return {
 			success: false,
 			movedFile: { from: sourcePath, to: targetPath },
@@ -427,15 +440,13 @@ export async function moveModule(
 				updatedReferences.push(...updates);
 				if (!dryRun) {
 					// We'll write this as part of the move
-					await rt.fs.writeFile(targetPath, newContent);
-					await rt.fs.deleteFile(sourcePath);
+					await moveFileWithContent(rt, sourcePath, targetPath, newContent);
 					fileMoved = true;
 				}
 			} else if (!dryRun) {
 				// No internal changes, just copy
 				const content = await rt.fs.readFile(sourcePath);
-				await rt.fs.writeFile(targetPath, content);
-				await rt.fs.deleteFile(sourcePath);
+				await moveFileWithContent(rt, sourcePath, targetPath, content);
 				fileMoved = true;
 			}
 		}
@@ -444,8 +455,7 @@ export async function moveModule(
 	// If file wasn't moved yet (no internal refs or couldn't parse), copy as-is
 	if (!(fileMoved || dryRun)) {
 		const content = await rt.fs.readFile(sourcePath);
-		await rt.fs.writeFile(targetPath, content);
-		await rt.fs.deleteFile(sourcePath);
+		await moveFileWithContent(rt, sourcePath, targetPath, content);
 	}
 
 	// Update all referencing files
@@ -573,6 +583,22 @@ export async function moveModule(
 		updatedReferences,
 		errors,
 	};
+}
+
+async function moveFileWithContent(
+	rt: Runtime,
+	sourcePath: string,
+	targetPath: string,
+	content: string
+): Promise<void> {
+	if (await shouldUseSafeCaseRename(sourcePath, targetPath)) {
+		await safeCaseRename(rt, sourcePath, targetPath);
+		await rt.fs.writeFile(targetPath, content);
+		return;
+	}
+
+	await rt.fs.writeFile(targetPath, content);
+	await rt.fs.deleteFile(sourcePath);
 }
 
 function updateInternalImports(

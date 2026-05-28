@@ -26,6 +26,10 @@ const nodeFs: FileSystem = {
 	async deleteFile(filePath: string): Promise<void> {
 		await fs.unlink(filePath);
 	},
+
+	async rename(from: string, to: string): Promise<void> {
+		await fs.rename(from, to);
+	},
 };
 
 async function* globScan(

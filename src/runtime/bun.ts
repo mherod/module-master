@@ -28,6 +28,11 @@ const bunFs: FileSystem = {
 	async deleteFile(path: string): Promise<void> {
 		await Bun.file(path).delete();
 	},
+
+	async rename(from: string, to: string): Promise<void> {
+		const { rename } = await import("node:fs/promises");
+		await rename(from, to);
+	},
 };
 
 const bunGlob: GlobRunner = {

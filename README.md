@@ -94,6 +94,7 @@ resect move src/utils/old.ts src/helpers/new.ts --dry-run
 - Dynamic imports and `require()` calls
 - Internal imports within the moved file
 - Jest/Vitest mock calls
+- Case-only renames on case-insensitive filesystems
 
 ### `rename <file> <oldName> <newName>`
 

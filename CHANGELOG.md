@@ -6,6 +6,10 @@ All notable user-facing changes to this project are documented here.
 
 ### New Features
 
+- **Case-only `move` renames**: `resect move Foo.ts foo.ts` now detects
+  case-only basename changes on case-insensitive filesystems and uses a
+  two-step rename so the lowercase target exists, importers are rewritten, and
+  git history survives `--follow`.
 - **`alias --rename-specifier` mode**: `resect alias <dir>
   --rename-specifier="<from>=<to>"` rewrites exact import specifier strings,
   including case-only alias moves such as `@utils/Foo` to `@utils/foo`.

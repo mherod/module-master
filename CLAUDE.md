@@ -250,21 +250,23 @@ DON'T: Apply alias to complex dynamic imports or computed module paths; rely on 
 
 ## Type Checking Verification
 
-The `verify.ts` module provides safety for refactoring operations:
-
 - **Before/after comparison**: Runs `tsc --noEmit -p <tsconfig>` before and after changes
-- **Error diffing**: Compares error output to identify new issues introduced by changes
-- **Exit on failure**: Commands exit with error code if new type errors are detected
-- **Bonus tracking**: Reports errors fixed by the refactoring as a side effect
-- **Enabled by default**: Use `--no-verify` to skip for faster execution (risky)
+- **Error diffing**: Identifies new issues introduced by changes
+- **Exit on failure**: Commands exit non-zero for new type errors
+- **Bonus tracking**: Reports errors fixed by refactoring
+- **Enabled by default**: `--no-verify` skips it
 
-Verification spawns `tsc` as a subprocess and diffs error output (before vs after). `runTypeCheck(project)` is exported from `verify.ts` and reused by `move.ts`.
+Verification spawns `tsc` and diffs output. `runTypeCheck(project)` is exported from `verify.ts` and reused by `move.ts`.
 
 `collectUnresolvableDiagnostics(project)` returns `UnresolvableDiagnosticWithFile[]` for project-wide unresolvable import reporting. Exposed as `VerificationResult.unresolvableDiagnostics` after a verify pass.
 
 DON'T: Duplicate `runTypeCheck` logic in command files. Import from `verify.ts`.
 
 DON'T: Duplicate unresolvable-import scanning across command files. Call `collectUnresolvableDiagnostics(project)` from `verify.ts`.
+
+## Case-Insensitive Filesystems
+
+- `safeCaseRename()` performs two-step `git mv` for case-only file renames on macOS/APFS; use it before write/delete move logic.
 
 ## Dirty Worktree Guard
 
