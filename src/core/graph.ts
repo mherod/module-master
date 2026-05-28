@@ -7,6 +7,31 @@ import { normalizePath } from "./resolver.ts";
 import { scanBarrelExports, scanModuleReferences } from "./scanner.ts";
 import { withSourceFile } from "./source-file.ts";
 
+/**
+ * Run `callback` with the parsed source file for `filePath` from the
+ * graph's program(s). Tries `graph.program` first, then any program in
+ * `graph.programs` (covers workspace-merged graphs), then returns
+ * `fallback` if no program owns the file. Zero disk I/O.
+ */
+export function withGraphSourceFile<T>(
+	graph: Pick<DependencyGraph, "program" | "programs">,
+	filePath: string,
+	callback: (sourceFile: ts.SourceFile) => T,
+	fallback: T
+): T {
+	const primary = graph.program?.getSourceFile(filePath);
+	if (primary) {
+		return callback(primary);
+	}
+	for (const p of graph.programs ?? []) {
+		const sf = p.getSourceFile(filePath);
+		if (sf) {
+			return callback(sf);
+		}
+	}
+	return fallback;
+}
+
 export interface DependencyGraph {
 	/** Map from file path to files it imports */
 	imports: Map<string, ModuleReference[]>;
@@ -17,8 +42,11 @@ export interface DependencyGraph {
 	/** Map from barrel file to the files it actually re-exports (export ... from) */
 	barrelReExports: Map<string, string[]>;
 	/** The TypeScript program used to build this graph — enables zero-disk-I/O source file access.
-	 * Absent on test-constructed graphs and workspace-merged graphs. */
+	 * Absent on test-constructed graphs. */
 	program?: ts.Program;
+	/** Additional programs covering files outside `program` (e.g. workspace-merged graphs).
+	 * Callers should look up a file in `program` first, then fall back to scanning `programs`. */
+	programs?: ts.Program[];
 }
 
 interface FileScanResult {

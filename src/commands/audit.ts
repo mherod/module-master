@@ -1,10 +1,13 @@
 import path from "node:path";
 import { logger } from "../cli-logger.ts";
-import { buildDependencyGraph, type DependencyGraph } from "../core/graph.ts";
+import {
+	buildDependencyGraph,
+	type DependencyGraph,
+	withGraphSourceFile,
+} from "../core/graph.ts";
 import { loadProject, resolveTsConfig } from "../core/project.ts";
 import { normalizePath } from "../core/resolver.ts";
 import { scanExports } from "../core/scanner.ts";
-import { withSourceFile } from "../core/source-file.ts";
 import { discoverWorkspace } from "../core/workspace.ts";
 import type { ReadOnlyCommandOptions } from "../types/commands.ts";
 
@@ -78,10 +81,12 @@ export function computeMetrics(graph: DependencyGraph): FileMetrics[] {
 		const total = fanIn + fanOut;
 		const instability = total === 0 ? 0 : fanOut / total;
 
-		const sf = graph.program?.getSourceFile(file);
-		const exportCount = sf
-			? scanExports(sf).length
-			: withSourceFile(file, scanExports, []).length;
+		const exportCount = withGraphSourceFile(
+			graph,
+			file,
+			scanExports,
+			[]
+		).length;
 
 		metrics.push({
 			file,
@@ -248,13 +253,20 @@ export async function auditCommand(options: AuditOptions): Promise<void> {
 				},
 				{ onError: () => null }
 			);
-			// Build a fresh merged graph — never mutate the cached object
-			const mergedGraph = {
+			// Build a fresh merged graph — never mutate the cached object.
+			// Collect each package's program into `programs` so source-file
+			// lookups in computeMetrics can find files from any package
+			// without falling back to a disk read.
+			const extraPrograms = pkgGraphs
+				.map((g) => g?.program)
+				.filter((p): p is NonNullable<typeof p> => p !== undefined);
+			const mergedGraph: DependencyGraph = {
 				imports: new Map(cachedGraph.imports),
 				importedBy: new Map(cachedGraph.importedBy),
 				barrelFiles: new Set(cachedGraph.barrelFiles),
 				barrelReExports: new Map(cachedGraph.barrelReExports),
 				program: cachedGraph.program,
+				programs: extraPrograms,
 			};
 			for (const pkgGraph of pkgGraphs) {
 				if (!pkgGraph) {
