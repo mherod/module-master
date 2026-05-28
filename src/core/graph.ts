@@ -1,11 +1,13 @@
+import path from "node:path";
 import type ts from "typescript";
 import type { BarrelExport, ModuleReference } from "../types/graph.ts";
 import type { ProjectConfig } from "../types.ts";
 import { mapConcurrent } from "./concurrency.ts";
-import { createProgram, getProjectFiles } from "./project.ts";
+import { createProgram, getProjectFiles, loadProject } from "./project.ts";
 import { normalizePath } from "./resolver.ts";
 import { scanBarrelExports, scanModuleReferences } from "./scanner.ts";
 import { withSourceFile } from "./source-file.ts";
+import { discoverProject, toProjectConfig } from "./tsconfig-discovery.ts";
 
 /**
  * Run `callback` with the parsed source file for `filePath` from the
@@ -236,4 +238,111 @@ export function findBarrelReExports(
 	}
 
 	return barrels;
+}
+
+/**
+ * Build a dependency graph for every non-solution tsconfig discovered in the
+ * project that owns `tsconfigPath`. Falls back to the single resolved config
+ * when discovery finds nothing. Each graph is cached per tsconfig by
+ * `buildDependencyGraph`, so repeated configs are cheap.
+ *
+ * Use this anywhere a command needs to see references that live in sibling
+ * tsconfigs (e.g. analyze, unused) — querying a single graph misses files
+ * owned by other configs in the same project (#59 / #66).
+ */
+export async function buildProjectGraphs(
+	tsconfigPath: string
+): Promise<{ tsconfigPath: string; graph: DependencyGraph }[]> {
+	const discovery = discoverProject(path.dirname(tsconfigPath));
+	const configs = discovery.configs.filter((c) => !c.isSolution);
+
+	const projects =
+		configs.length > 0
+			? configs.map(toProjectConfig)
+			: [loadProject(tsconfigPath)];
+
+	const results: { tsconfigPath: string; graph: DependencyGraph }[] = [];
+	for (const project of projects) {
+		const graph = await buildDependencyGraph(project);
+		results.push({ tsconfigPath: project.tsconfigPath, graph });
+	}
+	return results;
+}
+
+/**
+ * Union multiple per-tsconfig dependency graphs into a single graph suitable
+ * for cross-config reverse-reference queries (`findAllReferences`,
+ * `findBarrelReExports`). All maps are deep-merged; per-ref duplicates are
+ * deduped by `sourceFile:specifier:line` so a shared file appearing in two
+ * configs does not double-count.
+ *
+ * The first graph's `program` is preserved as `program` for zero-I/O lookups;
+ * remaining programs are collected into `programs` so `withGraphSourceFile`
+ * can still find a source file owned by any contributing config.
+ */
+export function mergeDependencyGraphs(
+	graphs: DependencyGraph[]
+): DependencyGraph {
+	const imports = new Map<string, ModuleReference[]>();
+	const importedBy = new Map<string, ModuleReference[]>();
+	const barrelFiles = new Set<string>();
+	const barrelReExports = new Map<string, string[]>();
+	const programs: ts.Program[] = [];
+
+	const refKey = (r: ModuleReference) =>
+		`${r.sourceFile}:${r.specifier}:${r.line}`;
+
+	const mergeRefMap = (
+		target: Map<string, ModuleReference[]>,
+		source: Map<string, ModuleReference[]>
+	) => {
+		for (const [key, refs] of source) {
+			const existing = target.get(key);
+			if (existing) {
+				const seen = new Set(existing.map(refKey));
+				for (const ref of refs) {
+					const k = refKey(ref);
+					if (!seen.has(k)) {
+						existing.push(ref);
+						seen.add(k);
+					}
+				}
+			} else {
+				target.set(key, [...refs]);
+			}
+		}
+	};
+
+	for (const g of graphs) {
+		mergeRefMap(imports, g.imports);
+		mergeRefMap(importedBy, g.importedBy);
+		for (const b of g.barrelFiles) {
+			barrelFiles.add(b);
+		}
+		for (const [barrel, files] of g.barrelReExports) {
+			const existing = barrelReExports.get(barrel) ?? [];
+			for (const f of files) {
+				if (!existing.includes(f)) {
+					existing.push(f);
+				}
+			}
+			barrelReExports.set(barrel, existing);
+		}
+		if (g.program) {
+			programs.push(g.program);
+		}
+		if (g.programs) {
+			programs.push(...g.programs);
+		}
+	}
+
+	const [primary, ...rest] = programs;
+	return {
+		imports,
+		importedBy,
+		barrelFiles,
+		barrelReExports,
+		program: primary,
+		programs: rest.length > 0 ? rest : undefined,
+	};
 }

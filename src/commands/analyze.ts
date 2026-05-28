@@ -2,8 +2,10 @@ import path from "node:path";
 import { logger } from "../cli-logger.ts";
 import {
 	buildDependencyGraph,
+	buildProjectGraphs,
 	findAllReferences,
 	findBarrelReExports,
+	mergeDependencyGraphs,
 } from "../core/graph.ts";
 import {
 	createProgram,
@@ -130,8 +132,15 @@ export async function analyze(
 	const barrelExports = scanBarrelExports(sourceFile, project);
 	const unresolvable = scanUnresolvableImports(sourceFile, project);
 
-	// Build graph to find reverse references
-	const graph = await buildDependencyGraph(project);
+	// Build a usage graph from EVERY non-solution tsconfig in the project, not
+	// just the one that owns the analyze target — otherwise a consumer living
+	// in a sibling config (e.g. tsconfig.scripts.json) leaves referencedBy
+	// empty and the export looks dead. See #66.
+	const projectGraphs = await buildProjectGraphs(project.tsconfigPath);
+	const graph =
+		projectGraphs.length > 1
+			? mergeDependencyGraphs(projectGraphs.map((g) => g.graph))
+			: await buildDependencyGraph(project);
 	const referencedBy = findAllReferences(filePath, graph);
 	const barrelReExportFiles = findBarrelReExports(filePath, graph);
 

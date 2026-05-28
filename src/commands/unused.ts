@@ -3,15 +3,11 @@ import ts from "typescript";
 import { logger } from "../cli-logger.ts";
 import { filterGitignored } from "../core/git.ts";
 import type { DependencyGraph } from "../core/graph.ts";
-import { buildDependencyGraph } from "../core/graph.ts";
-import { loadProject, resolveTsConfig } from "../core/project.ts";
+import { buildProjectGraphs } from "../core/graph.ts";
+import { resolveTsConfig } from "../core/project.ts";
 import { normalizePath } from "../core/resolver.ts";
 import { scanExports } from "../core/scanner.ts";
 import { withSourceFile } from "../core/source-file.ts";
-import {
-	discoverProject,
-	toProjectConfig,
-} from "../core/tsconfig-discovery.ts";
 import type { ExportInfo } from "../types/analysis.ts";
 import type { ReadOnlyCommandOptions } from "../types/commands.ts";
 
@@ -171,31 +167,6 @@ export async function findUnusedExports(
 		scannedConfigs,
 		scannedFileCount: fileToGraph.size,
 	};
-}
-
-/**
- * Build a dependency graph for every non-solution tsconfig discovered in the
- * project that owns `tsconfigPath`. Falls back to the single resolved config
- * when discovery finds nothing. Each graph is cached per tsconfig by
- * `buildDependencyGraph`, so repeated configs are cheap.
- */
-async function buildProjectGraphs(
-	tsconfigPath: string
-): Promise<{ tsconfigPath: string; graph: DependencyGraph }[]> {
-	const discovery = discoverProject(path.dirname(tsconfigPath));
-	const configs = discovery.configs.filter((c) => !c.isSolution);
-
-	const projects =
-		configs.length > 0
-			? configs.map(toProjectConfig)
-			: [loadProject(tsconfigPath)];
-
-	const results: { tsconfigPath: string; graph: DependencyGraph }[] = [];
-	for (const project of projects) {
-		const graph = await buildDependencyGraph(project);
-		results.push({ tsconfigPath: project.tsconfigPath, graph });
-	}
-	return results;
 }
 
 /**

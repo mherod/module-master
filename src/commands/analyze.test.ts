@@ -171,4 +171,66 @@ describe("analyze command", () => {
 
 		await cleanup(dir);
 	});
+
+	test("includes references from sibling tsconfig (regression #66)", async () => {
+		// tsconfig.json owns src/**; tsconfig.scripts.json owns scripts/**.
+		// Example.ts is imported only from scripts/, which is outside the
+		// config that resolves for the analyze target. Before the fix
+		// referencedBy was empty because only the target's owning tsconfig
+		// was scanned.
+		const dir = await makeFixtureBase("analyze-sibling-tsconfig", {
+			"tsconfig.json": JSON.stringify({
+				compilerOptions: { strict: true },
+				include: ["src/**/*.ts"],
+			}),
+			"tsconfig.scripts.json": JSON.stringify({
+				compilerOptions: { strict: true },
+				include: ["scripts/**/*.ts"],
+			}),
+			"src/utils/Example.ts": "export function doThing(): void {}\n",
+			"scripts/Consumer.ts":
+				'import { doThing } from "../src/utils/Example";\ndoThing();\n',
+		});
+
+		const proc = Bun.spawn(
+			[...CLI, "analyze", path.join(dir, "src/utils/Example.ts")],
+			{ stdout: "pipe", stderr: "pipe" }
+		);
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		expect(stdout).toContain("Consumer.ts");
+		expect(stdout).not.toContain("Referenced by (0 files)");
+
+		await cleanup(dir);
+	});
+
+	test("alias-based imports resolve to referencedBy (regression #66)", async () => {
+		// Single tsconfig with a path alias; consumer imports via the alias.
+		const dir = await makeFixtureBase("analyze-alias-ref", {
+			"tsconfig.json": JSON.stringify({
+				compilerOptions: {
+					strict: true,
+					baseUrl: ".",
+					paths: { "@utils/*": ["src/utils/*"] },
+				},
+				include: ["src/**/*.ts"],
+			}),
+			"src/utils/Example.ts": "export function doThing(): void {}\n",
+			"src/feature/Consumer.ts":
+				'import { doThing } from "@utils/Example";\ndoThing();\n',
+		});
+
+		const proc = Bun.spawn(
+			[...CLI, "analyze", path.join(dir, "src/utils/Example.ts")],
+			{ stdout: "pipe", stderr: "pipe" }
+		);
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		expect(stdout).toContain("Consumer.ts");
+		expect(stdout).not.toContain("Referenced by (0 files)");
+
+		await cleanup(dir);
+	});
 });
