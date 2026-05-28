@@ -2,6 +2,63 @@
 
 All notable user-facing changes to this project are documented here.
 
+## [1.7.0] — 2026-05-28
+
+### New Features
+
+- **`resect-mcp` stdio MCP server**: New binary alongside the `resect`
+  CLI exposing analysis (`find`, `analyze`, `audit`, `discover`,
+  `workspace`, `unused`, `similar`) as Model Context Protocol tools.
+  Point Claude Code or any MCP client at `resect-mcp` and the agent
+  explores your codebase structure without copy-pasting CLI output.
+  Setup instructions for Claude Code and Codex CLI are in the README.
+- **Mutating MCP tools (`move`, `rename`, `alias`)**: The same three
+  refactors the CLI ships now run over MCP. Each defaults to
+  `dryRun: true`, returns a structured diff, refuses to mutate a
+  dirty worktree unless `force: true`, and — when `dryRun: false` and
+  `verify: true` — runs `tsc --noEmit` before AND after the change
+  and returns the diagnostic delta (`errorsBefore`, `errorsAfter`,
+  `newErrors`, `fixedCount`) so callers see exactly which type
+  errors the refactor introduced or fixed. `extract-common` is still
+  CLI-only pending a structured-result rewrite (#60).
+- **`unused` distinguishes de-export from delete**: Each unused
+  export now carries `internalUsage` and `internalRefCount`.
+  `internalUsage: false` means referenced nowhere — safe to delete.
+  `internalUsage: true` means only the `export` keyword is
+  redundant — deleting the symbol would break its own module. The
+  report adds aggregate `deadCount` and `internalOnlyCount` (#58).
+- **`unused` counts usage across sibling tsconfigs**: Usage is
+  computed from every non-solution tsconfig discovered in the
+  project, not just the one resolved for the scanned directory. An
+  export consumed only by a sibling config (e.g. `scripts/` on
+  `tsconfig.scripts.json`) is no longer falsely reported dead.
+  Report exposes `scannedConfigs` and `scannedFileCount` (#59).
+- **`analyze` shows unused exports** in its output alongside
+  imports, exports, and reverse-dependencies.
+
+### Performance
+
+- **`audit` skips per-file disk reads**: `computeMetrics` now looks
+  up source files in `graph.program` (and any additional programs
+  collected during a workspace merge) instead of re-reading and
+  re-parsing each file from disk. `DependencyGraph` gains an
+  optional `programs?: ts.Program[]` slot for workspace coverage,
+  and `withGraphSourceFile(graph, file, …)` is exported as the
+  canonical lookup (#61).
+- **`move` and `rename` reuse the graph's program**: Each command
+  previously built a second `ts.Program` via `createProgram(project)`
+  after `buildDependencyGraph` had already built one — two parse
+  passes per refactor. They now reuse `graph.program` with a
+  `createProgram` fallback for test-constructed graphs (#63).
+- **`discoverWorkspace` cache exposes `clearWorkspaceCache`** for
+  tests that mutate the filesystem between calls (#62).
+
+### Tooling
+
+- **Pre-commit hook rebuilds binaries and re-links globally** when
+  source changes, so local `resect` and `resect-mcp` invocations
+  always reflect the latest commit.
+
 ## [1.6.0] — 2026-03-29
 
 ### New Features
