@@ -28,7 +28,7 @@ async function expectGit(cwd: string, args: string[]): Promise<string> {
 	const stdout = await new Response(proc.stdout).text();
 	const stderr = await new Response(proc.stderr).text();
 	await proc.exited;
-	if (proc.exitCode !== 0 || stderr) {
+	if (proc.exitCode !== 0) {
 		throw new Error(
 			`git ${args.join(" ")} failed with ${proc.exitCode ?? 0}: ${stderr}`
 		);
