@@ -6,6 +6,11 @@ All notable user-facing changes to this project are documented here.
 
 ### New Features
 
+- **`naming` command**: `resect naming <dir>` audits per-directory
+  filename casing conventions and reports outliers with suggested
+  names, primary export kind, sibling majority, and confidence. The
+  read-only MCP tool is registered as `naming`; `--fix` is gated until
+  safe case-only rename/import-specifier support lands (#72/#73).
 - **Experimental `tidy` command**: `resect tidy --experimental <dir>`
   composes the existing `unused`, `similar`, and `audit` analyses into one
   read-only grouped report. JSON output uses schema version

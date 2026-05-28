@@ -229,6 +229,21 @@ Usage is counted across **every tsconfig discovered in the project**, not just t
 
 Correctly handles aliased imports, namespace imports, dynamic imports, re-exports, and type-only imports.
 
+### `naming <directory>`
+
+Audit per-directory filename casing conventions and report outliers.
+
+```bash
+resect naming src
+resect naming src --json
+resect naming src --majority-threshold=0.8
+resect naming src --include-tests
+```
+
+The report groups files by directory, finds the local majority casing (`camelCase`, `PascalCase`, `kebab-case`, or `snake_case`), and flags files whose basename does not match that convention unless the primary export kind justifies the current casing. For example, a `PascalCase` class file can sit in a mostly `camelCase` directory without being reported, while a `PascalCase` function file is suggested as `camelCase`.
+
+`--fix` is intentionally gated until safe case-only move and import-specifier rewrite support lands (#72/#73). Use the default read-only mode for audits.
+
 ### `tidy <directory>`
 
 Compose the existing read-only analyses into one structural tidyup report.
@@ -257,6 +272,7 @@ resect ships a stdio [Model Context Protocol](https://modelcontextprotocol.io) s
 | `audit` | Module health: fan-out, fan-in, instability, large export surfaces, cycles |
 | `unused` | Exports no other file imports, flagged as de-export vs delete (`internalUsage`, `deadCount`, `internalOnlyCount`) |
 | `similar` | Similar/duplicate functions, type aliases, and interfaces |
+| `naming` | Per-directory filename casing outliers with suggested filenames |
 | `tidy` | Experimental grouped report composing unused, similar, and audit |
 
 **Mutating tools** (default to `dryRun: true` — callers preview before applying):

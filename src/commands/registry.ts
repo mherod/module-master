@@ -7,6 +7,7 @@ import { discoverCommand } from "./discover.ts";
 import { extractCommonCommand } from "./extract-common.ts";
 import { findCommand } from "./find.ts";
 import { moveCommand } from "./move.ts";
+import { namingCommand } from "./naming.ts";
 import { renameCommand } from "./rename.ts";
 import { similarCommand } from "./similar.ts";
 import { tidyCommand } from "./tidy.ts";
@@ -23,6 +24,7 @@ export interface CliValues {
 	prefer?: string;
 	force?: boolean;
 	"no-verify"?: boolean;
+	fix?: boolean;
 	json?: boolean;
 	threshold?: string;
 	"max-groups"?: string;
@@ -44,6 +46,9 @@ export interface CliValues {
 	"fan-out-threshold"?: string;
 	"fan-in-threshold"?: string;
 	"export-threshold"?: string;
+	"min-siblings"?: string;
+	"majority-threshold"?: string;
+	"include-tests"?: boolean;
 	bucket?: string;
 	format?: string;
 }
@@ -596,6 +601,82 @@ Examples:
 				sameNameOnly: values["same-name-only"],
 				skipWrappers: values["skip-wrappers"],
 			});
+		},
+	},
+
+	{
+		name: "naming",
+		helpText: `
+Usage: ${name} naming <directory> [options]
+
+Audit per-directory filename casing conventions and report outliers.
+
+Arguments:
+  directory    Path to the project directory to scan
+
+Options:
+  --json                  Output results as JSON
+  --workspace             Scan across workspace packages
+  --min-siblings          Minimum files in a directory before auditing (default: 3)
+  --majority-threshold    Required casing majority 0.0-1.0 (default: 0.6)
+  --include-tests         Include *.test.* and *.spec.* files
+  --fix                   Blocked until safe case-only move support lands (#72/#73)
+  --force                 Allow --fix past dirty-worktree guard before the blocked gate
+
+Examples:
+  ${name} naming src
+  ${name} naming src --json
+  ${name} naming src --majority-threshold=0.8
+`,
+		run: async ([directory], values) => {
+			if (!directory) {
+				logger.error("Error: naming requires a <directory> argument");
+				logger.error(`Run '${name} naming --help' for usage`);
+				process.exit(1);
+			}
+			const rawMinSiblings = values["min-siblings"];
+			const minSiblings =
+				rawMinSiblings === undefined ? undefined : Number(rawMinSiblings);
+			if (
+				minSiblings !== undefined &&
+				(!Number.isInteger(minSiblings) || minSiblings < 1)
+			) {
+				logger.error("Error: --min-siblings must be a positive integer");
+				process.exit(1);
+			}
+			const rawMajorityThreshold = values["majority-threshold"];
+			const majorityThreshold =
+				rawMajorityThreshold === undefined
+					? undefined
+					: Number(rawMajorityThreshold);
+			if (
+				majorityThreshold !== undefined &&
+				(Number.isNaN(majorityThreshold) ||
+					majorityThreshold < 0 ||
+					majorityThreshold > 1)
+			) {
+				logger.error(
+					"Error: --majority-threshold must be a number between 0.0 and 1.0"
+				);
+				process.exit(1);
+			}
+			try {
+				await namingCommand({
+					directory,
+					project: values.project,
+					workspace: values.workspace,
+					verbose: values.verbose,
+					json: values.json,
+					fix: values.fix,
+					force: values.force,
+					minSiblings,
+					majorityThreshold,
+					includeTests: values["include-tests"],
+				});
+			} catch (error) {
+				logger.error(error instanceof Error ? error.message : String(error));
+				process.exit(1);
+			}
 		},
 	},
 

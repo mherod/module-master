@@ -18,6 +18,7 @@ const { values, positionals } = parseArgs({
 		prefer: { type: "string" },
 		force: { type: "boolean" },
 		"no-verify": { type: "boolean" },
+		fix: { type: "boolean" },
 		json: { type: "boolean" },
 		threshold: { type: "string" },
 		"max-groups": { type: "string" },
@@ -41,6 +42,9 @@ const { values, positionals } = parseArgs({
 		"fan-out-threshold": { type: "string" },
 		"fan-in-threshold": { type: "string" },
 		"export-threshold": { type: "string" },
+		"min-siblings": { type: "string" },
+		"majority-threshold": { type: "string" },
+		"include-tests": { type: "boolean" },
 		ignore: { type: "string" },
 	},
 	allowPositionals: true,
@@ -67,6 +71,7 @@ Commands:
   extract-common <directory>           Extract duplicate functions into shared modules
   audit <directory>                    Analyze module health: fan-out, fan-in, cycles
   unused <directory>                   Find exports never imported by other files
+  naming <directory>                   Audit per-directory filename casing
   tidy <directory>                     Compose unused, similar, and audit reports
 
 Options:
@@ -100,6 +105,10 @@ Options:
   --fan-out-threshold  Flag files with more than N imports (default: 10, audit command)
   --fan-in-threshold   Flag files with more than N consumers (default: 10, audit command)
   --export-threshold   Flag files with more than N exports (default: 8, audit command)
+  --min-siblings       Minimum files in a directory before naming audit (default: 3)
+  --majority-threshold Required filename casing majority for naming audit (default: 0.6)
+  --include-tests      Include *.test.* and *.spec.* files in naming audit
+  --fix                Attempt command fix mode where supported
   --ignore          Glob pattern to exclude files (unused command, e.g. "*.test.ts")
 
 Examples:

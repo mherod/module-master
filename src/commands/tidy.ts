@@ -7,6 +7,11 @@ import {
 	type DependencyGraph,
 	mergeDependencyGraphs,
 } from "../core/graph.ts";
+import {
+	dedupeTsconfigResults,
+	isWithinPath,
+	toRelativePath,
+} from "../core/path-utils.ts";
 import { resolveTsConfig } from "../core/project.ts";
 import {
 	collectFunctionsFromFiles,
@@ -46,40 +51,15 @@ function assertExperimental(enabled: boolean | undefined): void {
 	);
 }
 
-function isWithin(baseDir: string, filePath: string): boolean {
-	const relative = path.relative(baseDir, filePath);
-	return (
-		relative === "" || !(relative.startsWith("..") || path.isAbsolute(relative))
-	);
-}
-
-function toRelative(baseDir: string, filePath: string): string {
-	return path.relative(baseDir, filePath) || ".";
-}
-
 function firstScopedFile(
 	files: string[],
 	scopeDir: string
 ): string | undefined {
-	return files.find((file) => isWithin(scopeDir, file));
+	return files.find((file) => isWithinPath(scopeDir, file));
 }
 
 function buildMergedGraph(graphs: ProjectGraphResult[]): DependencyGraph {
 	return mergeDependencyGraphs(graphs.map(({ graph }) => graph));
-}
-
-function dedupeGraphs(graphs: ProjectGraphResult[]): ProjectGraphResult[] {
-	const seen = new Set<string>();
-	const deduped: ProjectGraphResult[] = [];
-	for (const graph of graphs) {
-		const key = path.resolve(graph.tsconfigPath);
-		if (seen.has(key)) {
-			continue;
-		}
-		seen.add(key);
-		deduped.push(graph);
-	}
-	return deduped;
 }
 
 async function buildGraphSet(options: {
@@ -114,14 +94,14 @@ async function buildGraphSet(options: {
 	);
 
 	return {
-		graphs: dedupeGraphs([...baseGraphs, ...packageGraphs.flat()]),
+		graphs: dedupeTsconfigResults([...baseGraphs, ...packageGraphs.flat()]),
 		scanDirectory: workspace.root,
 	};
 }
 
 function graphFiles(graph: DependencyGraph, directory: string): string[] {
 	return Array.from(graph.imports.keys()).filter(
-		(file) => TS_JS_VUE_EXTENSIONS.test(file) && isWithin(directory, file)
+		(file) => TS_JS_VUE_EXTENSIONS.test(file) && isWithinPath(directory, file)
 	);
 }
 
@@ -135,10 +115,10 @@ async function mapUnusedFindings(
 	return {
 		totalFiles: report.totalFiles,
 		findings: report.unused
-			.filter((finding) => isWithin(scopeDir, finding.file))
+			.filter((finding) => isWithinPath(scopeDir, finding.file))
 			.map((finding) => ({
 				kind: "unused",
-				sourceFile: toRelative(reportDirectory, finding.file),
+				sourceFile: toRelativePath(reportDirectory, finding.file),
 				name: finding.name,
 				line: finding.line,
 				exportKind: finding.type,
@@ -176,14 +156,14 @@ async function mapSimilarFindings(options: {
 			continue;
 		}
 		const members: TidySimilarMember[] = group.functions.map((member) => ({
-			sourceFile: toRelative(options.reportDirectory, member.file),
+			sourceFile: toRelativePath(options.reportDirectory, member.file),
 			name: member.name,
 			kind: member.kind,
 			line: member.line,
 		}));
 		findings.push({
 			kind: "similar",
-			sourceFile: toRelative(options.reportDirectory, scopedSource),
+			sourceFile: toRelativePath(options.reportDirectory, scopedSource),
 			groupIndex: index + 1,
 			bucket: group.bucket,
 			score: group.score,
@@ -203,7 +183,7 @@ function metricFinding(
 ): TidyAuditFinding {
 	return {
 		kind,
-		sourceFile: toRelative(reportDirectory, metric.file),
+		sourceFile: toRelativePath(reportDirectory, metric.file),
 		value,
 		threshold,
 		instability: metric.instability,
@@ -232,15 +212,15 @@ function mapAuditFindings(options: {
 		}
 		findings.push({
 			kind: "audit-cycle",
-			sourceFile: toRelative(options.reportDirectory, scopedSource),
+			sourceFile: toRelativePath(options.reportDirectory, scopedSource),
 			files: cycle.files.map((file) =>
-				toRelative(options.reportDirectory, file)
+				toRelativePath(options.reportDirectory, file)
 			),
 		});
 	}
 
 	for (const metric of report.highFanOut) {
-		if (isWithin(options.scopeDir, metric.file)) {
+		if (isWithinPath(options.scopeDir, metric.file)) {
 			findings.push(
 				metricFinding(
 					"audit-fan-out",
@@ -254,7 +234,7 @@ function mapAuditFindings(options: {
 	}
 
 	for (const metric of report.highFanIn) {
-		if (isWithin(options.scopeDir, metric.file)) {
+		if (isWithinPath(options.scopeDir, metric.file)) {
 			findings.push(
 				metricFinding(
 					"audit-fan-in",
@@ -268,7 +248,7 @@ function mapAuditFindings(options: {
 	}
 
 	for (const metric of report.largeExportSurface) {
-		if (isWithin(options.scopeDir, metric.file)) {
+		if (isWithinPath(options.scopeDir, metric.file)) {
 			findings.push(
 				metricFinding(
 					"audit-export-surface",
@@ -321,8 +301,8 @@ export async function buildTidyReport(
 
 	return {
 		schemaVersion: TIDY_SCHEMA_VERSION,
-		directory: toRelative(process.cwd(), reportDirectory),
-		scope: options.scope ? toRelative(process.cwd(), scopeDir) : null,
+		directory: toRelativePath(process.cwd(), reportDirectory),
+		scope: options.scope ? toRelativePath(process.cwd(), scopeDir) : null,
 		generatedAt: new Date().toISOString(),
 		findings: {
 			unused: unused.findings,

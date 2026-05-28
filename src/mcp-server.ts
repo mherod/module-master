@@ -43,6 +43,7 @@ import { buildAuditReport } from "./commands/audit.ts";
 import { runExtractCommon } from "./commands/extract-common.ts";
 import { search } from "./commands/find.ts";
 import { moveModule } from "./commands/move.ts";
+import { buildNamingReport } from "./commands/naming.ts";
 import { renameSymbol } from "./commands/rename.ts";
 import { buildTidyReport } from "./commands/tidy.ts";
 import { findUnusedExports } from "./commands/unused.ts";
@@ -391,6 +392,27 @@ async function tidyTool(
 		fanOutThreshold: options.fanOutThreshold,
 		fanInThreshold: options.fanInThreshold,
 		exportThreshold: options.exportThreshold,
+	});
+	return jsonText(report);
+}
+
+async function namingTool(
+	directory: string,
+	options: {
+		project?: string;
+		workspace?: boolean;
+		minSiblings?: number;
+		majorityThreshold?: number;
+		includeTests?: boolean;
+	}
+): Promise<CallToolResult> {
+	const report = await buildNamingReport({
+		directory,
+		project: options.project,
+		workspace: options.workspace,
+		minSiblings: options.minSiblings,
+		majorityThreshold: options.majorityThreshold,
+		includeTests: options.includeTests,
 	});
 	return jsonText(report);
 }
@@ -748,6 +770,65 @@ server.registerTool(
 				fanOutThreshold,
 				fanInThreshold,
 				exportThreshold,
+			});
+		} catch (error) {
+			return toError(error);
+		}
+	}
+);
+
+server.registerTool(
+	"naming",
+	{
+		description:
+			"Audit per-directory filename casing conventions and report files whose basename casing is an outlier not justified by the primary export kind. Groups files by directory, finds a casing majority across camelCase, PascalCase, kebab-case, and snake_case, and returns suggested filenames plus confidence. Read-only; fix mode is intentionally not exposed until safe case-only rename support lands.",
+		inputSchema: {
+			directory: z
+				.string()
+				.describe(
+					"Absolute or cwd-relative path to the project directory to scan"
+				),
+			project: z
+				.string()
+				.optional()
+				.describe(
+					"Optional path to the project root or tsconfig.json. Omit to auto-resolve the tsconfig for `directory`"
+				),
+			workspace: z
+				.boolean()
+				.optional()
+				.describe("Scan across workspace packages where available"),
+			minSiblings: z
+				.number()
+				.optional()
+				.describe("Minimum files in a directory before auditing (default 3)"),
+			majorityThreshold: z
+				.number()
+				.optional()
+				.describe(
+					"Required majority ratio from 0.0 to 1.0 before reporting outliers (default 0.6)"
+				),
+			includeTests: z
+				.boolean()
+				.optional()
+				.describe("Include *.test.* and *.spec.* files in the audit"),
+		},
+	},
+	async ({
+		directory,
+		project,
+		workspace,
+		minSiblings,
+		majorityThreshold,
+		includeTests,
+	}) => {
+		try {
+			return await namingTool(directory, {
+				project,
+				workspace,
+				minSiblings,
+				majorityThreshold,
+				includeTests,
 			});
 		} catch (error) {
 			return toError(error);
