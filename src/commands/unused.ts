@@ -52,6 +52,11 @@ export interface UnusedReport {
 	scannedFileCount: number;
 }
 
+export interface ProjectGraphResult {
+	tsconfigPath: string;
+	graph: DependencyGraph;
+}
+
 /**
  * Find exports that are never imported by any other file in the project.
  */
@@ -79,6 +84,24 @@ export async function findUnusedExports(
 	// consumed only by files owned by a sibling config (e.g. a CLI/migration
 	// script on tsconfig.scripts.json) is falsely reported dead (#59).
 	const graphs = await buildProjectGraphs(tsconfigPath);
+
+	return await findUnusedExportsFromGraphs(directory, graphs, {
+		ignore: options?.ignore,
+	});
+}
+
+/**
+ * Find unused exports from a caller-supplied project graph set.
+ *
+ * This lets read-only orchestrators share the same graph build across multiple
+ * audit steps instead of rebuilding the project per command.
+ */
+export async function findUnusedExportsFromGraphs(
+	directory: string,
+	graphs: ProjectGraphResult[],
+	options?: { ignore?: string }
+): Promise<UnusedReport> {
+	const absoluteDir = path.resolve(directory);
 
 	// Merge per-config usage maps and map each file to a graph that contains it
 	// (for export scanning + internal-reference counting).

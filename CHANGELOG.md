@@ -2,6 +2,16 @@
 
 All notable user-facing changes to this project are documented here.
 
+## [Unreleased]
+
+### New Features
+
+- **Experimental `tidy` command**: `resect tidy --experimental <dir>`
+  composes the existing `unused`, `similar`, and `audit` analyses into one
+  read-only grouped report. JSON output uses schema version
+  `1-experimental`, which may change during the 1.x experimental window.
+  The command is also exposed as a read-only MCP tool.
+
 ## [1.7.0] — 2026-05-28
 
 ### New Features

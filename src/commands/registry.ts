@@ -9,6 +9,7 @@ import { findCommand } from "./find.ts";
 import { moveCommand } from "./move.ts";
 import { renameCommand } from "./rename.ts";
 import { similarCommand } from "./similar.ts";
+import { tidyCommand } from "./tidy.ts";
 import { workspaceCommand } from "./workspace.ts";
 
 export interface CliValues {
@@ -37,6 +38,9 @@ export interface CliValues {
 	group?: string;
 	output?: string;
 	workspace?: boolean;
+	experimental?: boolean;
+	scope?: string;
+	out?: string;
 	"fan-out-threshold"?: string;
 	"fan-in-threshold"?: string;
 	"export-threshold"?: string;
@@ -592,6 +596,63 @@ Examples:
 				sameNameOnly: values["same-name-only"],
 				skipWrappers: values["skip-wrappers"],
 			});
+		},
+	},
+
+	{
+		name: "tidy",
+		helpText: `
+Usage: ${name} tidy <directory> --experimental [options]
+
+Run a read-only structural tidyup report by composing unused, similar, and audit.
+
+Arguments:
+  directory    Path to the project directory to scan
+
+Options:
+  --experimental         Required in 1.x to opt into the unstable tidy schema
+  --json                 Output results as JSON
+  --scope                Only show findings whose source file is under this path
+  --out                  Write the report to a file instead of stdout
+  --workspace            Scan across all workspace packages where supported
+  --verbose              Show extra operational messages
+
+Examples:
+  ${name} tidy src --experimental
+  ${name} tidy src --experimental --json
+  ${name} tidy src --experimental --scope src/core
+  ${name} tidy src --experimental --out tidy-report.json --json
+`,
+		run: async ([directory], values) => {
+			if (!directory) {
+				logger.error("Error: tidy requires a <directory> argument");
+				logger.error(`Run '${name} tidy --help' for usage`);
+				process.exit(1);
+			}
+			try {
+				await tidyCommand({
+					directory,
+					project: values.project,
+					json: values.json,
+					workspace: values.workspace,
+					verbose: values.verbose,
+					experimental: values.experimental,
+					scope: values.scope,
+					out: values.out,
+					fanOutThreshold: values["fan-out-threshold"]
+						? Number(values["fan-out-threshold"])
+						: undefined,
+					fanInThreshold: values["fan-in-threshold"]
+						? Number(values["fan-in-threshold"])
+						: undefined,
+					exportThreshold: values["export-threshold"]
+						? Number(values["export-threshold"])
+						: undefined,
+				});
+			} catch (error) {
+				logger.error(error instanceof Error ? error.message : String(error));
+				process.exit(1);
+			}
 		},
 	},
 

@@ -229,6 +229,19 @@ Usage is counted across **every tsconfig discovered in the project**, not just t
 
 Correctly handles aliased imports, namespace imports, dynamic imports, re-exports, and type-only imports.
 
+### `tidy <directory>`
+
+Compose the existing read-only analyses into one structural tidyup report.
+
+```bash
+resect tidy src --experimental
+resect tidy src --experimental --json
+resect tidy src --experimental --scope src/core
+resect tidy src --experimental --json --out tidy-report.json
+```
+
+In the 1.x series, `--experimental` is required. The JSON schema is versioned as `1-experimental` and may change before 2.0. The MVP is report-only: it runs `unused`, `similar`, and `audit` as one pipeline, emits grouped findings plus a summary, supports `--scope` filtering, and does not mutate files.
+
 ## MCP Server (Claude Code)
 
 resect ships a stdio [Model Context Protocol](https://modelcontextprotocol.io) server, `resect-mcp`, that exposes both its analysis and refactoring capabilities as MCP tools. Point Claude Code (or any MCP client) at it and let the agent explore — and safely refactor — your codebase directly.
@@ -244,6 +257,7 @@ resect ships a stdio [Model Context Protocol](https://modelcontextprotocol.io) s
 | `audit` | Module health: fan-out, fan-in, instability, large export surfaces, cycles |
 | `unused` | Exports no other file imports, flagged as de-export vs delete (`internalUsage`, `deadCount`, `internalOnlyCount`) |
 | `similar` | Similar/duplicate functions, type aliases, and interfaces |
+| `tidy` | Experimental grouped report composing unused, similar, and audit |
 
 **Mutating tools** (default to `dryRun: true` — callers preview before applying):
 

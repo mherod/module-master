@@ -301,7 +301,7 @@ DON'T: Add a new mutating command without conflict detection. All commands that 
 
 ## Audit Command
 
-The `audit` command (`src/commands/audit.ts`) analyzes module health metrics:
+`src/commands/audit.ts` analyzes module health metrics:
 
 ```bash
 bun src/cli.ts audit <directory>                        # Scan project for health metrics
@@ -310,13 +310,17 @@ bun src/cli.ts audit . --workspace                      # Scan across workspace 
 bun src/cli.ts audit src --fan-out-threshold=8           # Custom thresholds
 ```
 
+## Tidy Command
+
+`bun src/cli.ts tidy src --experimental [--json]` runs the 1.x experimental read-only orchestrator in `src/commands/tidy.ts`: `unused` + `similar` + `audit`, schema `1-experimental`. Keep mutation gates for later `tidy --fix`.
+
 ### Metrics
 
-- **Fan-out**: Number of distinct modules a file imports. High fan-out suggests a file orchestrates too many concerns (SRP violation).
-- **Fan-in**: Number of distinct files importing a module. High fan-in on a non-utility file suggests a potential God module.
-- **Instability**: `fanOut / (fanIn + fanOut)` — Robert C. Martin's metric. 0 = maximally stable, 1 = maximally unstable.
-- **Export surface**: Number of exports per file. Large export surfaces suggest the module may be doing too much (ISP violation).
-- **Circular dependencies**: DFS-based cycle detection over the import graph. Cycles indicate missing abstractions or inverted dependencies (DIP violation).
+- **Fan-out**: distinct modules imported; high values suggest too many concerns.
+- **Fan-in**: distinct importers; high non-utility fan-in suggests a God module.
+- **Instability**: `fanOut / (fanIn + fanOut)`. 0 = stable, 1 = unstable.
+- **Export surface**: exports per file; high counts suggest too much module scope.
+- **Circular dependencies**: DFS cycles over the import graph; cycles indicate missing abstractions or inverted dependencies.
 
 ### Core Functions
 

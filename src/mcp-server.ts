@@ -44,6 +44,7 @@ import { runExtractCommon } from "./commands/extract-common.ts";
 import { search } from "./commands/find.ts";
 import { moveModule } from "./commands/move.ts";
 import { renameSymbol } from "./commands/rename.ts";
+import { buildTidyReport } from "./commands/tidy.ts";
 import { findUnusedExports } from "./commands/unused.ts";
 import { isWorktreeDirty } from "./core/git.ts";
 import { buildDependencyGraph } from "./core/graph.ts";
@@ -364,6 +365,36 @@ async function similarTool(
 	});
 }
 
+async function tidyTool(
+	directory: string,
+	options: {
+		project?: string;
+		experimental?: boolean;
+		scope?: string;
+		workspace?: boolean;
+		fanOutThreshold?: number;
+		fanInThreshold?: number;
+		exportThreshold?: number;
+	}
+): Promise<CallToolResult> {
+	if (!options.experimental) {
+		return errorText(
+			"`tidy` is experimental in resect 1.x. Set experimental=true to opt in."
+		);
+	}
+	const report = await buildTidyReport({
+		directory,
+		project: options.project,
+		experimental: options.experimental,
+		scope: options.scope,
+		workspace: options.workspace,
+		fanOutThreshold: options.fanOutThreshold,
+		fanInThreshold: options.fanInThreshold,
+		exportThreshold: options.exportThreshold,
+	});
+	return jsonText(report);
+}
+
 // ── Server wiring ───────────────────────────────────────────────────
 
 const server = new McpServer({ name: "resect", version });
@@ -646,6 +677,77 @@ server.registerTool(
 				skipSameFile,
 				minLines,
 				kinds,
+			});
+		} catch (error) {
+			return toError(error);
+		}
+	}
+);
+
+server.registerTool(
+	"tidy",
+	{
+		description:
+			"Run the experimental read-only tidy orchestrator over a TypeScript project. Composes the existing unused, similar, and audit analyses into one versioned grouped report with per-category findings and a summary. Requires experimental=true in resect 1.x because the JSON schema is unstable until 2.0. No files are changed.",
+		inputSchema: {
+			directory: z
+				.string()
+				.describe(
+					"Absolute or cwd-relative path to the project directory to scan"
+				),
+			experimental: z
+				.boolean()
+				.optional()
+				.describe("Required opt-in while tidy is experimental in resect 1.x"),
+			project: z
+				.string()
+				.optional()
+				.describe(
+					"Optional path to the project root or tsconfig.json. Omit to auto-resolve the tsconfig for `directory`"
+				),
+			scope: z
+				.string()
+				.optional()
+				.describe(
+					"Only return findings whose source file is under this subtree"
+				),
+			workspace: z
+				.boolean()
+				.optional()
+				.describe("Scan across all workspace packages where supported"),
+			fanOutThreshold: z
+				.number()
+				.optional()
+				.describe("Flag files importing more than N distinct modules"),
+			fanInThreshold: z
+				.number()
+				.optional()
+				.describe("Flag files imported by more than N distinct files"),
+			exportThreshold: z
+				.number()
+				.optional()
+				.describe("Flag files exporting more than N symbols"),
+		},
+	},
+	async ({
+		directory,
+		experimental,
+		project,
+		scope,
+		workspace,
+		fanOutThreshold,
+		fanInThreshold,
+		exportThreshold,
+	}) => {
+		try {
+			return await tidyTool(directory, {
+				experimental,
+				project,
+				scope,
+				workspace,
+				fanOutThreshold,
+				fanInThreshold,
+				exportThreshold,
 			});
 		} catch (error) {
 			return toError(error);

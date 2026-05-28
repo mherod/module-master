@@ -598,7 +598,7 @@ function findProjectRoot(dir: string): string {
 /**
  * Collect functions from an array of file paths using bounded concurrency.
  */
-async function collectFunctionsFromFiles(filePaths: string[]): Promise<{
+export async function collectFunctionsFromFiles(filePaths: string[]): Promise<{
 	functions: FunctionInfo[];
 	totalFiles: number;
 }> {

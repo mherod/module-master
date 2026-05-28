@@ -55,6 +55,12 @@ export {
 // ── Commands: similar ───────────────────────────────────────────────
 export type { SimilarOptions } from "./commands/similar.ts";
 export { similarCommand } from "./commands/similar.ts";
+// ── Commands: tidy ─────────────────────────────────────────────────
+export {
+	buildTidyReport,
+	formatTidyReport,
+	tidyCommand,
+} from "./commands/tidy.ts";
 // ── Commands: workspace ─────────────────────────────────────────────
 export type { WorkspaceOptions } from "./commands/workspace.ts";
 export { workspaceCommand } from "./commands/workspace.ts";
@@ -147,5 +153,14 @@ export type {
 	SimilarityGroup,
 	SimilarityReport,
 } from "./types/similar.ts";
+export type {
+	TidyAuditFinding,
+	TidyFinding,
+	TidyOptions,
+	TidyReport,
+	TidySimilarFinding,
+	TidySimilarMember,
+	TidyUnusedFinding,
+} from "./types/tidy.ts";
 // ── Core types ──────────────────────────────────────────────────────
 export type { ProjectConfig, ProjectReference } from "./types.ts";

@@ -33,6 +33,9 @@ const { values, positionals } = parseArgs({
 		group: { type: "string" },
 		output: { type: "string", short: "o" },
 		workspace: { type: "boolean" },
+		experimental: { type: "boolean" },
+		scope: { type: "string" },
+		out: { type: "string" },
 		bucket: { type: "string" },
 		format: { type: "string" },
 		"fan-out-threshold": { type: "string" },
@@ -64,6 +67,7 @@ Commands:
   extract-common <directory>           Extract duplicate functions into shared modules
   audit <directory>                    Analyze module health: fan-out, fan-in, cycles
   unused <directory>                   Find exports never imported by other files
+  tidy <directory>                     Compose unused, similar, and audit reports
 
 Options:
   -h, --help        Show this help message
@@ -90,6 +94,9 @@ Options:
   --bucket          Filter by similarity bucket: exact, high, medium (similar command)
   --format          Output format: compact (similar command)
   --workspace       Scan across all workspace packages (discover, similar, and other commands)
+  --experimental    Opt into experimental commands and schemas
+  --scope           Limit report findings to a source subtree
+  --out             Write command output to a file
   --fan-out-threshold  Flag files with more than N imports (default: 10, audit command)
   --fan-in-threshold   Flag files with more than N consumers (default: 10, audit command)
   --export-threshold   Flag files with more than N exports (default: 8, audit command)
