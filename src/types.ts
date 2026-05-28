@@ -43,6 +43,15 @@ export type {
 	UpdatedReference,
 } from "./types/move.ts";
 export type {
+	DetectedFilenameCasing,
+	FilenameCasing,
+	NamingAnalysisOptions,
+	NamingOptions,
+	NamingReport,
+	NamingViolation,
+	PrimaryExportKind,
+} from "./types/naming.ts";
+export type {
 	FunctionInfo,
 	SimilarityBucket,
 	SimilarityGroup,

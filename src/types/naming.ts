@@ -1,0 +1,64 @@
+import type { ReadOnlyCommandOptions } from "./commands.ts";
+
+export type FilenameCasing =
+	| "camelCase"
+	| "PascalCase"
+	| "kebab-case"
+	| "snake_case";
+
+export type DetectedFilenameCasing = FilenameCasing | "unknown";
+
+export type PrimaryExportKind =
+	| "class"
+	| "function"
+	| "type"
+	| "interface"
+	| "enum"
+	| "variable"
+	| "mixed"
+	| "unknown";
+
+export interface NamingAnalysisOptions {
+	directory?: string;
+	minSiblings?: number;
+	majorityThreshold?: number;
+	includeTests?: boolean;
+}
+
+export interface NamingOptions
+	extends ReadOnlyCommandOptions,
+		NamingAnalysisOptions {
+	directory: string;
+	json?: boolean;
+	fix?: boolean;
+	force?: boolean;
+}
+
+export interface NamingViolation {
+	file: string;
+	currentCasing: DetectedFilenameCasing;
+	suggestedName: string;
+	primaryExportKind: PrimaryExportKind;
+	siblingCasingMajority: FilenameCasing;
+	siblingMajorityPercent: number;
+	siblingMajorityCount: number;
+	siblingCount: number;
+	confidence: number;
+	reason: string;
+}
+
+export interface NamingReport {
+	schemaVersion: "1";
+	directory: string;
+	generatedAt: string;
+	findings: NamingViolation[];
+	summary: {
+		totalFindings: number;
+		filesTouched: 0;
+		totalFiles: number;
+		totalDirectories: number;
+		minSiblings: number;
+		majorityThreshold: number;
+		includeTests: boolean;
+	};
+}

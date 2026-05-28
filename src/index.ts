@@ -45,6 +45,13 @@ export { findCommand, search } from "./commands/find.ts";
 // ── Commands: move ──────────────────────────────────────────────────
 export type { MoveOptions } from "./commands/move.ts";
 export { moveCommand, moveModule } from "./commands/move.ts";
+// ── Commands: naming ───────────────────────────────────────────────
+export {
+	buildNamingReport,
+	findNamingViolations,
+	formatNamingReport,
+	namingCommand,
+} from "./commands/naming.ts";
 // ── Commands: rename ────────────────────────────────────────────────
 export type { RenameOptions, RenameResult } from "./commands/rename.ts";
 export {
@@ -146,6 +153,16 @@ export type {
 	MoveResult,
 	UpdatedReference,
 } from "./types/move.ts";
+// ── Types: naming ──────────────────────────────────────────────────
+export type {
+	DetectedFilenameCasing,
+	FilenameCasing,
+	NamingAnalysisOptions,
+	NamingOptions,
+	NamingReport,
+	NamingViolation,
+	PrimaryExportKind,
+} from "./types/naming.ts";
 export type {
 	DeclarationKind,
 	FunctionInfo,
