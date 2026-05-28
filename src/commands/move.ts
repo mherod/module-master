@@ -330,8 +330,11 @@ export async function moveModule(
 		refsByFile.set(ref.sourceFile, existing);
 	}
 
-	// Also need to update imports WITHIN the file being moved
-	const program = createProgram(project);
+	// Also need to update imports WITHIN the file being moved.
+	// Reuse the graph's program when available — buildDependencyGraph always
+	// sets it for project-loaded graphs, so the fallback only fires for
+	// test-constructed graphs that bypass buildDependencyGraph.
+	const program = graph.program ?? createProgram(project);
 	const sourceAst = program.getSourceFile(sourcePath);
 	let fileMoved = false;
 

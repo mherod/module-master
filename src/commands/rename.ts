@@ -164,8 +164,10 @@ export async function renameSymbol(
 		logger.info(`Found ${references.length} references to check`);
 	}
 
-	// Create program for parsing
-	const program = createProgram(project);
+	// Create program for parsing — reuse the graph's program when available
+	// (buildDependencyGraph sets it for project-loaded graphs; fallback covers
+	// test-constructed graphs that bypass it).
+	const program = graph.program ?? createProgram(project);
 	const checker = program.getTypeChecker();
 
 	// First, rename the export in the source file
