@@ -37,6 +37,20 @@ export type {
 	ReferenceType,
 } from "./types/graph.ts";
 export type {
+	MockCleanupApplyResult,
+	MockCleanupOptions,
+	MockCleanupReport,
+	MockCleanupSkipped,
+	MockCleanupSummary,
+	MockCleanupTypecheck,
+	MockFactoryEntry,
+	MockFactorySkip,
+	MockFactorySkipReason,
+	MockFactoryValueKind,
+	MockOrphan,
+	MockSourceRange,
+} from "./types/mock-cleanup.ts";
+export type {
 	MoveError,
 	MoveOperation,
 	MoveResult,

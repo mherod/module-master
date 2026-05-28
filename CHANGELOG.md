@@ -6,6 +6,11 @@ All notable user-facing changes to this project are documented here.
 
 ### New Features
 
+- **`mock-cleanup` command**: `resect mock-cleanup <dir>` detects orphan
+  keys in `jest.mock`, `vi.mock`, `vitest.mock`, and Bun `mock.module`
+  object factories after exports are removed. `--fix` removes only the
+  orphan keys, leaves empty factories in place, runs type checking, and rolls
+  back on regression. The mutating MCP tool defaults to `dryRun:true`.
 - **`test-relocation` command**: `resect test-relocation <dir>` reports
   stranded tests and test files whose names disagree with their imports under
   test. The read-only report suggests co-located `__tests__` or alongside moves

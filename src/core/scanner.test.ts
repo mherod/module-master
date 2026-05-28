@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import ts from "typescript";
 import type { ProjectConfig } from "../types";
-import { scanModuleReferences } from "./scanner";
+import { scanExports, scanModuleReferences } from "./scanner";
 import { withSourceFile } from "./source-file";
 
 // Mock resolver to avoid file system lookups
@@ -31,6 +31,7 @@ describe("scanModuleReferences", () => {
             jest.mock('./mocked');
             vi.mock('./vi-mocked');
 			vitest.mock('./vitest-mocked');
+			mock.module('./bun-mocked', () => ({ foo: () => 1 }));
         `;
 		const sourceFile = ts.createSourceFile(
 			"test.ts",
@@ -51,6 +52,73 @@ describe("scanModuleReferences", () => {
 				type: "jest-mock",
 			})
 		);
+		expect(refs).toContainEqual(
+			expect.objectContaining({
+				specifier: "./bun-mocked",
+				type: "jest-mock",
+				factoryEntries: [
+					expect.objectContaining({ key: "foo", valueNodeKind: "other" }),
+				],
+			})
+		);
+	});
+
+	test("extracts mock factory entries for object literal factories", () => {
+		const sourceCode = `
+			jest.mock('./mocked', () => ({
+				foo: jest.fn(),
+				bar: vi.fn(),
+				answer: 42,
+			}));
+        `;
+		const sourceFile = ts.createSourceFile(
+			"test.ts",
+			sourceCode,
+			ts.ScriptTarget.Latest
+		);
+		const refs = scanModuleReferences(sourceFile, project);
+		const mockRef = refs.find((ref) => ref.specifier === "./mocked");
+
+		expect(mockRef?.factoryEntries?.map((entry) => entry.key)).toEqual([
+			"foo",
+			"bar",
+			"answer",
+		]);
+		expect(
+			mockRef?.factoryEntries?.map((entry) => entry.valueNodeKind)
+		).toEqual(["jest.fn", "vi.fn", "literal"]);
+	});
+
+	test("skips unsupported mock factory shapes without empty factory entries", () => {
+		const sourceCode = `
+			const factory = () => ({ foo: vi.fn() });
+			vi.mock('./mocked', factory);
+        `;
+		const sourceFile = ts.createSourceFile(
+			"test.ts",
+			sourceCode,
+			ts.ScriptTarget.Latest
+		);
+		const refs = scanModuleReferences(sourceFile, project);
+		const mockRef = refs.find((ref) => ref.specifier === "./mocked");
+
+		expect(mockRef?.factoryEntries).toBeUndefined();
+		expect(mockRef?.mockFactorySkip?.reason).toBe("unsupported-factory");
+	});
+});
+
+describe("scanExports", () => {
+	test("includes named re-export aliases in the visible export surface", () => {
+		const sourceFile = ts.createSourceFile(
+			"barrel.ts",
+			'export { foo as bar } from "./inner";\nexport * as ns from "./inner";',
+			ts.ScriptTarget.Latest
+		);
+
+		expect(scanExports(sourceFile).map((entry) => entry.name)).toEqual([
+			"bar",
+			"ns",
+		]);
 	});
 });
 

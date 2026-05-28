@@ -8,6 +8,13 @@ import type {
 	ModuleReference,
 	ReferenceType,
 } from "../types/graph.ts";
+import type {
+	MockFactoryEntry,
+	MockFactorySkip,
+	MockFactorySkipReason,
+	MockFactoryValueKind,
+	MockSourceRange,
+} from "../types/mock-cleanup.ts";
 import type { ProjectConfig } from "../types.ts";
 import { type ResolveResult, resolveModuleSpecifier } from "./resolver.ts";
 
@@ -140,7 +147,7 @@ function extractReference(
 			return resolveCallArgument(node, sourceFile, project, "require-resolve");
 		}
 
-		// jest.mock('...') or vi.mock('...')
+		// jest.mock('...'), vi.mock('...'), or bun:test mock.module('...')
 		if (
 			ts.isPropertyAccessExpression(node.expression) &&
 			ts.isIdentifier(node.expression.expression) &&
@@ -152,12 +159,269 @@ function extractReference(
 				(obj === "jest" || obj === "vi" || obj === "vitest") &&
 				(prop === "mock" || prop === "doMock" || prop === "unmock")
 			) {
-				return resolveCallArgument(node, sourceFile, project, "jest-mock");
+				return extractMockCallReference(node, sourceFile, project);
+			}
+			if (obj === "mock" && prop === "module") {
+				return extractMockCallReference(node, sourceFile, project);
 			}
 		}
 	}
 
 	return null;
+}
+
+function extractMockCallReference(
+	node: ts.CallExpression,
+	sourceFile: ts.SourceFile,
+	project: ProjectConfig
+): ModuleReference | null {
+	const ref = resolveCallArgument(node, sourceFile, project, "jest-mock");
+	if (!ref) {
+		return null;
+	}
+
+	const factory = extractMockFactory(node, sourceFile);
+	return {
+		...ref,
+		factoryEntries: factory.entries,
+		mockFactorySkip: factory.skip,
+	};
+}
+
+function extractMockFactory(
+	node: ts.CallExpression,
+	sourceFile: ts.SourceFile
+): { entries?: MockFactoryEntry[]; skip?: MockFactorySkip } {
+	const factory = node.arguments[1];
+	if (!factory) {
+		return {};
+	}
+
+	if (!(ts.isArrowFunction(factory) || ts.isFunctionExpression(factory))) {
+		return {
+			skip: mockFactorySkip(
+				"unsupported-factory",
+				"Mock factory is not an arrow function or function expression.",
+				sourceFile,
+				factory
+			),
+		};
+	}
+
+	if (hasAsyncModifier(factory)) {
+		return {
+			skip: mockFactorySkip(
+				"async-factory",
+				"Async mock factories are skipped because cleanup would change timing semantics.",
+				sourceFile,
+				factory
+			),
+		};
+	}
+
+	const objectLiteral = returnedObjectLiteral(factory);
+	if (!objectLiteral) {
+		return {
+			skip: mockFactorySkip(
+				"non-object-literal-return",
+				"Mock factory does not return an object literal.",
+				sourceFile,
+				factory
+			),
+		};
+	}
+
+	return extractFactoryEntries(objectLiteral, sourceFile);
+}
+
+function hasAsyncModifier(node: ts.Node): boolean {
+	return (
+		ts.canHaveModifiers(node) &&
+		(ts
+			.getModifiers(node)
+			?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) ??
+			false)
+	);
+}
+
+function returnedObjectLiteral(
+	factory: ts.ArrowFunction | ts.FunctionExpression
+): ts.ObjectLiteralExpression | null {
+	if (ts.isArrowFunction(factory)) {
+		if (!ts.isBlock(factory.body)) {
+			const body = unwrapParentheses(factory.body);
+			return ts.isObjectLiteralExpression(body) ? body : null;
+		}
+		return returnedObjectLiteralFromStatements(factory.body.statements);
+	}
+
+	return returnedObjectLiteralFromStatements(factory.body.statements);
+}
+
+function returnedObjectLiteralFromStatements(
+	statements: ts.NodeArray<ts.Statement>
+): ts.ObjectLiteralExpression | null {
+	const returns = statements.filter(ts.isReturnStatement);
+	if (returns.length !== 1) {
+		return null;
+	}
+	const expression = returns[0]?.expression;
+	if (!expression) {
+		return null;
+	}
+	const returned = unwrapParentheses(expression);
+	return ts.isObjectLiteralExpression(returned) ? returned : null;
+}
+
+function unwrapParentheses(expression: ts.Expression): ts.Expression {
+	let current = expression;
+	while (ts.isParenthesizedExpression(current)) {
+		current = current.expression;
+	}
+	return current;
+}
+
+function extractFactoryEntries(
+	objectLiteral: ts.ObjectLiteralExpression,
+	sourceFile: ts.SourceFile
+): { entries?: MockFactoryEntry[]; skip?: MockFactorySkip } {
+	const entries: MockFactoryEntry[] = [];
+	const factoryNode = sourceRange(objectLiteral, sourceFile);
+
+	for (const property of objectLiteral.properties) {
+		if (ts.isSpreadAssignment(property)) {
+			return {
+				skip: {
+					reason: "spread",
+					message:
+						"Mock factory contains a spread assignment, so cleanup cannot prove which keys are explicit.",
+					factoryNode,
+				},
+			};
+		}
+
+		const key = propertyKey(property);
+		if (!key) {
+			return {
+				skip: {
+					reason: "computed-property",
+					message:
+						"Mock factory contains a computed property name, so cleanup cannot map it to an export name.",
+					factoryNode,
+				},
+			};
+		}
+
+		entries.push({
+			key: key.name,
+			valueNodeKind: factoryValueKind(property),
+			keyNode: sourceRange(key.node, sourceFile),
+			propertyNode: sourceRange(property, sourceFile),
+			factoryNode,
+		});
+	}
+
+	return { entries };
+}
+
+function propertyKey(
+	property: ts.ObjectLiteralElementLike
+): { name: string; node: ts.PropertyName } | null {
+	if (
+		ts.isPropertyAssignment(property) ||
+		ts.isShorthandPropertyAssignment(property) ||
+		ts.isMethodDeclaration(property) ||
+		ts.isGetAccessorDeclaration(property) ||
+		ts.isSetAccessorDeclaration(property)
+	) {
+		const name = property.name;
+		if (ts.isComputedPropertyName(name) || ts.isPrivateIdentifier(name)) {
+			return null;
+		}
+		return {
+			name: propertyNameText(name),
+			node: name,
+		};
+	}
+
+	return null;
+}
+
+function propertyNameText(name: ts.PropertyName): string {
+	if (ts.isIdentifier(name) || ts.isStringLiteral(name)) {
+		return name.text;
+	}
+	if (ts.isNumericLiteral(name)) {
+		return name.text;
+	}
+	return name.getText();
+}
+
+function factoryValueKind(
+	property: ts.ObjectLiteralElementLike
+): MockFactoryValueKind {
+	if (!ts.isPropertyAssignment(property)) {
+		return "other";
+	}
+	const value = unwrapParentheses(property.initializer);
+	if (isMockFnCall(value, "vi")) {
+		return "vi.fn";
+	}
+	if (isMockFnCall(value, "jest")) {
+		return "jest.fn";
+	}
+	if (isLiteralExpression(value)) {
+		return "literal";
+	}
+	return "other";
+}
+
+function isMockFnCall(expression: ts.Expression, objectName: string): boolean {
+	return (
+		ts.isCallExpression(expression) &&
+		ts.isPropertyAccessExpression(expression.expression) &&
+		ts.isIdentifier(expression.expression.expression) &&
+		expression.expression.expression.text === objectName &&
+		expression.expression.name.text === "fn"
+	);
+}
+
+function isLiteralExpression(expression: ts.Expression): boolean {
+	return (
+		ts.isStringLiteral(expression) ||
+		ts.isNoSubstitutionTemplateLiteral(expression) ||
+		ts.isNumericLiteral(expression) ||
+		expression.kind === ts.SyntaxKind.TrueKeyword ||
+		expression.kind === ts.SyntaxKind.FalseKeyword ||
+		expression.kind === ts.SyntaxKind.NullKeyword
+	);
+}
+
+function mockFactorySkip(
+	reason: MockFactorySkipReason,
+	message: string,
+	sourceFile: ts.SourceFile,
+	node: ts.Node
+): MockFactorySkip {
+	return {
+		reason,
+		message,
+		factoryNode: sourceRange(node, sourceFile),
+	};
+}
+
+function sourceRange(
+	node: ts.Node,
+	sourceFile: ts.SourceFile
+): MockSourceRange {
+	const start = node.getStart(sourceFile);
+	const { line, character } = sourceFile.getLineAndCharacterOfPosition(start);
+	return {
+		start,
+		end: node.end,
+		line: line + 1,
+		column: character + 1,
+	};
 }
 
 /**
@@ -489,10 +753,9 @@ export function scanExports(sourceFile: ts.SourceFile): ExportInfo[] {
 			});
 		}
 
-		// export { x, y } (local exports, not re-exports)
+		// export { x, y } and export { x as y } from './mod'
 		if (
 			ts.isExportDeclaration(node) &&
-			!node.moduleSpecifier &&
 			node.exportClause &&
 			ts.isNamedExports(node.exportClause)
 		) {
@@ -507,6 +770,23 @@ export function scanExports(sourceFile: ts.SourceFile): ExportInfo[] {
 					line: line + 1,
 				});
 			}
+		}
+
+		// export * as ns from './mod'
+		if (
+			ts.isExportDeclaration(node) &&
+			node.exportClause &&
+			ts.isNamespaceExport(node.exportClause)
+		) {
+			const { line } = sourceFile.getLineAndCharacterOfPosition(
+				node.exportClause.name.getStart(sourceFile)
+			);
+			exports.push({
+				name: node.exportClause.name.text,
+				type: "named",
+				isType: node.isTypeOnly,
+				line: line + 1,
+			});
 		}
 
 		ts.forEachChild(node, visit);

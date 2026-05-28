@@ -231,6 +231,20 @@ Usage is counted across **every tsconfig discovered in the project**, not just t
 
 Correctly handles aliased imports, namespace imports, dynamic imports, re-exports, and type-only imports.
 
+### `mock-cleanup <directory>`
+
+Find stale keys in mock factory objects after an export has been removed from the mocked module.
+
+```bash
+resect mock-cleanup src
+resect mock-cleanup src --json
+resect mock-cleanup src --fix
+```
+
+The audit scans `jest.mock`, `vi.mock`, `vitest.mock`, and Bun `mock.module` calls whose factory returns an object literal. Keys that no longer match exports on the mocked module are reported with `file:line` and the mocked specifier. Spread, computed, async, and non-object-literal factories are reported as skipped because cleanup cannot prove their semantics.
+
+`--fix` removes only orphan keys, leaves the mock call in place even when the factory becomes empty, runs `tsc --noEmit`, and rolls back if type checking regresses.
+
 ### `test-relocation <directory>`
 
 Find stranded or misnamed test files from their project imports.
@@ -298,6 +312,7 @@ resect ships a stdio [Model Context Protocol](https://modelcontextprotocol.io) s
 | `move` | Move a file and rewrite every import (relative, alias, cross-package barrel) |
 | `rename` | Rename an exported symbol and every import binding across the project |
 | `alias` | Normalize import specifiers to `alias`, `relative`, or `shortest` style |
+| `mock-cleanup` | Remove orphan mock factory keys with typecheck rollback |
 
 Each mutating tool:
 
@@ -372,7 +387,7 @@ To remove it: `codex mcp remove resect`.
 - **AST-level precision** — Uses TypeScript Compiler API, not regex (see [AST Node Coverage](./CLAUDE.md#ast-node-coverage) for the full node-kind support matrix)
 - **Type-safe refactoring** — Runs `tsc --noEmit` before and after changes
 - **Full import coverage** — Named, default, namespace, dynamic, require, require.resolve
-- **Test mock support** — jest.mock(), vi.mock(), vitest.mock()
+- **Test mock support** — jest.mock(), vi.mock(), vitest.mock(), mock.module()
 - **Path alias preservation** — Respects your tsconfig paths
 - **Barrel file intelligence** — Recursively resolves re-export chains to find deep dependencies
 - **Monorepo-native** — First-class support for pnpm, yarn, and npm workspaces

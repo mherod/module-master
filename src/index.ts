@@ -42,6 +42,14 @@ export type {
 	FindResult,
 } from "./commands/find.ts";
 export { findCommand, search } from "./commands/find.ts";
+// ── Commands: mock-cleanup ─────────────────────────────────────────
+export {
+	applyMockCleanup,
+	buildMockCleanupReport,
+	findMockOrphans,
+	formatMockCleanupReport,
+	mockCleanupCommand,
+} from "./commands/mock-cleanup.ts";
 // ── Commands: move ──────────────────────────────────────────────────
 export type { MoveOptions } from "./commands/move.ts";
 export { moveCommand, moveModule } from "./commands/move.ts";
@@ -155,6 +163,20 @@ export type {
 	ModuleReference,
 	ReferenceType,
 } from "./types/graph.ts";
+export type {
+	MockCleanupApplyResult,
+	MockCleanupOptions,
+	MockCleanupReport,
+	MockCleanupSkipped,
+	MockCleanupSummary,
+	MockCleanupTypecheck,
+	MockFactoryEntry,
+	MockFactorySkip,
+	MockFactorySkipReason,
+	MockFactoryValueKind,
+	MockOrphan,
+	MockSourceRange,
+} from "./types/mock-cleanup.ts";
 export type {
 	MoveError,
 	MoveOperation,

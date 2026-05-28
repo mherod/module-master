@@ -1,0 +1,161 @@
+import { describe, expect, test } from "bun:test";
+import path from "node:path";
+import { CLI, cleanup, makeFixture, runCli } from "./__test-helpers";
+
+function tsconfig(): string {
+	return JSON.stringify({
+		compilerOptions: {
+			strict: true,
+			target: "ESNext",
+			module: "Preserve",
+			moduleResolution: "bundler",
+			skipLibCheck: true,
+		},
+		include: ["**/*.ts"],
+	});
+}
+
+async function makeMockFixture(name: string, files: Record<string, string>) {
+	return makeFixture(
+		`mock-cleanup-${name}`,
+		{
+			"tsconfig.json": tsconfig(),
+			...files,
+		},
+		{ outsideRepo: true }
+	);
+}
+
+describe("mock-cleanup command", () => {
+	test("reports and removes orphan vi.mock factory keys", async () => {
+		const dir = await makeMockFixture("orphans", {
+			"mod.ts": "export const foo = 1;\nexport const bar = 2;\n",
+			"mod.test.ts": `
+				declare const vi: {
+					fn(): unknown;
+					mock(specifier: string, factory: () => Record<string, unknown>): void;
+				};
+				vi.mock("./mod", () => ({ foo: vi.fn(), bar: vi.fn(), baz: vi.fn() }));
+			`,
+		});
+
+		try {
+			const audit = await runCli(["mock-cleanup", dir, "--json"]);
+			expect(audit.exitCode).toBe(0);
+			const report = JSON.parse(audit.stdout);
+			expect(report.orphans).toHaveLength(1);
+			expect(report.orphans[0].orphanKey).toBe("baz");
+
+			const human = await runCli(["mock-cleanup", dir]);
+			expect(human.exitCode).toBe(0);
+			expect(human.stdout).toContain("mod.test.ts:");
+			expect(human.stdout).toContain("baz -> ./mod");
+
+			const fix = await runCli([
+				"mock-cleanup",
+				dir,
+				"--fix",
+				"--force",
+				"--json",
+			]);
+			expect(fix.exitCode).toBe(0);
+			const result = JSON.parse(fix.stdout);
+			expect(result.success).toBe(true);
+			expect(result.modifiedFiles).toHaveLength(1);
+
+			const next = await Bun.file(path.join(dir, "mod.test.ts")).text();
+			expect(next).toContain("{ foo: vi.fn(), bar: vi.fn() }");
+			expect(next).not.toContain("baz");
+		} finally {
+			await cleanup(dir);
+		}
+	});
+
+	test("reports spread factories as skipped and leaves fix as a no-op", async () => {
+		const dir = await makeMockFixture("spread", {
+			"mod.ts": "export const foo = 1;\n",
+			"mod.test.ts": `
+				declare const vi: {
+					fn(): unknown;
+					mock(specifier: string, factory: () => Record<string, unknown>): void;
+				};
+				const actual = { foo: 1 };
+				vi.mock("./mod", () => ({ ...actual, baz: vi.fn() }));
+			`,
+		});
+
+		try {
+			const audit = await runCli(["mock-cleanup", dir, "--json"]);
+			expect(audit.exitCode).toBe(0);
+			const report = JSON.parse(audit.stdout);
+			expect(report.orphans).toHaveLength(0);
+			expect(report.skipped).toHaveLength(1);
+			expect(report.skipped[0].reason).toBe("spread");
+
+			const before = await Bun.file(path.join(dir, "mod.test.ts")).text();
+			const fix = await runCli([
+				"mock-cleanup",
+				dir,
+				"--fix",
+				"--force",
+				"--json",
+			]);
+			expect(fix.exitCode).toBe(0);
+			const after = await Bun.file(path.join(dir, "mod.test.ts")).text();
+			expect(after).toBe(before);
+		} finally {
+			await cleanup(dir);
+		}
+	});
+
+	test("leaves the mock call in place when removing every factory key", async () => {
+		const dir = await makeMockFixture("empty-factory", {
+			"mod.ts": "export const foo = 1;\n",
+			"mod.test.ts": `
+				declare const jest: {
+					fn(): unknown;
+					mock(specifier: string, factory: () => Record<string, unknown>): void;
+				};
+				jest.mock("./mod", () => ({ baz: jest.fn() }));
+			`,
+		});
+
+		try {
+			const fix = await runCli([
+				"mock-cleanup",
+				dir,
+				"--fix",
+				"--force",
+				"--json",
+			]);
+			expect(fix.exitCode).toBe(0);
+
+			const next = await Bun.file(path.join(dir, "mod.test.ts")).text();
+			expect(next).toContain('jest.mock("./mod", () => ({}));');
+			expect(next).not.toContain("baz");
+		} finally {
+			await cleanup(dir);
+		}
+	});
+
+	test("MCP tool is registered with dryRun default behavior", async () => {
+		const serverSource = await Bun.file(
+			path.resolve(import.meta.dir, "../mcp-server.ts")
+		).text();
+
+		expect(serverSource).toContain('server.registerTool(\n\t"mock-cleanup"');
+		expect(serverSource).toContain("const dryRun = options.dryRun ?? true");
+	});
+
+	test("missing directory argument exits with error", async () => {
+		const proc = Bun.spawn([...CLI, "mock-cleanup"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const stderr = await new Response(proc.stderr).text();
+		await proc.exited;
+
+		expect(proc.exitCode).toBe(1);
+		expect(stderr).toContain("mock-cleanup requires a <directory> argument");
+	});
+});

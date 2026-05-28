@@ -42,6 +42,10 @@ import { analyze } from "./commands/analyze.ts";
 import { buildAuditReport } from "./commands/audit.ts";
 import { runExtractCommon } from "./commands/extract-common.ts";
 import { search } from "./commands/find.ts";
+import {
+	applyMockCleanup,
+	buildMockCleanupReport,
+} from "./commands/mock-cleanup.ts";
 import { moveModule } from "./commands/move.ts";
 import { buildNamingReport } from "./commands/naming.ts";
 import { renameSymbol } from "./commands/rename.ts";
@@ -471,6 +475,53 @@ async function testRelocationTool(
 		force: options.force ?? false,
 		worktreeDirty: wt.dirty,
 		...result,
+	});
+}
+
+async function mockCleanupTool(
+	directory: string,
+	options: {
+		project?: string;
+		dryRun?: boolean;
+		force?: boolean;
+		verify?: boolean;
+	}
+): Promise<CallToolResult> {
+	const absoluteDir = path.resolve(directory);
+	const tsconfigPath = resolveTsConfig(options.project, absoluteDir);
+	if (!tsconfigPath) {
+		return errorText(`Could not find tsconfig.json for ${absoluteDir}`);
+	}
+	const project = loadProject(tsconfigPath, absoluteDir);
+	const dryRun = options.dryRun ?? true;
+	const wt = await checkWorktree(project.rootDir, options.force ?? false);
+	if (wt.blocked && !dryRun) {
+		return errorText(
+			"Working tree has uncommitted changes. Commit/stash first, or rerun with force=true."
+		);
+	}
+
+	const report = await buildMockCleanupReport({
+		directory: absoluteDir,
+		project: options.project,
+	});
+	if (dryRun) {
+		return jsonText({ dryRun, force: options.force ?? false, report });
+	}
+
+	const result = await applyMockCleanup(report, {
+		project,
+		reportDirectory: absoluteDir,
+		dryRun,
+		verify: options.verify ?? true,
+	});
+	return jsonText({
+		force: options.force ?? false,
+		worktreeDirty: wt.dirty,
+		...result,
+		modifiedFiles: result.modifiedFiles.map((file) =>
+			path.relative(project.rootDir, file)
+		),
 	});
 }
 
@@ -945,6 +996,55 @@ server.registerTool(
 				force,
 				verbose,
 				conventionThreshold,
+			});
+		} catch (error) {
+			return toError(error);
+		}
+	}
+);
+
+server.registerTool(
+	"mock-cleanup",
+	{
+		description:
+			"Detect orphan keys in jest.mock, vi.mock, vitest.mock, and bun:test mock.module object-literal factories. Defaults to dryRun=true and reports keys whose names are no longer exports on the mocked module, plus skipped factories such as spread or computed shapes. When dryRun=false, removes only those orphan keys, leaves the mock call in place even if the factory becomes empty, runs tsc before/after by default, and rolls back on typecheck regression. Mutating.",
+		inputSchema: {
+			directory: z
+				.string()
+				.describe(
+					"Absolute or cwd-relative path to the project directory to scan"
+				),
+			project: z
+				.string()
+				.optional()
+				.describe(
+					"Optional path to the project root or tsconfig.json. Omit to auto-resolve the tsconfig for `directory`"
+				),
+			dryRun: z
+				.boolean()
+				.optional()
+				.describe(
+					"Preview orphan mock keys without writing files (default true)"
+				),
+			force: z
+				.boolean()
+				.optional()
+				.describe("Override dirty-worktree guard when dryRun=false"),
+			verify: z
+				.boolean()
+				.optional()
+				.describe(
+					"Run `tsc --noEmit` before and after and roll back on regression (default true). Ignored when dryRun=true"
+				),
+		},
+	},
+	async ({ directory, project, dryRun, force, verify }) => {
+		try {
+			return await mockCleanupTool(directory, {
+				project,
+				dryRun,
+				force,
+				verify,
 			});
 		} catch (error) {
 			return toError(error);

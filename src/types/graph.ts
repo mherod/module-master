@@ -1,3 +1,5 @@
+import type { MockFactoryEntry, MockFactorySkip } from "./mock-cleanup.ts";
+
 export interface ModuleReference {
 	/** The file containing the reference */
 	sourceFile: string;
@@ -15,6 +17,10 @@ export interface ModuleReference {
 	bindings?: ImportBinding[];
 	/** Whether this is a type-only import */
 	isTypeOnly: boolean;
+	/** For jest.mock/vi.mock/mock.module calls with object-literal factories. */
+	factoryEntries?: MockFactoryEntry[];
+	/** Why mock-cleanup cannot inspect a present mock factory. */
+	mockFactorySkip?: MockFactorySkip;
 }
 
 export type ReferenceType =

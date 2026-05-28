@@ -6,6 +6,7 @@ import { auditCommand } from "./audit.ts";
 import { discoverCommand } from "./discover.ts";
 import { extractCommonCommand } from "./extract-common.ts";
 import { findCommand } from "./find.ts";
+import { mockCleanupCommand } from "./mock-cleanup.ts";
 import { moveCommand } from "./move.ts";
 import { namingCommand } from "./naming.ts";
 import { renameCommand } from "./rename.ts";
@@ -668,6 +669,51 @@ Examples:
 					dryRun: values["dry-run"],
 					force: values.force,
 					conventionThreshold: normalizedThreshold,
+				});
+			} catch (error) {
+				logger.error(error instanceof Error ? error.message : String(error));
+				process.exit(1);
+			}
+		},
+	},
+
+	{
+		name: "mock-cleanup",
+		helpText: `
+Usage: ${name} mock-cleanup <directory> [options]
+
+Find mock factory keys that no longer exist as exports on the mocked module.
+
+Arguments:
+  directory    Path to the project directory to scan
+
+Options:
+  --json        Output results as JSON
+  --fix         Remove orphan factory keys and run type checking
+  -n, --dry-run Preview even when --fix is set
+  --force       Allow --fix when the git worktree is dirty
+  --no-verify   Skip type checking verification (not recommended)
+
+Examples:
+  ${name} mock-cleanup src
+  ${name} mock-cleanup src --json
+  ${name} mock-cleanup src --fix
+`,
+		run: async ([directory], values) => {
+			if (!directory) {
+				logger.error("Error: mock-cleanup requires a <directory> argument");
+				logger.error(`Run '${name} mock-cleanup --help' for usage`);
+				process.exit(1);
+			}
+			try {
+				await mockCleanupCommand({
+					directory,
+					project: values.project,
+					json: values.json,
+					fix: values.fix,
+					dryRun: values["dry-run"],
+					force: values.force,
+					verify: !values["no-verify"],
 				});
 			} catch (error) {
 				logger.error(error instanceof Error ? error.message : String(error));

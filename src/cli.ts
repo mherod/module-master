@@ -72,6 +72,7 @@ Commands:
   extract-common <directory>           Extract duplicate functions into shared modules
   audit <directory>                    Analyze module health: fan-out, fan-in, cycles
   unused <directory>                   Find exports never imported by other files
+  mock-cleanup <directory>             Find orphan keys in mock factories
   test-relocation <directory>          Find stranded or misnamed test files
   naming <directory>                   Audit per-directory filename casing
   tidy <directory>                     Compose unused, similar, and audit reports
@@ -121,6 +122,7 @@ Examples:
   ${name} move src/old/file.ts src/new/file.ts --dry-run
   ${name} rename src/components/Button.tsx Button PrimaryButton
   ${name} similar src --json
+  ${name} mock-cleanup src --fix
 `);
 }
 
