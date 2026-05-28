@@ -113,6 +113,15 @@ export async function discoverWorkspace(
 }
 
 /**
+ * Clear the per-process workspace discovery cache.
+ * Intended for tests that mutate the filesystem between calls and need a
+ * fresh scan; production code should rely on the cache.
+ */
+export function clearWorkspaceCache(): void {
+	workspaceCache.clear();
+}
+
+/**
  * Find the workspace root directory and config
  */
 async function findWorkspaceRoot(startDir: string): Promise<{
