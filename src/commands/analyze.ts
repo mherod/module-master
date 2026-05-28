@@ -157,8 +157,12 @@ export async function analyze(
 	// Cross-reference exports against imported-bindings map to find unused exports.
 	// Each hit carries internalUsage so callers can tell a de-export candidate
 	// (keep the symbol, drop `export`) from a delete candidate (no usage anywhere).
-	const { buildImportedBindingsMap, countInternalReferences, isExportUsed } =
-		await import("./unused.ts");
+	const {
+		buildImportedBindingsMap,
+		countInternalReferences,
+		hasNoExternalUsage,
+		isExportUsed,
+	} = await import("./unused.ts");
 	const importedBindings = buildImportedBindingsMap(graph);
 	const fileImporters = importedBindings.get(filePath);
 	const unusedExports = exports
@@ -171,6 +175,7 @@ export async function analyze(
 				internalRefCount,
 			};
 		});
+	const noExternalUsage = hasNoExternalUsage(filePath, exports, graph);
 
 	return {
 		file: filePath,
@@ -180,6 +185,7 @@ export async function analyze(
 		barrelExports: barrelsWithContext,
 		unresolvable,
 		unusedExports,
+		noExternalUsage,
 	};
 }
 
@@ -254,6 +260,13 @@ function printAnalysis(
 	}
 
 	logger.empty();
+
+	if (result.noExternalUsage) {
+		logger.info(
+			"No external usage: every export in this file is unused outside the file."
+		);
+		logger.empty();
+	}
 
 	// Unresolvable imports
 	if (result.unresolvable.length > 0) {

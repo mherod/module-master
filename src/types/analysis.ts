@@ -12,6 +12,7 @@ export interface AnalysisResult {
 		diagnostic: string;
 	}>;
 	unusedExports: UnusedExportInfo[];
+	noExternalUsage: boolean;
 }
 
 export interface ExportInfo {

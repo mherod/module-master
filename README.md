@@ -214,7 +214,7 @@ Without `--output`, keeps one canonical copy in place and replaces all others wi
 
 ### `unused <directory>`
 
-Find exports that no other file in the project imports.
+Find exports and files that no other file in the project imports.
 
 ```bash
 resect unused src                            # Scan for unused exports
@@ -223,7 +223,9 @@ resect unused src --ignore="*.test.ts"       # Exclude test files
 resect unused src --verbose                  # Detailed output
 ```
 
-A hit is a **de-export** signal, not automatically a **delete** signal. Each result carries `internalUsage` / `internalRefCount`: when `internalUsage` is `false` the symbol is referenced nowhere and is safe to delete; when `true`, it is still called within its own file, so only the `export` keyword is redundant — deleting the symbol would break its own module. The report also returns aggregate `deadCount` and `internalOnlyCount`.
+A per-export hit is a **de-export** signal, not automatically a **delete** signal. Each result carries `internalUsage` / `internalRefCount`: when `internalUsage` is `false` the symbol is referenced nowhere and is safe to delete; when `true`, it is still called within its own file, so only the `export` keyword is redundant — deleting the symbol would break its own module. The report also returns aggregate `deadCount` and `internalOnlyCount`.
+
+The report also includes `orphanFiles`: exported files with `noExternalUsage:true`, meaning no external file imports the module or a barrel that re-exports it. Package entrypoints from `package.json` `main`, `module`, or `exports` are excluded from this list because they are public API by definition. This top-level JSON field is experimental during the 1.x series and is marked with `schemaVersion: "1-experimental"`.
 
 Usage is counted across **every tsconfig discovered in the project**, not just the one that resolves for the scan directory — so an export consumed only by a sibling config (e.g. `scripts/` on a `tsconfig.scripts.json`) is not falsely reported dead. The scanned set is returned as `scannedConfigs` / `scannedFileCount`. The `--ignore` glob excludes files only as reported *candidates*; ignored files (e.g. tests) still count as *usage* sources, so a test-only export is not reported dead.
 
@@ -283,7 +285,7 @@ resect ships a stdio [Model Context Protocol](https://modelcontextprotocol.io) s
 | `discover` | tsconfig files, extends chains, project references, path aliases, file ownership |
 | `workspace` | Monorepo packages, entrypoints, exports maps, barrel files |
 | `audit` | Module health: fan-out, fan-in, instability, large export surfaces, cycles |
-| `unused` | Exports no other file imports, flagged as de-export vs delete (`internalUsage`, `deadCount`, `internalOnlyCount`) |
+| `unused` | Exports and files no other file imports, flagged as de-export vs delete plus `orphanFiles` |
 | `similar` | Similar/duplicate functions, type aliases, and interfaces |
 | `test-relocation` | Stranded or misnamed tests with suggested colocated moves; dry-run by default |
 | `naming` | Per-directory filename casing outliers with suggested filenames |

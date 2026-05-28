@@ -3,13 +3,29 @@ import ts from "typescript";
 import { logger } from "../cli-logger.ts";
 import { filterGitignored } from "../core/git.ts";
 import type { DependencyGraph } from "../core/graph.ts";
-import { buildProjectGraphs } from "../core/graph.ts";
+import {
+	buildProjectGraphs,
+	findAllReferences,
+	mergeDependencyGraphs,
+	withGraphSourceFile,
+} from "../core/graph.ts";
 import { resolveTsConfig } from "../core/project.ts";
 import { normalizePath } from "../core/resolver.ts";
 import { scanExports } from "../core/scanner.ts";
 import { withSourceFile } from "../core/source-file.ts";
+import { discoverWorkspace } from "../core/workspace.ts";
+import { getRuntime } from "../runtime/index.ts";
 import type { ExportInfo } from "../types/analysis.ts";
 import type { ReadOnlyCommandOptions } from "../types/commands.ts";
+import type { ModuleReference, ReferenceType } from "../types/graph.ts";
+
+const UNUSED_SCHEMA_VERSION = "1-experimental" as const;
+const ALL_BINDINGS = "__all__";
+const RE_EXPORT_TYPES = new Set<ReferenceType>([
+	"export-from",
+	"export-all",
+	"export-all-as",
+]);
 
 export interface UnusedOptions extends ReadOnlyCommandOptions {
 	directory: string;
@@ -34,8 +50,17 @@ export interface UnusedExport {
 	internalRefCount: number;
 }
 
+export interface OrphanFile {
+	file: string;
+	exportNames: string[];
+	externalImporterCount: number;
+	noExternalUsage: true;
+}
+
 export interface UnusedReport {
+	schemaVersion: typeof UNUSED_SCHEMA_VERSION;
 	unused: UnusedExport[];
+	orphanFiles: OrphanFile[];
 	totalExports: number;
 	totalFiles: number;
 	/** Exports referenced by no file at all — safe deletion candidates. */
@@ -69,7 +94,9 @@ export async function findUnusedExports(
 	const tsconfigPath = resolveTsConfig(options?.project, absoluteDir);
 	if (!tsconfigPath) {
 		return {
+			schemaVersion: UNUSED_SCHEMA_VERSION,
 			unused: [],
+			orphanFiles: [],
 			totalExports: 0,
 			totalFiles: 0,
 			deadCount: 0,
@@ -103,24 +130,35 @@ export async function findUnusedExportsFromGraphs(
 ): Promise<UnusedReport> {
 	const absoluteDir = path.resolve(directory);
 
-	// Merge per-config usage maps and map each file to a graph that contains it
-	// (for export scanning + internal-reference counting).
+	const graph =
+		graphs.length > 1
+			? mergeDependencyGraphs(graphs.map((result) => result.graph))
+			: graphs[0]?.graph;
+	if (!graph) {
+		return {
+			schemaVersion: UNUSED_SCHEMA_VERSION,
+			unused: [],
+			orphanFiles: [],
+			totalExports: 0,
+			totalFiles: 0,
+			deadCount: 0,
+			internalOnlyCount: 0,
+			scannedConfigs: [],
+			scannedFileCount: 0,
+		};
+	}
+
+	// Merge per-config usage maps so sibling tsconfigs contribute importers.
 	const importedBindings = new Map<string, Set<string>>();
-	const fileToGraph = new Map<string, DependencyGraph>();
 	const scannedConfigs: string[] = [];
 
 	for (const { tsconfigPath: configPath, graph } of graphs) {
 		scannedConfigs.push(configPath);
 		mergeImportedBindings(importedBindings, buildImportedBindingsMap(graph));
-		for (const file of graph.imports.keys()) {
-			if (!fileToGraph.has(file)) {
-				fileToGraph.set(file, graph);
-			}
-		}
 	}
 
 	// Candidate files: those under the target directory, across all configs.
-	let candidateFiles = Array.from(fileToGraph.keys()).filter((f) =>
+	let candidateFiles = Array.from(graph.imports.keys()).filter((f) =>
 		f.startsWith(absoluteDir)
 	);
 
@@ -133,6 +171,8 @@ export async function findUnusedExportsFromGraphs(
 	const ignorePattern = options?.ignore ? new Bun.Glob(options.ignore) : null;
 
 	const unused: UnusedExport[] = [];
+	const exportedFiles = new Map<string, ExportInfo[]>();
+	const entrypointFiles = await collectPackageEntrypointFiles(absoluteDir);
 	let totalExports = 0;
 
 	for (const file of candidateFiles) {
@@ -143,10 +183,6 @@ export async function findUnusedExportsFromGraphs(
 			continue;
 		}
 
-		const graph = fileToGraph.get(file);
-		if (!graph) {
-			continue;
-		}
 		const fileImporters = importedBindings.get(normalizePath(file));
 
 		// Scan exports and count internal references from the same parsed
@@ -154,6 +190,7 @@ export async function findUnusedExportsFromGraphs(
 		const collect = (sourceFile: ts.SourceFile): void => {
 			const exports = scanExports(sourceFile);
 			totalExports += exports.length;
+			exportedFiles.set(normalizePath(file), exports);
 
 			for (const exp of exports) {
 				if (isExportUsed(exp, file, fileImporters, graph)) {
@@ -172,23 +209,35 @@ export async function findUnusedExportsFromGraphs(
 			}
 		};
 
-		if (graph.program) {
-			withSourceFile(graph.program, file, collect, undefined);
-		} else {
+		const didCollect = withGraphSourceFile(
+			graph,
+			file,
+			(sourceFile) => {
+				collect(sourceFile);
+				return true;
+			},
+			false
+		);
+		if (!didCollect) {
 			withSourceFile(file, collect, undefined);
 		}
 	}
 
 	const internalOnlyCount = unused.filter((u) => u.internalUsage).length;
+	const orphanFiles = computeOrphanFiles(graph, exportedFiles, {
+		entrypointFiles,
+	});
 
 	return {
+		schemaVersion: UNUSED_SCHEMA_VERSION,
 		unused,
+		orphanFiles,
 		totalExports,
 		totalFiles: candidateFiles.length,
 		deadCount: unused.length - internalOnlyCount,
 		internalOnlyCount,
 		scannedConfigs,
-		scannedFileCount: fileToGraph.size,
+		scannedFileCount: graph.imports.size,
 	};
 }
 
@@ -209,6 +258,235 @@ function mergeImportedBindings(
 			}
 		} else {
 			target.set(key, new Set(bindings));
+		}
+	}
+}
+
+export function computeOrphanFiles(
+	graph: DependencyGraph,
+	exportedFiles: ReadonlyMap<string, readonly ExportInfo[]>,
+	options?: { entrypointFiles?: ReadonlySet<string> }
+): OrphanFile[] {
+	const entrypointFiles = options?.entrypointFiles ?? new Set<string>();
+	const orphanFiles: OrphanFile[] = [];
+
+	for (const [file, exports] of exportedFiles) {
+		if (exports.length === 0 || entrypointFiles.has(normalizePath(file))) {
+			continue;
+		}
+
+		const externalImporterCount = countExternalImporters(file, graph);
+		if (externalImporterCount > 0) {
+			continue;
+		}
+
+		orphanFiles.push({
+			file,
+			exportNames: exports.map((exp) => exp.name),
+			externalImporterCount,
+			noExternalUsage: true,
+		});
+	}
+
+	orphanFiles.sort((a, b) => a.file.localeCompare(b.file));
+	return orphanFiles;
+}
+
+export function hasNoExternalUsage(
+	file: string,
+	exports: readonly ExportInfo[],
+	graph: DependencyGraph
+): boolean {
+	return exports.length > 0 && countExternalImporters(file, graph) === 0;
+}
+
+function countExternalImporters(file: string, graph: DependencyGraph): number {
+	const normalizedFile = normalizePath(file);
+	const importers = new Set<string>();
+
+	for (const ref of findAllReferences(normalizedFile, graph)) {
+		if (isExternalUsage(ref, normalizedFile)) {
+			importers.add(normalizePath(ref.sourceFile));
+		}
+	}
+
+	return importers.size;
+}
+
+function isExternalUsage(ref: ModuleReference, targetFile: string): boolean {
+	return (
+		normalizePath(ref.sourceFile) !== targetFile &&
+		!RE_EXPORT_TYPES.has(ref.type)
+	);
+}
+
+interface PackageJsonEntrypoints {
+	main?: unknown;
+	module?: unknown;
+	exports?: unknown;
+}
+
+async function collectPackageEntrypointFiles(
+	directory: string
+): Promise<Set<string>> {
+	const packageJsonPaths = new Set<string>();
+	const workspace = await discoverWorkspace(directory);
+	if (workspace) {
+		for (const pkg of workspace.packages) {
+			packageJsonPaths.add(pkg.packageJsonPath);
+		}
+	}
+
+	const nearestPackageJson = await findNearestPackageJson(directory);
+	if (nearestPackageJson) {
+		packageJsonPaths.add(nearestPackageJson);
+	}
+
+	const entrypointFiles = new Set<string>();
+	for (const packageJsonPath of packageJsonPaths) {
+		const packageJson = await readPackageJson(packageJsonPath);
+		if (!packageJson) {
+			continue;
+		}
+		const packageDir = path.dirname(packageJsonPath);
+		const srcDir = await detectSourceDir(packageDir);
+		for (const specifier of collectEntrypointSpecifiers(packageJson)) {
+			for (const candidate of expandEntrypointCandidates(
+				packageDir,
+				specifier,
+				srcDir
+			)) {
+				if (await getRuntime().fs.exists(candidate)) {
+					entrypointFiles.add(normalizePath(candidate));
+				}
+			}
+		}
+	}
+
+	return entrypointFiles;
+}
+
+async function findNearestPackageJson(
+	startDir: string
+): Promise<string | null> {
+	let current = path.resolve(startDir);
+
+	while (current !== path.dirname(current)) {
+		const candidate = path.join(current, "package.json");
+		if (await getRuntime().fs.exists(candidate)) {
+			return candidate;
+		}
+		current = path.dirname(current);
+	}
+
+	return null;
+}
+
+async function readPackageJson(
+	filePath: string
+): Promise<PackageJsonEntrypoints | null> {
+	try {
+		const raw = await getRuntime().fs.readFile(filePath);
+		return JSON.parse(raw) as PackageJsonEntrypoints;
+	} catch {
+		return null;
+	}
+}
+
+async function detectSourceDir(
+	packageDir: string
+): Promise<string | undefined> {
+	for (const candidate of ["src", "source"]) {
+		if (await getRuntime().fs.exists(path.join(packageDir, candidate))) {
+			return candidate;
+		}
+	}
+	return undefined;
+}
+
+function collectEntrypointSpecifiers(
+	packageJson: PackageJsonEntrypoints
+): string[] {
+	const specifiers: string[] = [];
+	if (typeof packageJson.main === "string") {
+		specifiers.push(packageJson.main);
+	}
+	if (typeof packageJson.module === "string") {
+		specifiers.push(packageJson.module);
+	}
+	collectExportSpecifiers(packageJson.exports, specifiers);
+	return specifiers;
+}
+
+function collectExportSpecifiers(value: unknown, specifiers: string[]): void {
+	if (typeof value === "string") {
+		specifiers.push(value);
+		return;
+	}
+	if (Array.isArray(value)) {
+		for (const item of value) {
+			collectExportSpecifiers(item, specifiers);
+		}
+		return;
+	}
+	if (value && typeof value === "object") {
+		for (const nested of Object.values(value)) {
+			collectExportSpecifiers(nested, specifiers);
+		}
+	}
+}
+
+function expandEntrypointCandidates(
+	packageDir: string,
+	specifier: string,
+	srcDir: string | undefined
+): string[] {
+	if (
+		specifier.includes("*") ||
+		path.isAbsolute(specifier) ||
+		/^[a-z]+:/i.test(specifier)
+	) {
+		return [];
+	}
+
+	const relativeSpecifier = specifier.replace(/^\.\//, "");
+	const candidates = new Set<string>();
+	addExtensionCandidates(
+		path.resolve(packageDir, relativeSpecifier),
+		candidates
+	);
+
+	if (srcDir) {
+		const parts = relativeSpecifier.split(/[\\/]/);
+		const [firstPart, ...rest] = parts;
+		if (firstPart && ["dist", "build", "lib"].includes(firstPart)) {
+			addExtensionCandidates(
+				path.resolve(packageDir, srcDir, ...rest),
+				candidates
+			);
+		}
+	}
+
+	return Array.from(candidates);
+}
+
+function addExtensionCandidates(
+	basePath: string,
+	candidates: Set<string>
+): void {
+	candidates.add(basePath);
+	const parsed = path.parse(basePath);
+	const withoutExtension = parsed.ext
+		? path.join(parsed.dir, parsed.name)
+		: basePath;
+
+	for (const extension of [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"]) {
+		candidates.add(`${withoutExtension}${extension}`);
+	}
+
+	if (!parsed.ext) {
+		for (const extension of [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"]) {
+			candidates.add(path.join(basePath, `index${extension}`));
 		}
 	}
 }
@@ -289,7 +567,7 @@ export function buildImportedBindingsMap(
 
 	for (const refs of graph.imports.values()) {
 		for (const ref of refs) {
-			const resolved = ref.resolvedPath;
+			const resolved = normalizePath(ref.resolvedPath);
 			if (!map.has(resolved)) {
 				map.set(resolved, new Set());
 			}
@@ -309,7 +587,7 @@ export function buildImportedBindingsMap(
 				case "require-resolve":
 				case "jest-mock":
 					// These consume the entire module
-					bindings.add("__all__");
+					bindings.add(ALL_BINDINGS);
 					break;
 				case "import-named":
 				case "export-from":
@@ -342,7 +620,7 @@ export function isExportUsed(
 	}
 
 	// If anyone does import *, export *, require, dynamic import — all exports are used
-	if (fileImporters.has("__all__")) {
+	if (fileImporters.has(ALL_BINDINGS)) {
 		return true;
 	}
 
@@ -378,8 +656,25 @@ export async function unusedCommand(options: UnusedOptions): Promise<void> {
 		`📊 Scanned ${report.totalExports} export(s) across ${report.totalFiles} file(s)\n`
 	);
 
-	if (report.unused.length === 0) {
+	if (report.unused.length === 0 && report.orphanFiles.length === 0) {
 		logger.info("✅ No unused exports found.");
+		logger.empty();
+		return;
+	}
+
+	if (report.orphanFiles.length > 0) {
+		logger.info(
+			`Orphan files (no external usage): ${report.orphanFiles.length}`
+		);
+		for (const orphan of report.orphanFiles) {
+			const rel = path.relative(absoluteDir, orphan.file);
+			logger.info(`  ${rel} — ${orphan.exportNames.length} export(s)`);
+		}
+		logger.empty();
+	}
+
+	if (report.unused.length === 0) {
+		logger.info("No unused individual exports found.");
 		logger.empty();
 		return;
 	}

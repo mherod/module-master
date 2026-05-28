@@ -75,6 +75,30 @@ describe("analyze command", () => {
 		await cleanup(dir);
 	});
 
+	test("shows noExternalUsage hint for orphan files", async () => {
+		const dir = await makeFixture("no-external-usage", {
+			"orphan.ts": [
+				"export function foo() {",
+				"  return bar();",
+				"}",
+				"export function bar() {",
+				"  return foo();",
+				"}",
+			].join("\n"),
+		});
+
+		const proc = Bun.spawn([...CLI, "analyze", path.join(dir, "orphan.ts")], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		expect(stdout).toContain("No external usage");
+
+		await cleanup(dir);
+	});
+
 	test("--verbose shows detailed import info", async () => {
 		const dir = await makeFixture("verbose", {
 			"utils.ts": 'export function helper() { return "ok"; }',

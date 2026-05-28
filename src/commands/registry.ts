@@ -868,7 +868,7 @@ Examples:
 		helpText: `
 Usage: ${name} unused <directory> [options]
 
-Find exports that are never imported by any other file in the project.
+Find exports and files that are never imported by any other file in the project.
 
 Arguments:
   directory    Path to the project directory to scan

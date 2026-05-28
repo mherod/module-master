@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
 import { createSourceFileFromText } from "../core/source-file.ts";
 import { CLI, cleanup, makeFixture as makeFixtureBase } from "./__test-helpers";
 import { countInternalReferences } from "./unused.ts";
@@ -14,6 +15,17 @@ async function makeFixture(name: string, files: Record<string, string>) {
 }
 
 describe("unused command", () => {
+	test("unused MCP tool returns orphan files", async () => {
+		const serverSource = await Bun.file(
+			path.resolve(import.meta.dir, "../mcp-server.ts")
+		).text();
+
+		expect(serverSource).toContain("orphanFiles: report.orphanFiles.map");
+		expect(serverSource).toContain(
+			"orphanFileCount: report.orphanFiles.length"
+		);
+	});
+
 	test("reports no unused exports when all are consumed", async () => {
 		const dir = await makeFixture("all-used", {
 			"utils.ts": 'export function helper() { return "ok"; }',
@@ -346,8 +358,118 @@ describe("unused command", () => {
 		await proc.exited;
 		expect(proc.exitCode).toBe(0);
 		const report = JSON.parse(stdout);
+		expect(report.schemaVersion).toBe("1-experimental");
 		expect(report.totalExports).toBeGreaterThanOrEqual(2);
 		expect(report.totalFiles).toBeGreaterThanOrEqual(3);
+		expect(Array.isArray(report.orphanFiles)).toBe(true);
+
+		await cleanup(dir);
+	});
+
+	test("reports orphan files whose exports only reference each other", async () => {
+		const dir = await makeFixture("orphan-file", {
+			"a.ts": [
+				"export function foo() {",
+				"  return bar();",
+				"}",
+				"export function bar() {",
+				"  return foo();",
+				"}",
+			].join("\n"),
+			"main.ts": "export function main() {\n  return 1;\n}",
+		});
+
+		const proc = Bun.spawn([...CLI, "unused", dir, "--json"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+		const orphan = report.orphanFiles.find((file: { file: string }) =>
+			file.file.endsWith("a.ts")
+		);
+		expect(orphan).toBeDefined();
+		expect(orphan.exportNames.sort()).toEqual(["bar", "foo"]);
+		expect(orphan.externalImporterCount).toBe(0);
+		expect(orphan.noExternalUsage).toBe(true);
+
+		await cleanup(dir);
+	});
+
+	test("does not report files imported only by tests as orphan files", async () => {
+		const dir = await makeFixture("test-import-live", {
+			"a.ts": "export function foo() {\n  return 1;\n}",
+			"a.test.ts": 'import { foo } from "./a";\nfoo();',
+		});
+
+		const proc = Bun.spawn([...CLI, "unused", dir, "--json"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+		const orphanFiles = report.orphanFiles.map((file: { file: string }) =>
+			path.basename(file.file)
+		);
+		expect(orphanFiles).not.toContain("a.ts");
+
+		await cleanup(dir);
+	});
+
+	test("excludes package entrypoints from orphan files", async () => {
+		const dir = await makeFixture("entrypoint", {
+			"package.json": JSON.stringify({ main: "./src/index.ts" }),
+			"tsconfig.json": JSON.stringify({
+				compilerOptions: { strict: true },
+				include: ["src/**/*.ts"],
+			}),
+			"src/index.ts": "export function publicApi() {\n  return 1;\n}",
+			"src/internal.ts": "export function internalOnly() {\n  return 2;\n}",
+		});
+
+		const proc = Bun.spawn(
+			[...CLI, "unused", path.join(dir, "src"), "--json"],
+			{
+				stdout: "pipe",
+				stderr: "pipe",
+			}
+		);
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+		const orphanFiles = report.orphanFiles.map((file: { file: string }) =>
+			path.basename(file.file)
+		);
+		expect(orphanFiles).not.toContain("index.ts");
+		expect(orphanFiles).toContain("internal.ts");
+
+		await cleanup(dir);
+	});
+
+	test("--ignore excludes matching orphan files from the report", async () => {
+		const dir = await makeFixture("ignore-orphan", {
+			"helper.test.ts": "export function testHelper() {\n  return 1;\n}",
+			"subject.ts": "export function subject() {\n  return 2;\n}",
+		});
+
+		const proc = Bun.spawn(
+			[...CLI, "unused", dir, "--json", "--ignore=*.test.ts"],
+			{ stdout: "pipe", stderr: "pipe" }
+		);
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+		const orphanFiles = report.orphanFiles.map((file: { file: string }) =>
+			path.basename(file.file)
+		);
+		expect(orphanFiles).not.toContain("helper.test.ts");
+		expect(orphanFiles).toContain("subject.ts");
 
 		await cleanup(dir);
 	});

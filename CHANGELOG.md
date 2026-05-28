@@ -11,6 +11,11 @@ All notable user-facing changes to this project are documented here.
   test. The read-only report suggests co-located `__tests__` or alongside moves
   based on project convention, and `--fix` applies moves through the existing
   move pipeline with a single closing typecheck.
+- **`unused` orphan-file detection**: `resect unused <dir>` now reports
+  `orphanFiles` for exported files with no external importers, excluding
+  package entrypoints declared through `package.json` `main`, `module`, or
+  `exports`. `analyze` also prints a `noExternalUsage` hint for a single
+  orphaned file.
 - **`naming` command**: `resect naming <dir>` audits per-directory
   filename casing conventions and reports outliers with suggested
   names, primary export kind, sibling majority, and confidence. The
