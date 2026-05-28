@@ -40,6 +40,7 @@ import {
 } from "./commands/alias.ts";
 import { analyze } from "./commands/analyze.ts";
 import { buildAuditReport } from "./commands/audit.ts";
+import { runExtractCommon } from "./commands/extract-common.ts";
 import { search } from "./commands/find.ts";
 import { moveModule } from "./commands/move.ts";
 import { renameSymbol } from "./commands/rename.ts";
@@ -1029,6 +1030,225 @@ server.registerTool(
 				dryRun: dryRun ?? true,
 				force: force ?? false,
 				verify: verify ?? true,
+			});
+		} catch (error) {
+			return toError(error);
+		}
+	}
+);
+
+async function extractCommonTool(args: {
+	directory: string;
+	project?: string;
+	threshold?: number;
+	group?: number;
+	output?: string;
+	workspace: boolean;
+	dryRun: boolean;
+	force: boolean;
+	verify: boolean;
+	nameThreshold?: number;
+	sameNameOnly?: boolean;
+	skipSameFile?: boolean;
+	minLines?: number;
+	skipDirectives?: boolean;
+	skipWrappers?: boolean;
+}): Promise<CallToolResult> {
+	const absoluteDir = path.resolve(args.directory);
+	const tsconfigPath = resolveTsConfig(args.project, absoluteDir);
+	if (!tsconfigPath) {
+		return errorText(`Could not find tsconfig.json for ${absoluteDir}`);
+	}
+	const project = loadProject(tsconfigPath);
+
+	const runExtract = async () =>
+		runExtractCommon({
+			directory: absoluteDir,
+			project: args.project,
+			threshold: args.threshold,
+			group: args.group,
+			output: args.output,
+			workspace: args.workspace,
+			dryRun: args.dryRun,
+			force: args.force,
+			nameThreshold: args.nameThreshold,
+			sameNameOnly: args.sameNameOnly,
+			skipSameFile: args.skipSameFile,
+			minLines: args.minLines,
+			skipDirectives: args.skipDirectives,
+			skipWrappers: args.skipWrappers,
+		});
+
+	const shouldVerify = args.verify && !args.dryRun;
+	type Result = Awaited<ReturnType<typeof runExtractCommon>>;
+	const guarded: { result: Result; delta: TypecheckDelta | undefined } =
+		shouldVerify
+			? await withTypecheckGuard(project, runExtract)
+			: { result: await runExtract(), delta: undefined };
+	const { result, delta } = guarded;
+
+	const root = project.rootDir;
+	return jsonText({
+		dryRun: args.dryRun,
+		force: args.force,
+		worktreeDirty: result.worktreeDirty,
+		success: result.success,
+		totalGroups: result.totalGroups,
+		totalRemoved: result.totalRemoved,
+		modifiedFiles: result.modifiedFiles.map((f) => path.relative(root, f)),
+		groups: result.groups.map((g) => ({
+			canonical: {
+				file: path.relative(root, g.canonical.file),
+				line: g.canonical.line,
+				name: g.canonical.name,
+			},
+			removed: g.removed.map((r) => ({
+				file: path.relative(root, r.file),
+				line: r.line,
+				name: r.name,
+			})),
+			functions: g.functions.map((f) => ({
+				file: path.relative(root, f.file),
+				line: f.line,
+				name: f.name,
+			})),
+		})),
+		errors: result.errors,
+		typecheck: delta,
+	});
+}
+
+server.registerTool(
+	"extract-common",
+	{
+		description:
+			"Consolidate duplicate or near-duplicate top-level functions across a project by extracting one canonical copy and removing the rest. Internally runs `similar` to find groups, picks a canonical per group, removes the others, and rewrites their callers' imports to reference the canonical's location (or a shared `output` file when provided). Defaults to `dryRun: true` — preview the extraction plan first. When `dryRun: false` and `verify: true` (both default) runs `tsc --noEmit` before AND after and returns the diagnostic delta in `typecheck`. A dirty worktree is returned as an error unless `force: true`. Returns success flag, total groups extracted, total duplicates removed, modified file list, per-group plan (canonical + removed + all functions), errors, worktree-dirty flag, and (when verified) the typecheck delta. Skips groups that would create circular imports.",
+		inputSchema: {
+			directory: z
+				.string()
+				.describe(
+					"Absolute or cwd-relative path to the project directory to scan and refactor"
+				),
+			project: z
+				.string()
+				.optional()
+				.describe(
+					"Optional path to the project root or tsconfig.json. Omit to auto-resolve"
+				),
+			threshold: z
+				.number()
+				.optional()
+				.describe(
+					"Minimum structural similarity to consider for extraction, 0.0–1.0 (default 0.95). Lower = consolidate more loosely-similar functions"
+				),
+			group: z
+				.number()
+				.optional()
+				.describe(
+					"Restrict extraction to a single group by 1-based index from the similar report. Useful for piloting one consolidation at a time"
+				),
+			output: z
+				.string()
+				.optional()
+				.describe(
+					"Path to a shared file where the canonical function should be written (e.g. 'src/shared/helpers.ts'). When omitted, the canonical stays in place at its current file"
+				),
+			workspace: z
+				.boolean()
+				.optional()
+				.describe(
+					"Scan across all packages in a workspace (default false). Required for cross-package consolidation"
+				),
+			dryRun: z
+				.boolean()
+				.optional()
+				.describe(
+					"Preview the extraction without writing files (default true). Set false to apply"
+				),
+			force: z
+				.boolean()
+				.optional()
+				.describe(
+					"Override the dirty-worktree guard (default false). Use with care"
+				),
+			verify: z
+				.boolean()
+				.optional()
+				.describe(
+					"Run `tsc --noEmit` before and after and return the diagnostic delta (default true). Ignored when dryRun=true"
+				),
+			nameThreshold: z
+				.number()
+				.optional()
+				.describe(
+					"Also require member NAME similarity (0.0–1.0) to group functions together"
+				),
+			sameNameOnly: z
+				.boolean()
+				.optional()
+				.describe(
+					"Only consolidate functions that share an identical name (strictest grouping)"
+				),
+			skipSameFile: z
+				.boolean()
+				.optional()
+				.describe(
+					"Skip groups whose members all live in one file, leaving only cross-file duplication"
+				),
+			minLines: z
+				.number()
+				.optional()
+				.describe(
+					"Ignore functions whose body has fewer than N lines, to skip trivial one-liners"
+				),
+			skipDirectives: z
+				.boolean()
+				.optional()
+				.describe(
+					"Skip functions with compile-time directives (e.g. 'use server', 'use client') that change runtime semantics"
+				),
+			skipWrappers: z
+				.boolean()
+				.optional()
+				.describe(
+					"Skip thin wrapper functions whose body is a single delegating call"
+				),
+		},
+	},
+	async ({
+		directory,
+		project,
+		threshold,
+		group,
+		output,
+		workspace,
+		dryRun,
+		force,
+		verify,
+		nameThreshold,
+		sameNameOnly,
+		skipSameFile,
+		minLines,
+		skipDirectives,
+		skipWrappers,
+	}) => {
+		try {
+			return await extractCommonTool({
+				directory,
+				project,
+				threshold,
+				group,
+				output,
+				workspace: workspace ?? false,
+				dryRun: dryRun ?? true,
+				force: force ?? false,
+				verify: verify ?? true,
+				nameThreshold,
+				sameNameOnly,
+				skipSameFile,
+				minLines,
+				skipDirectives,
+				skipWrappers,
 			});
 		} catch (error) {
 			return toError(error);
