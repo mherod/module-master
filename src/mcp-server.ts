@@ -1,20 +1,30 @@
 #!/usr/bin/env bun
 
 /**
- * resect MCP server — exposes resect's read-only analysis capabilities as
+ * resect MCP server — exposes resect's analysis and refactoring capabilities as
  * Model Context Protocol tools over stdio.
  *
  * Design notes:
  *  - A stdio MCP server speaks JSON-RPC on stdout, so NOTHING may be written to
  *    stdout except the transport itself. This entry deliberately calls the
- *    data-returning functions (`search`, `analyze`, `buildAuditReport`, …)
- *    rather than the `*Command` wrappers, which print via the `logger`
- *    (stdout) and call `process.exit()` on bad input — both fatal here.
+ *    data-returning functions (`search`, `analyze`, `buildAuditReport`,
+ *    `moveModule`, `renameSymbol`, `normalizeImports`, …) rather than the
+ *    `*Command` wrappers, which print via the `logger` (stdout) and call
+ *    `process.exit()` on bad input — both fatal here.
  *  - Every tool handler is wrapped in try/catch so failures become an `isError`
  *    result instead of throwing/exiting and killing the server.
- *  - Only read-only tools are exposed. Mutating commands (move/rename/alias/
- *    extract-common) would need dry-run-by-default + structured results before
- *    they can be exposed safely.
+ *  - Mutating tools (`move`, `rename`, `alias`) default to `dryRun: true` so
+ *    callers always preview the diff first. When `dryRun` is false and
+ *    `verify` is on (the default), each tool runs `tsc --noEmit` before AND
+ *    after applying changes; the diagnostic delta is included in the result
+ *    so the caller can see exactly which errors the refactor introduced or
+ *    fixed.
+ *  - Mutating tools use `isWorktreeDirty` (not `ensureCleanWorktree`, which
+ *    calls `process.exit`). A dirty worktree becomes a structured error
+ *    unless `force: true` is set.
+ *  - `extract-common` is intentionally not exposed yet — its output shape and
+ *    interactive ordering need a structured-result rewrite first. Tracked in
+ *    issue #60.
  */
 
 import path from "node:path";
@@ -23,15 +33,64 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { version } from "../package.json";
+import {
+	type AliasResult,
+	applyChanges as applyAliasChanges,
+	normalizeImports,
+} from "./commands/alias.ts";
 import { analyze } from "./commands/analyze.ts";
 import { buildAuditReport } from "./commands/audit.ts";
 import { search } from "./commands/find.ts";
+import { moveModule } from "./commands/move.ts";
+import { renameSymbol } from "./commands/rename.ts";
 import { findUnusedExports } from "./commands/unused.ts";
+import { isWorktreeDirty } from "./core/git.ts";
 import { buildDependencyGraph } from "./core/graph.ts";
 import { loadProject, resolveTsConfig } from "./core/project.ts";
 import { analyzeSimilarity } from "./core/similarity.ts";
 import { discoverProject } from "./core/tsconfig-discovery.ts";
+import { runTypeCheck } from "./core/verify.ts";
 import { discoverWorkspace } from "./core/workspace.ts";
+import type { ProjectConfig } from "./types.ts";
+
+// ── Mutating-tool helpers ──────────────────────────────────────────
+
+/** Structured worktree check that does NOT call process.exit on dirty. */
+async function checkWorktree(
+	cwd: string,
+	force: boolean
+): Promise<{ dirty: boolean; blocked: boolean }> {
+	const dirty = await isWorktreeDirty(cwd);
+	return { dirty, blocked: dirty && !force };
+}
+
+interface TypecheckDelta {
+	errorsBefore: number;
+	errorsAfter: number;
+	newErrors: string[];
+	fixedCount: number;
+}
+
+/** Run tsc before/after the mutating op and return the diagnostic delta. */
+async function withTypecheckGuard<T>(
+	project: ProjectConfig,
+	apply: () => Promise<T>
+): Promise<{ result: T; delta: TypecheckDelta }> {
+	const errorsBefore = await runTypeCheck(project);
+	const result = await apply();
+	const errorsAfter = await runTypeCheck(project);
+	const newErrors = errorsAfter.filter((e) => !errorsBefore.includes(e));
+	const fixedErrors = errorsBefore.filter((e) => !errorsAfter.includes(e));
+	return {
+		result,
+		delta: {
+			errorsBefore: errorsBefore.length,
+			errorsAfter: errorsAfter.length,
+			newErrors,
+			fixedCount: fixedErrors.length,
+		},
+	};
+}
 
 // ── Result helpers ──────────────────────────────────────────────────
 
@@ -567,6 +626,407 @@ server.registerTool(
 				skipSameFile,
 				minLines,
 				kinds,
+			});
+		} catch (error) {
+			return toError(error);
+		}
+	}
+);
+
+// ── Mutating tool implementations ──────────────────────────────────
+
+async function moveTool(args: {
+	source: string;
+	target: string;
+	project?: string;
+	dryRun: boolean;
+	force: boolean;
+	verify: boolean;
+	verbose: boolean;
+}): Promise<CallToolResult> {
+	const absoluteSource = path.resolve(args.source);
+	const absoluteTarget = path.resolve(args.target);
+	const tsconfigPath = resolveTsConfig(
+		args.project,
+		path.dirname(absoluteSource)
+	);
+	if (!tsconfigPath) {
+		return errorText(`Could not find tsconfig.json for ${absoluteSource}`);
+	}
+	const project = loadProject(tsconfigPath, absoluteSource);
+
+	const wt = await checkWorktree(project.rootDir, args.force);
+	if (wt.blocked) {
+		return errorText(
+			"Working tree has uncommitted changes. Commit/stash first, or rerun with force=true."
+		);
+	}
+
+	const workspace = (await discoverWorkspace(project.rootDir)) ?? undefined;
+
+	const runMove = async () =>
+		moveModule(
+			absoluteSource,
+			absoluteTarget,
+			project,
+			args.dryRun,
+			args.verbose,
+			workspace
+		);
+
+	const shouldVerify = args.verify && !args.dryRun;
+	const { result, delta } = shouldVerify
+		? await withTypecheckGuard(project, runMove)
+		: { result: await runMove(), delta: undefined };
+
+	const root = project.rootDir;
+	return jsonText({
+		dryRun: args.dryRun,
+		force: args.force,
+		worktreeDirty: wt.dirty,
+		success: result.success,
+		movedFile: {
+			from: path.relative(root, result.movedFile.from),
+			to: path.relative(root, result.movedFile.to),
+		},
+		updatedReferenceCount: result.updatedReferences.length,
+		updatedReferences: result.updatedReferences.map((r) => ({
+			file: path.relative(root, r.file),
+			line: r.line,
+			oldSpecifier: r.oldSpecifier,
+			newSpecifier: r.newSpecifier,
+		})),
+		errors: result.errors.map((e) => ({
+			file: path.relative(root, e.file),
+			message: e.message,
+			recoverable: e.recoverable,
+		})),
+		typecheck: delta,
+	});
+}
+
+async function renameTool(args: {
+	file: string;
+	oldName: string;
+	newName: string;
+	project?: string;
+	dryRun: boolean;
+	force: boolean;
+	verify: boolean;
+	verbose: boolean;
+}): Promise<CallToolResult> {
+	const absolutePath = path.resolve(args.file);
+	const tsconfigPath = resolveTsConfig(
+		args.project,
+		path.dirname(absolutePath)
+	);
+	if (!tsconfigPath) {
+		return errorText(`Could not find tsconfig.json for ${absolutePath}`);
+	}
+	const project = loadProject(tsconfigPath, absolutePath);
+
+	const wt = await checkWorktree(project.rootDir, args.force);
+	if (wt.blocked) {
+		return errorText(
+			"Working tree has uncommitted changes. Commit/stash first, or rerun with force=true."
+		);
+	}
+
+	const runRename = async () =>
+		renameSymbol(
+			absolutePath,
+			args.oldName,
+			args.newName,
+			project,
+			args.dryRun,
+			args.verbose
+		);
+
+	const shouldVerify = args.verify && !args.dryRun;
+	const { result, delta } = shouldVerify
+		? await withTypecheckGuard(project, runRename)
+		: { result: await runRename(), delta: undefined };
+
+	const root = project.rootDir;
+	return jsonText({
+		dryRun: args.dryRun,
+		force: args.force,
+		worktreeDirty: wt.dirty,
+		success: result.success,
+		renamedSymbol: {
+			file: path.relative(root, result.renamedSymbol.file),
+			oldName: result.renamedSymbol.oldName,
+			newName: result.renamedSymbol.newName,
+		},
+		updatedReferenceCount: result.updatedReferences.length,
+		updatedReferences: result.updatedReferences.map((r) => ({
+			file: path.relative(root, r.file),
+			line: r.line,
+			oldSpecifier: r.oldSpecifier,
+			newSpecifier: r.newSpecifier,
+		})),
+		errors: result.errors.map((e) => ({
+			file: path.relative(root, e.file),
+			message: e.message,
+		})),
+		typecheck: delta,
+	});
+}
+
+async function aliasTool(args: {
+	target: string;
+	prefer: "alias" | "relative" | "shortest";
+	project?: string;
+	dryRun: boolean;
+	force: boolean;
+	verify: boolean;
+}): Promise<CallToolResult> {
+	const absoluteTarget = path.resolve(args.target);
+	const tsconfigPath = resolveTsConfig(args.project, absoluteTarget);
+	if (!tsconfigPath) {
+		return errorText(`Could not find tsconfig.json for ${absoluteTarget}`);
+	}
+	const project = loadProject(tsconfigPath);
+
+	const wt = await checkWorktree(project.rootDir, args.force);
+	if (wt.blocked) {
+		return errorText(
+			"Working tree has uncommitted changes. Commit/stash first, or rerun with force=true."
+		);
+	}
+
+	const result: AliasResult = normalizeImports(
+		absoluteTarget,
+		args.prefer,
+		project
+	);
+
+	let delta: TypecheckDelta | undefined;
+	if (!args.dryRun && result.changes.length > 0) {
+		const guarded = args.verify
+			? await withTypecheckGuard(project, async () =>
+					applyAliasChanges(result.changes)
+				)
+			: { delta: undefined };
+		delta = guarded.delta;
+		if (!args.verify) {
+			await applyAliasChanges(result.changes);
+		}
+	}
+
+	const root = project.rootDir;
+	return jsonText({
+		dryRun: args.dryRun,
+		force: args.force,
+		worktreeDirty: wt.dirty,
+		strategy: args.prefer,
+		filesProcessed: result.filesProcessed,
+		importsUpdated: result.importsUpdated,
+		changes: result.changes.map((c) => ({
+			file: path.relative(root, c.file),
+			line: c.line,
+			oldSpecifier: c.oldSpecifier,
+			newSpecifier: c.newSpecifier,
+			strategy: c.strategy,
+		})),
+		typecheck: delta,
+	});
+}
+
+// ── Mutating tool registrations ────────────────────────────────────
+
+server.registerTool(
+	"move",
+	{
+		description:
+			"Move a TypeScript/JavaScript file to a new path and rewrite every import that referenced it. Updates relative and alias specifiers, splits mixed barrel imports when only some bindings moved, updates barrel re-exports for same-package moves, and rewrites cross-package imports to use the destination package name (adding a barrel export at the destination when needed). Defaults to `dryRun: true` so callers preview the change first; when `dryRun: false` and `verify: true` (both default) the tool runs `tsc --noEmit` before AND after the move and returns the diagnostic delta in `typecheck` — `newErrors` lists any errors the move introduced. A dirty worktree is returned as an error unless `force: true`. Returns success flag, updated reference list, errors, worktree-dirty flag, and (when verified) the typecheck delta.",
+		inputSchema: {
+			source: z
+				.string()
+				.describe(
+					"Absolute or cwd-relative path to the existing file to move (e.g. 'src/old/foo.ts')"
+				),
+			target: z
+				.string()
+				.describe(
+					"Absolute or cwd-relative path the file should be moved to (e.g. 'src/new/foo.ts'). Must not already exist"
+				),
+			project: z
+				.string()
+				.optional()
+				.describe(
+					"Optional path to the project root or tsconfig.json. Omit to auto-resolve the nearest tsconfig that owns the source file"
+				),
+			dryRun: z
+				.boolean()
+				.optional()
+				.describe(
+					"Preview the move without writing files (default true). Set false to actually apply"
+				),
+			force: z
+				.boolean()
+				.optional()
+				.describe(
+					"Override the dirty-worktree guard (default false). Use with care — the guard prevents data loss on a clean commit boundary"
+				),
+			verify: z
+				.boolean()
+				.optional()
+				.describe(
+					"Run `tsc --noEmit` before and after the move and return the diagnostic delta (default true). Ignored when dryRun=true"
+				),
+			verbose: z
+				.boolean()
+				.optional()
+				.describe("Include extra detail in the result (default false)"),
+		},
+	},
+	async ({ source, target, project, dryRun, force, verify, verbose }) => {
+		try {
+			return await moveTool({
+				source,
+				target,
+				project,
+				dryRun: dryRun ?? true,
+				force: force ?? false,
+				verify: verify ?? true,
+				verbose: verbose ?? false,
+			});
+		} catch (error) {
+			return toError(error);
+		}
+	}
+);
+
+server.registerTool(
+	"rename",
+	{
+		description:
+			"Rename an exported symbol (function, class, type, interface, enum, const) in its source file and update every import that references it across the project. Updates both the declaration and all unaliased import bindings; aliased imports (`import { foo as bar }`) are left intact because the local name is already decoupled. Checks for conflicts before mutating: aborts if the new name already exists in the source file or in any importing file's local bindings. Defaults to `dryRun: true`; when `dryRun: false` and `verify: true` (both default) runs `tsc --noEmit` before AND after and returns the diagnostic delta. A dirty worktree is returned as an error unless `force: true`. Returns success, updated reference list, errors, worktree-dirty flag, and (when verified) the typecheck delta.",
+		inputSchema: {
+			file: z
+				.string()
+				.describe(
+					"Absolute or cwd-relative path to the source file that declares the export to rename"
+				),
+			oldName: z
+				.string()
+				.describe(
+					"Current name of the exported symbol (must exist as an export in `file`)"
+				),
+			newName: z
+				.string()
+				.describe(
+					"New name for the export. Must not already exist in the source file or in any importing file's bindings"
+				),
+			project: z
+				.string()
+				.optional()
+				.describe(
+					"Optional path to the project root or tsconfig.json. Omit to auto-resolve the nearest tsconfig that owns the file"
+				),
+			dryRun: z
+				.boolean()
+				.optional()
+				.describe(
+					"Preview the rename without writing files (default true). Set false to apply"
+				),
+			force: z
+				.boolean()
+				.optional()
+				.describe(
+					"Override the dirty-worktree guard (default false). Use with care"
+				),
+			verify: z
+				.boolean()
+				.optional()
+				.describe(
+					"Run `tsc --noEmit` before and after and return the diagnostic delta (default true). Ignored when dryRun=true"
+				),
+			verbose: z
+				.boolean()
+				.optional()
+				.describe("Include extra detail in the result (default false)"),
+		},
+	},
+	async ({
+		file,
+		oldName,
+		newName,
+		project,
+		dryRun,
+		force,
+		verify,
+		verbose,
+	}) => {
+		try {
+			return await renameTool({
+				file,
+				oldName,
+				newName,
+				project,
+				dryRun: dryRun ?? true,
+				force: force ?? false,
+				verify: verify ?? true,
+				verbose: verbose ?? false,
+			});
+		} catch (error) {
+			return toError(error);
+		}
+	}
+);
+
+server.registerTool(
+	"alias",
+	{
+		description:
+			"Normalize import specifiers across a file or directory to a chosen style. Strategies: `alias` rewrites relative paths to tsconfig `paths` aliases where available; `relative` rewrites alias paths to `./…` relative paths; `shortest` picks whichever resulting specifier is shorter per import. Skips external packages (node_modules) and any specifier that resolves outside the project root. Defaults to `dryRun: true`; when `dryRun: false` and `verify: true` (both default) runs `tsc --noEmit` before AND after and returns the diagnostic delta. A dirty worktree is returned as an error unless `force: true`. Returns the strategy used, files processed, import count updated, the per-change list (file, line, old/new specifier), and (when verified) the typecheck delta.",
+		inputSchema: {
+			target: z
+				.string()
+				.describe(
+					"Absolute or cwd-relative path to a file or directory whose imports should be normalized"
+				),
+			prefer: z
+				.enum(["alias", "relative", "shortest"])
+				.describe(
+					"Normalization strategy: 'alias' = use tsconfig paths, 'relative' = use ./ paths, 'shortest' = pick the shorter option per import"
+				),
+			project: z
+				.string()
+				.optional()
+				.describe(
+					"Optional path to the project root or tsconfig.json. Omit to auto-resolve"
+				),
+			dryRun: z
+				.boolean()
+				.optional()
+				.describe(
+					"Preview the rewrite without writing files (default true). Set false to apply"
+				),
+			force: z
+				.boolean()
+				.optional()
+				.describe(
+					"Override the dirty-worktree guard (default false). Use with care"
+				),
+			verify: z
+				.boolean()
+				.optional()
+				.describe(
+					"Run `tsc --noEmit` before and after and return the diagnostic delta (default true). Ignored when dryRun=true"
+				),
+		},
+	},
+	async ({ target, prefer, project, dryRun, force, verify }) => {
+		try {
+			return await aliasTool({
+				target,
+				prefer,
+				project,
+				dryRun: dryRun ?? true,
+				force: force ?? false,
+				verify: verify ?? true,
 			});
 		} catch (error) {
 			return toError(error);

@@ -174,7 +174,7 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 	}
 }
 
-function normalizeImports(
+export function normalizeImports(
 	target: string,
 	prefer: "alias" | "relative" | "shortest",
 	project: ProjectConfig
