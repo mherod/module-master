@@ -1,11 +1,20 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 export const CLI = ["bun", path.resolve(import.meta.dir, "../cli.ts")];
 
+export interface CliResult {
+	stdout: string;
+	stderr: string;
+	exitCode: number | null;
+}
+
 export interface FixtureOptions {
 	/** When true, writes a default tsconfig.json unless one is provided in files */
 	tsconfig?: boolean;
+	/** Put generated fixtures outside the repo when files use *.test.* names */
+	outsideRepo?: boolean;
 }
 
 export async function makeFixture(
@@ -13,11 +22,10 @@ export async function makeFixture(
 	files: Record<string, string>,
 	options?: FixtureOptions
 ): Promise<string> {
-	const dir = path.join(
-		import.meta.dir,
-		"__fixtures__",
-		`${prefix}-${Date.now()}`
-	);
+	const fixtureRoot = options?.outsideRepo
+		? path.join(tmpdir(), "resect-fixtures")
+		: path.join(import.meta.dir, "__fixtures__");
+	const dir = path.join(fixtureRoot, `${prefix}-${Date.now()}`);
 	await mkdir(dir, { recursive: true });
 	if (options?.tsconfig && !files["tsconfig.json"]) {
 		await writeFile(
@@ -38,4 +46,17 @@ export async function makeFixture(
 
 export async function cleanup(dir: string) {
 	await rm(dir, { recursive: true, force: true });
+}
+
+export async function runCli(args: string[]): Promise<CliResult> {
+	const proc = Bun.spawn([...CLI, ...args], {
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [stdout, stderr] = await Promise.all([
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+	]);
+	await proc.exited;
+	return { stdout, stderr, exitCode: proc.exitCode };
 }

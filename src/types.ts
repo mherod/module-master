@@ -57,3 +57,11 @@ export type {
 	SimilarityGroup,
 	SimilarityReport,
 } from "./types/similar.ts";
+export type {
+	TestRelocation,
+	TestRelocationApplyResult,
+	TestRelocationImport,
+	TestRelocationOptions,
+	TestRelocationReason,
+	TestRelocationReport,
+} from "./types/test-relocation.ts";

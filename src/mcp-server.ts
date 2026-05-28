@@ -45,6 +45,10 @@ import { search } from "./commands/find.ts";
 import { moveModule } from "./commands/move.ts";
 import { buildNamingReport } from "./commands/naming.ts";
 import { renameSymbol } from "./commands/rename.ts";
+import {
+	applyRelocations,
+	buildTestRelocationReport,
+} from "./commands/test-relocation.ts";
 import { buildTidyReport } from "./commands/tidy.ts";
 import { findUnusedExports } from "./commands/unused.ts";
 import { isWorktreeDirty } from "./core/git.ts";
@@ -415,6 +419,50 @@ async function namingTool(
 		includeTests: options.includeTests,
 	});
 	return jsonText(report);
+}
+
+async function testRelocationTool(
+	directory: string,
+	options: {
+		project?: string;
+		dryRun?: boolean;
+		force?: boolean;
+		verbose?: boolean;
+		conventionThreshold?: number;
+	}
+): Promise<CallToolResult> {
+	const absoluteDir = path.resolve(directory);
+	const tsconfigPath = resolveTsConfig(options.project, absoluteDir);
+	if (!tsconfigPath) {
+		return errorText(`Could not find tsconfig.json for ${absoluteDir}`);
+	}
+	const project = loadProject(tsconfigPath, absoluteDir);
+	const dryRun = options.dryRun ?? true;
+	const wt = await checkWorktree(project.rootDir, options.force ?? false);
+	if (wt.blocked && !dryRun) {
+		return errorText(
+			"Working tree has uncommitted changes. Commit/stash first, or rerun with force=true."
+		);
+	}
+	const report = await buildTestRelocationReport({
+		directory: absoluteDir,
+		project: options.project,
+		conventionThreshold: options.conventionThreshold,
+	});
+	if (dryRun) {
+		return jsonText({ dryRun, force: options.force ?? false, report });
+	}
+	const result = await applyRelocations(report, {
+		project,
+		reportDirectory: absoluteDir,
+		dryRun,
+		verbose: options.verbose,
+	});
+	return jsonText({
+		force: options.force ?? false,
+		worktreeDirty: wt.dirty,
+		...result,
+	});
 }
 
 // ── Server wiring ───────────────────────────────────────────────────
@@ -829,6 +877,65 @@ server.registerTool(
 				minSiblings,
 				majorityThreshold,
 				includeTests,
+			});
+		} catch (error) {
+			return toError(error);
+		}
+	}
+);
+
+server.registerTool(
+	"test-relocation",
+	{
+		description:
+			"Find test files whose imports indicate they are stranded away from their subject module or misnamed relative to the subject they import. Defaults to dryRun=true and returns suggested moves. When dryRun=false, moves each test through the existing move pipeline, then runs one closing typecheck and rolls back on regression. Mutating.",
+		inputSchema: {
+			directory: z
+				.string()
+				.describe(
+					"Absolute or cwd-relative path to the project directory to scan"
+				),
+			project: z
+				.string()
+				.optional()
+				.describe(
+					"Optional path to the project root or tsconfig.json. Omit to auto-resolve the tsconfig for `directory`"
+				),
+			dryRun: z
+				.boolean()
+				.optional()
+				.describe("Preview relocations without writing files (default true)"),
+			force: z
+				.boolean()
+				.optional()
+				.describe("Override dirty-worktree guard when dryRun=false"),
+			verbose: z
+				.boolean()
+				.optional()
+				.describe("Include extra move detail where available"),
+			conventionThreshold: z
+				.number()
+				.optional()
+				.describe(
+					"Required __tests__ majority ratio from 0.0 to 1.0 before suggesting __tests__ placement (default 0.7)"
+				),
+		},
+	},
+	async ({
+		directory,
+		project,
+		dryRun,
+		force,
+		verbose,
+		conventionThreshold,
+	}) => {
+		try {
+			return await testRelocationTool(directory, {
+				project,
+				dryRun,
+				force,
+				verbose,
+				conventionThreshold,
 			});
 		} catch (error) {
 			return toError(error);

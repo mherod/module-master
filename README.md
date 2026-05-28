@@ -229,6 +229,19 @@ Usage is counted across **every tsconfig discovered in the project**, not just t
 
 Correctly handles aliased imports, namespace imports, dynamic imports, re-exports, and type-only imports.
 
+### `test-relocation <directory>`
+
+Find stranded or misnamed test files from their project imports.
+
+```bash
+resect test-relocation src
+resect test-relocation src --json
+resect test-relocation src --fix
+resect test-relocation src --convention-threshold=0.8
+```
+
+The report detects tests that import one subject directory but live elsewhere, and tests whose basename does not match the subject module they import most. Suggestions follow the local test-placement convention: `__tests__/` when that pattern is the majority, otherwise alongside the subject. `--fix` uses the normal move pipeline and runs one closing typecheck.
+
 ### `naming <directory>`
 
 Audit per-directory filename casing conventions and report outliers.
@@ -272,6 +285,7 @@ resect ships a stdio [Model Context Protocol](https://modelcontextprotocol.io) s
 | `audit` | Module health: fan-out, fan-in, instability, large export surfaces, cycles |
 | `unused` | Exports no other file imports, flagged as de-export vs delete (`internalUsage`, `deadCount`, `internalOnlyCount`) |
 | `similar` | Similar/duplicate functions, type aliases, and interfaces |
+| `test-relocation` | Stranded or misnamed tests with suggested colocated moves; dry-run by default |
 | `naming` | Per-directory filename casing outliers with suggested filenames |
 | `tidy` | Experimental grouped report composing unused, similar, and audit |
 

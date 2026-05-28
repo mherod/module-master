@@ -10,6 +10,7 @@ import { moveCommand } from "./move.ts";
 import { namingCommand } from "./naming.ts";
 import { renameCommand } from "./rename.ts";
 import { similarCommand } from "./similar.ts";
+import { testRelocationCommand } from "./test-relocation.ts";
 import { tidyCommand } from "./tidy.ts";
 import { workspaceCommand } from "./workspace.ts";
 
@@ -49,6 +50,7 @@ export interface CliValues {
 	"min-siblings"?: string;
 	"majority-threshold"?: string;
 	"include-tests"?: boolean;
+	"convention-threshold"?: string;
 	bucket?: string;
 	format?: string;
 }
@@ -601,6 +603,76 @@ Examples:
 				sameNameOnly: values["same-name-only"],
 				skipWrappers: values["skip-wrappers"],
 			});
+		},
+	},
+
+	{
+		name: "test-relocation",
+		helpText: `
+Usage: ${name} test-relocation <directory> [options]
+
+Find stranded or misnamed test files from their imports-under-test.
+
+Arguments:
+  directory    Path to the project directory to scan
+
+Options:
+  --json                    Output results as JSON
+  --fix                     Move tests via the existing move pipeline
+  -n, --dry-run             Preview even when --fix is set
+  --force                   Allow --fix when the git worktree is dirty
+  --convention-threshold    Required __tests__ majority 0.0-1.0 or 0-100 (default: 0.7)
+
+Examples:
+  ${name} test-relocation src
+  ${name} test-relocation src --json
+  ${name} test-relocation src --fix
+`,
+		run: async ([directory], values) => {
+			if (!directory) {
+				logger.error("Error: test-relocation requires a <directory> argument");
+				logger.error(`Run '${name} test-relocation --help' for usage`);
+				process.exit(1);
+			}
+			const rawConventionThreshold = values["convention-threshold"];
+			const conventionThreshold =
+				rawConventionThreshold === undefined
+					? undefined
+					: Number(rawConventionThreshold);
+			if (
+				conventionThreshold !== undefined &&
+				(Number.isNaN(conventionThreshold) ||
+					conventionThreshold < 0 ||
+					conventionThreshold > 100)
+			) {
+				logger.error(
+					"Error: --convention-threshold must be between 0.0 and 1.0 or 0 and 100"
+				);
+				process.exit(1);
+			}
+			let normalizedThreshold: number | undefined;
+			if (conventionThreshold !== undefined) {
+				normalizedThreshold =
+					conventionThreshold > 1
+						? conventionThreshold / 100
+						: conventionThreshold;
+			}
+			try {
+				await testRelocationCommand({
+					directory,
+					project: values.project,
+					workspace: values.workspace,
+					verbose: values.verbose,
+					json: values.json,
+					fix: values.fix,
+					dryRun: values["dry-run"],
+					force: values.force,
+					conventionThreshold: normalizedThreshold,
+				});
+			} catch (error) {
+				logger.error(error instanceof Error ? error.message : String(error));
+				process.exit(1);
+			}
 		},
 	},
 

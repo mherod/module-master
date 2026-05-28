@@ -1,13 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { CLI, cleanup, makeFixture as makeFixtureBase } from "./__test-helpers";
-
-interface CliResult {
-	stdout: string;
-	stderr: string;
-	exitCode: number | null;
-}
+import {
+	cleanup,
+	makeFixture as makeFixtureBase,
+	runCli,
+} from "./__test-helpers";
 
 const CAMEL_NAMES = [
 	"alphaOne",
@@ -50,19 +48,6 @@ function withFiles(
 		files[`src/group/${name}.ts`] = makeContent(name);
 	}
 	return files;
-}
-
-async function runCli(args: string[]): Promise<CliResult> {
-	const proc = Bun.spawn([...CLI, ...args], {
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-	const [stdout, stderr] = await Promise.all([
-		new Response(proc.stdout).text(),
-		new Response(proc.stderr).text(),
-	]);
-	await proc.exited;
-	return { stdout, stderr, exitCode: proc.exitCode };
 }
 
 describe("naming command", () => {

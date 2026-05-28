@@ -62,6 +62,14 @@ export {
 // ── Commands: similar ───────────────────────────────────────────────
 export type { SimilarOptions } from "./commands/similar.ts";
 export { similarCommand } from "./commands/similar.ts";
+// ── Commands: test-relocation ──────────────────────────────────────
+export {
+	applyRelocations,
+	buildTestRelocationReport,
+	findTestRelocations,
+	formatTestRelocationReport,
+	testRelocationCommand,
+} from "./commands/test-relocation.ts";
 // ── Commands: tidy ─────────────────────────────────────────────────
 export {
 	buildTidyReport,
@@ -170,6 +178,14 @@ export type {
 	SimilarityGroup,
 	SimilarityReport,
 } from "./types/similar.ts";
+export type {
+	TestRelocation,
+	TestRelocationApplyResult,
+	TestRelocationImport,
+	TestRelocationOptions,
+	TestRelocationReason,
+	TestRelocationReport,
+} from "./types/test-relocation.ts";
 export type {
 	TidyAuditFinding,
 	TidyFinding,

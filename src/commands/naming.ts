@@ -16,6 +16,7 @@ import {
 	toRelativePath,
 } from "../core/path-utils.ts";
 import { resolveTsConfig } from "../core/project.ts";
+import { isTestFile } from "../core/test-files.ts";
 import { discoverWorkspace } from "../core/workspace.ts";
 import type {
 	DetectedFilenameCasing,
@@ -41,7 +42,6 @@ const CAMEL_CASE_PATTERN = /^[a-z][A-Za-z0-9]*$/;
 const PASCAL_CASE_PATTERN = /^[A-Z][A-Za-z0-9]*$/;
 const KEBAB_CASE_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)+$/;
 const SNAKE_CASE_PATTERN = /^[a-z0-9]+(?:_[a-z0-9]+)+$/;
-const TEST_FILE_PATTERN = /\.(?:test|spec)\.(?:[cm]?[tj]sx?|vue)$/;
 const LOWER_TO_UPPER_BOUNDARY = /([a-z0-9])([A-Z])/g;
 const ACRONYM_BOUNDARY = /([A-Z]+)([A-Z][a-z])/g;
 const NON_WORD_SEPARATOR = /[^A-Za-z0-9]+/g;
@@ -100,10 +100,6 @@ function stripSourceExtension(filePath: string): {
 		stem: basename.slice(0, -extension.length),
 		extension,
 	};
-}
-
-function isTestFile(filePath: string): boolean {
-	return TEST_FILE_PATTERN.test(path.basename(filePath));
 }
 
 function detectFilenameCasing(name: string): DetectedFilenameCasing {

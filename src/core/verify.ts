@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { logger } from "../cli-logger.ts";
 import type { ProjectConfig } from "../types.ts";
@@ -108,6 +109,32 @@ export interface TypeCheckOutcome {
 	incomplete: boolean;
 }
 
+function findLocalTypeScriptBinary(project: ProjectConfig): string {
+	const executable = process.platform === "win32" ? "tsc.cmd" : "tsc";
+	const roots = [
+		path.dirname(project.tsconfigPath),
+		project.rootDir,
+		process.cwd(),
+	];
+	const visited = new Set<string>();
+	for (const root of roots) {
+		let current = path.resolve(root);
+		while (!visited.has(current)) {
+			visited.add(current);
+			const candidate = path.join(current, "node_modules", ".bin", executable);
+			if (existsSync(candidate)) {
+				return candidate;
+			}
+			const parent = path.dirname(current);
+			if (parent === current) {
+				break;
+			}
+			current = parent;
+		}
+	}
+	return executable;
+}
+
 /**
  * Parse tsc --noEmit output into structured errors. Pure function — no I/O.
  * Distinguishes:
@@ -167,9 +194,10 @@ export async function runTypeCheckDetailed(
 ): Promise<TypeCheckOutcome> {
 	const tsconfigPath = project.tsconfigPath;
 	const cwd = path.dirname(tsconfigPath);
+	const tsc = findLocalTypeScriptBinary(project);
 
 	const proc = Bun.spawn(
-		["tsc", "--noEmit", "-p", tsconfigPath, "--pretty", "false"],
+		[tsc, "--noEmit", "-p", tsconfigPath, "--pretty", "false"],
 		{ cwd, stdout: "pipe", stderr: "pipe" }
 	);
 	const stdout = await new Response(proc.stdout).text();

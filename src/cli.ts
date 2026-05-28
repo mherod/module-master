@@ -45,6 +45,7 @@ const { values, positionals } = parseArgs({
 		"min-siblings": { type: "string" },
 		"majority-threshold": { type: "string" },
 		"include-tests": { type: "boolean" },
+		"convention-threshold": { type: "string" },
 		ignore: { type: "string" },
 	},
 	allowPositionals: true,
@@ -71,6 +72,7 @@ Commands:
   extract-common <directory>           Extract duplicate functions into shared modules
   audit <directory>                    Analyze module health: fan-out, fan-in, cycles
   unused <directory>                   Find exports never imported by other files
+  test-relocation <directory>          Find stranded or misnamed test files
   naming <directory>                   Audit per-directory filename casing
   tidy <directory>                     Compose unused, similar, and audit reports
 
@@ -108,6 +110,7 @@ Options:
   --min-siblings       Minimum files in a directory before naming audit (default: 3)
   --majority-threshold Required filename casing majority for naming audit (default: 0.6)
   --include-tests      Include *.test.* and *.spec.* files in naming audit
+  --convention-threshold Required __tests__ majority for test relocation (default: 0.7)
   --fix                Attempt command fix mode where supported
   --ignore          Glob pattern to exclude files (unused command, e.g. "*.test.ts")
 

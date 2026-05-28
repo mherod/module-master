@@ -6,6 +6,11 @@ All notable user-facing changes to this project are documented here.
 
 ### New Features
 
+- **`test-relocation` command**: `resect test-relocation <dir>` reports
+  stranded tests and test files whose names disagree with their imports under
+  test. The read-only report suggests co-located `__tests__` or alongside moves
+  based on project convention, and `--fix` applies moves through the existing
+  move pipeline with a single closing typecheck.
 - **`naming` command**: `resect naming <dir>` audits per-directory
   filename casing conventions and reports outliers with suggested
   names, primary export kind, sibling majority, and confidence. The
