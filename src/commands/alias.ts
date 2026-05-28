@@ -1,6 +1,7 @@
 import path from "node:path";
 import { logger } from "../cli-logger.ts";
 import ts from "../core/ast-utils.ts";
+import { mapConcurrent } from "../core/concurrency.ts";
 import { ensureCleanWorktree } from "../core/git.ts";
 import {
 	createProgram,
@@ -15,6 +16,8 @@ import { scanModuleReferences } from "../core/scanner.ts";
 import { withSourceFile } from "../core/source-file.ts";
 import {
 	printVerificationResults,
+	runTypeCheckDetailed,
+	type VerificationResult,
 	verifyTypeChecking,
 } from "../core/verify.ts";
 import {
@@ -28,7 +31,8 @@ import type { MutatingCommandOptions, ProjectConfig } from "../types.ts";
 
 export interface AliasOptions extends MutatingCommandOptions {
 	target: string;
-	prefer: "alias" | "relative" | "shortest";
+	prefer?: "alias" | "relative" | "shortest";
+	renameSpecifiers?: string[];
 	verify?: boolean;
 }
 
@@ -36,16 +40,30 @@ export interface AliasResult {
 	filesProcessed: number;
 	importsUpdated: number;
 	changes: AliasChange[];
+	conflicts: AliasConflict[];
 }
 
 export interface AliasChange extends UpdatedReference {
 	strategy: string;
 }
 
+export interface AliasConflict extends AliasChange {
+	reason: string;
+}
+
+export interface SpecifierRename {
+	from: string;
+	to: string;
+}
+
+const ALIAS_WRITE_CONCURRENCY = 4;
+const RENAME_SPECIFIER_STRATEGY = "rename-specifier";
+
 export async function aliasCommand(options: AliasOptions): Promise<void> {
 	const {
 		target,
 		prefer,
+		renameSpecifiers,
 		dryRun = false,
 		force = false,
 		verbose = false,
@@ -55,9 +73,38 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 	} = options;
 
 	const absoluteTarget = path.resolve(target);
+	let specifierRenames: SpecifierRename[];
+	try {
+		specifierRenames = parseSpecifierRenames(renameSpecifiers ?? []);
+	} catch (error) {
+		logger.error(error instanceof Error ? error.message : String(error));
+		process.exit(1);
+	}
+	const isRenameMode = specifierRenames.length > 0;
 
 	// Guard: refuse to mutate a dirty worktree unless --force
 	await ensureCleanWorktree(absoluteTarget, force, dryRun);
+
+	if (isRenameMode) {
+		if (workspace) {
+			logger.error("--workspace is not supported with --rename-specifier");
+			process.exit(1);
+		}
+		await aliasRenameSpecifierCommand({
+			absoluteTarget,
+			dryRun,
+			specifierRenames,
+			projectArg,
+			verbose,
+			verify,
+		});
+		return;
+	}
+
+	if (!prefer) {
+		logger.error("Error: alias requires --prefer option");
+		process.exit(1);
+	}
 
 	// Workspace mode: normalize imports across all packages
 	if (workspace) {
@@ -102,6 +149,7 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 			filesProcessed: totalFiles,
 			importsUpdated: allChanges.length,
 			changes: allChanges,
+			conflicts: [],
 		};
 
 		if (result.changes.length === 0) {
@@ -174,6 +222,116 @@ export async function aliasCommand(options: AliasOptions): Promise<void> {
 	}
 }
 
+async function aliasRenameSpecifierCommand(options: {
+	absoluteTarget: string;
+	dryRun: boolean;
+	specifierRenames: SpecifierRename[];
+	projectArg?: string;
+	verbose: boolean;
+	verify: boolean;
+}): Promise<void> {
+	const tsconfigPath = resolveTsConfig(
+		options.projectArg,
+		options.absoluteTarget
+	);
+	if (!tsconfigPath) {
+		logger.error("Could not find tsconfig.json");
+		process.exit(1);
+	}
+
+	const project = loadProject(tsconfigPath);
+	logger.info(
+		`\n${options.dryRun ? "🔍 Dry run:" : "🔧"} Renaming import specifiers...`
+	);
+	logger.info(`   Target: ${options.absoluteTarget}`);
+	for (const rename of options.specifierRenames) {
+		logger.info(`   ${rename.from} → ${rename.to}`);
+	}
+	if (options.verify) {
+		logger.info("   Verification: enabled");
+	}
+	logger.empty();
+
+	const result = renameImportSpecifiers(
+		options.absoluteTarget,
+		options.specifierRenames,
+		project
+	);
+
+	if (result.changes.length === 0 && result.conflicts.length === 0) {
+		logger.info("✨ No changes needed. No matching specifiers found.\n");
+		return;
+	}
+
+	if (result.conflicts.length > 0) {
+		printResults(result, true, true, project.rootDir);
+		logger.error(
+			"Specifier rename has conflicts. No files were changed; resolve the listed imports and retry."
+		);
+		process.exit(1);
+	}
+
+	if (options.dryRun) {
+		printResults(result, true, options.verbose, project.rootDir);
+		return;
+	}
+
+	if (options.verify) {
+		const verifyResult = await applyChangesWithVerification(
+			result.changes,
+			project
+		);
+		printResults(result, false, options.verbose, project.rootDir);
+		logger.empty();
+		printVerificationResults(verifyResult);
+
+		if (!verifyResult.success) {
+			logger.error(
+				"\nType checking failed. Specifier rename changes were rolled back."
+			);
+			process.exit(1);
+		}
+		return;
+	}
+
+	await applyChanges(result.changes);
+	printResults(result, false, options.verbose, project.rootDir);
+}
+
+export function parseSpecifierRenames(
+	values: readonly string[]
+): SpecifierRename[] {
+	const renames: SpecifierRename[] = [];
+	const seen = new Map<string, string>();
+	for (const value of values) {
+		const separatorIndex = value.indexOf("=");
+		if (separatorIndex <= 0 || separatorIndex === value.length - 1) {
+			throw new Error(
+				`Invalid --rename-specifier "${value}". Expected "<from>=<to>".`
+			);
+		}
+		const from = value.slice(0, separatorIndex);
+		const to = value.slice(separatorIndex + 1);
+		if (from === to) {
+			throw new Error(
+				`Invalid --rename-specifier "${value}". Source and target specifiers must differ.`
+			);
+		}
+		const previous = seen.get(from);
+		if (previous && previous !== to) {
+			throw new Error(
+				`Conflicting --rename-specifier values for "${from}": "${previous}" and "${to}".`
+			);
+		}
+		if (previous === to) {
+			continue;
+		}
+		seen.set(from, to);
+		renames.push({ from, to });
+	}
+	return renames;
+}
+
 export function normalizeImports(
 	target: string,
 	prefer: "alias" | "relative" | "shortest",
@@ -188,16 +346,7 @@ export function normalizeImports(
 		const references = getFileReferences(file, program, project);
 
 		// Build a set of existing specifiers and their bindings in this file
-		const existingSpecifiers = new Map<string, Set<string>>();
-		for (const ref of references) {
-			const bindings = existingSpecifiers.get(ref.specifier) ?? new Set();
-			if (ref.bindings) {
-				for (const b of ref.bindings) {
-					bindings.add(b.alias ?? b.name);
-				}
-			}
-			existingSpecifiers.set(ref.specifier, bindings);
-		}
+		const existingSpecifiers = buildSpecifierBindingMap(references);
 
 		for (const ref of references) {
 			// Skip external packages (node_modules, built-in modules)
@@ -219,21 +368,17 @@ export function normalizeImports(
 			if (newSpecifier && newSpecifier !== ref.specifier) {
 				// Check for duplicate specifier conflict: would the new specifier
 				// collide with an existing import that has overlapping bindings?
-				const existingBindings = existingSpecifiers.get(newSpecifier);
-				if (existingBindings && ref.bindings) {
-					const overlapping = ref.bindings.some((b) =>
-						existingBindings.has(b.alias ?? b.name)
-					);
-					if (overlapping) {
-						skipped.push({
-							file,
-							line: ref.line,
-							oldSpecifier: ref.specifier,
-							newSpecifier,
-							strategy: prefer,
-						});
-						continue;
-					}
+				if (
+					hasSpecifierConflict(existingSpecifiers, ref, newSpecifier, "overlap")
+				) {
+					skipped.push({
+						file,
+						line: ref.line,
+						oldSpecifier: ref.specifier,
+						newSpecifier,
+						strategy: prefer,
+					});
+					continue;
 				}
 
 				changes.push({
@@ -264,7 +409,117 @@ export function normalizeImports(
 		filesProcessed: filesToProcess.length,
 		importsUpdated: changes.length,
 		changes,
+		conflicts: [],
 	};
+}
+
+export function renameImportSpecifiers(
+	target: string,
+	renames: readonly SpecifierRename[],
+	project: ProjectConfig
+): AliasResult {
+	const changes: AliasChange[] = [];
+	const conflicts: AliasConflict[] = [];
+	const filesToProcess = getFilesToProcess(target, project);
+	const program = createProgram(project, filesToProcess);
+	const renameByFrom = new Map(
+		renames.map((rename) => [rename.from, rename.to])
+	);
+
+	for (const file of filesToProcess) {
+		const references = getRawFileReferences(file, program);
+		const existingSpecifiers = buildSpecifierBindingMap(references);
+
+		for (const ref of references) {
+			const newSpecifier = renameByFrom.get(ref.specifier);
+			if (!newSpecifier) {
+				continue;
+			}
+
+			const change = {
+				file,
+				line: ref.line,
+				oldSpecifier: ref.specifier,
+				newSpecifier,
+				strategy: RENAME_SPECIFIER_STRATEGY,
+			};
+			if (
+				hasSpecifierConflict(existingSpecifiers, ref, newSpecifier, "duplicate")
+			) {
+				conflicts.push({
+					...change,
+					reason: `rewriting would create a duplicate "${newSpecifier}" specifier in the same file`,
+				});
+				continue;
+			}
+			changes.push(change);
+		}
+	}
+
+	return {
+		filesProcessed: filesToProcess.length,
+		importsUpdated: changes.length,
+		changes,
+		conflicts,
+	};
+}
+
+export async function applyChangesWithVerification(
+	changes: AliasChange[],
+	project: ProjectConfig
+): Promise<VerificationResult> {
+	const before = await runTypeCheckDetailed(project);
+	await applyChanges(changes);
+	const after = await runTypeCheckDetailed(project);
+	const errorsBefore = before.errors;
+	const errorsAfter = after.errors;
+	const newErrors = errorsAfter.filter(
+		(error) => !errorsBefore.includes(error)
+	);
+	const fixedErrors = errorsBefore.filter(
+		(error) => !errorsAfter.includes(error)
+	);
+	const verificationIncomplete = before.incomplete || after.incomplete;
+	const result: VerificationResult = {
+		success: newErrors.length === 0 && !verificationIncomplete,
+		errorsBefore,
+		errorsAfter,
+		newErrors,
+		fixedErrors,
+		verificationIncomplete,
+	};
+
+	if (!result.success) {
+		await rollbackChanges(project.rootDir, changes);
+	}
+
+	return result;
+}
+
+async function rollbackChanges(
+	rootDir: string,
+	changes: readonly AliasChange[]
+): Promise<void> {
+	const files = [...new Set(changes.map((change) => change.file))].map((file) =>
+		path.relative(rootDir, file)
+	);
+	if (files.length === 0) {
+		return;
+	}
+	const proc = Bun.spawn(
+		["git", "restore", "--staged", "--worktree", "--", ...files],
+		{
+			cwd: rootDir,
+			stdout: "pipe",
+			stderr: "pipe",
+		}
+	);
+	await new Response(proc.stdout).text();
+	const stderr = await new Response(proc.stderr).text();
+	await proc.exited;
+	if (proc.exitCode !== 0) {
+		throw new Error(stderr || "git restore rollback failed");
+	}
 }
 
 export async function applyChanges(changes: AliasChange[]): Promise<void> {
@@ -285,45 +540,49 @@ export async function applyChanges(changes: AliasChange[]): Promise<void> {
 	type TC = import("../core/text-changes.ts").TextChange;
 
 	const rt = getRuntime();
-	for (const [filePath, fileChanges] of byFile) {
-		let content: string;
-		try {
-			content = await rt.fs.readFile(filePath);
-		} catch {
-			continue;
-		}
-
-		// Parse the file to find precise specifier locations via AST
-		const sourceFile = createSf(filePath, content);
-		const textChanges: TC[] = [];
-
-		for (const change of fileChanges) {
-			// Build a minimal ModuleReference to locate the specifier
-			const ref: ModuleReference = {
-				sourceFile: filePath,
-				specifier: change.oldSpecifier,
-				resolvedPath: "",
-				type: "import",
-				line: change.line,
-				column: 0,
-				isTypeOnly: false,
-			};
-			const location = findLoc(sourceFile, ref);
-			if (location) {
-				textChanges.push({
-					start: location.start,
-					end: location.end,
-					newText: change.newSpecifier,
-				});
+	await mapConcurrent(
+		[...byFile],
+		async ([filePath, fileChanges]) => {
+			let content: string;
+			try {
+				content = await rt.fs.readFile(filePath);
+			} catch {
+				return;
 			}
-		}
 
-		if (textChanges.length > 0) {
-			const unique = dedup(textChanges);
-			const newContent = applyEdits(content, unique);
-			await rt.fs.writeFile(filePath, newContent);
-		}
-	}
+			// Parse the file to find precise specifier locations via AST
+			const sourceFile = createSf(filePath, content);
+			const textChanges: TC[] = [];
+
+			for (const change of fileChanges) {
+				// Build a minimal ModuleReference to locate the specifier
+				const ref: ModuleReference = {
+					sourceFile: filePath,
+					specifier: change.oldSpecifier,
+					resolvedPath: "",
+					type: "import",
+					line: change.line,
+					column: 0,
+					isTypeOnly: false,
+				};
+				const location = findLoc(sourceFile, ref);
+				if (location) {
+					textChanges.push({
+						start: location.start,
+						end: location.end,
+						newText: change.newSpecifier,
+					});
+				}
+			}
+
+			if (textChanges.length > 0) {
+				const unique = dedup(textChanges);
+				const newContent = applyEdits(content, unique);
+				await rt.fs.writeFile(filePath, newContent);
+			}
+		},
+		{ concurrency: ALIAS_WRITE_CONCURRENCY }
+	);
 }
 
 function getFilesToProcess(target: string, project: ProjectConfig): string[] {
@@ -348,6 +607,218 @@ function getFileReferences(
 		filePath,
 		(sourceFile) => scanModuleReferences(sourceFile, project),
 		[]
+	);
+}
+
+function getRawFileReferences(
+	filePath: string,
+	program: ts.Program
+): ModuleReference[] {
+	const sourceFile = program.getSourceFile(filePath);
+	return sourceFile ? collectRawModuleReferences(sourceFile) : [];
+}
+
+function collectRawModuleReferences(
+	sourceFile: ts.SourceFile
+): ModuleReference[] {
+	const references: ModuleReference[] = [];
+	const addReference = (
+		node: ts.Node,
+		specifier: string,
+		type: ModuleReference["type"],
+		bindings: ModuleReference["bindings"],
+		isTypeOnly: boolean
+	) => {
+		const { line, character } = sourceFile.getLineAndCharacterOfPosition(
+			node.getStart(sourceFile)
+		);
+		references.push({
+			sourceFile: sourceFile.fileName,
+			specifier,
+			resolvedPath: "",
+			type,
+			line: line + 1,
+			column: character + 1,
+			bindings,
+			isTypeOnly,
+		});
+	};
+
+	function visit(node: ts.Node) {
+		if (
+			ts.isImportDeclaration(node) &&
+			ts.isStringLiteral(node.moduleSpecifier)
+		) {
+			const { type, bindings, isTypeOnly } = getImportReferenceShape(node);
+			addReference(
+				node,
+				node.moduleSpecifier.text,
+				type,
+				bindings.length > 0 ? bindings : undefined,
+				isTypeOnly
+			);
+		} else if (
+			ts.isExportDeclaration(node) &&
+			node.moduleSpecifier &&
+			ts.isStringLiteral(node.moduleSpecifier)
+		) {
+			const { type, bindings, isTypeOnly } = getExportReferenceShape(node);
+			addReference(
+				node,
+				node.moduleSpecifier.text,
+				type,
+				bindings.length > 0 ? bindings : undefined,
+				isTypeOnly
+			);
+		} else if (ts.isCallExpression(node)) {
+			const type = getCallReferenceType(node);
+			const arg = node.arguments[0];
+			if (type && arg && ts.isStringLiteral(arg)) {
+				addReference(node, arg.text, type, undefined, false);
+			}
+		}
+
+		ts.forEachChild(node, visit);
+	}
+
+	visit(sourceFile);
+	return references;
+}
+
+function getImportReferenceShape(node: ts.ImportDeclaration): {
+	type: ModuleReference["type"];
+	bindings: NonNullable<ModuleReference["bindings"]>;
+	isTypeOnly: boolean;
+} {
+	const isTypeOnly = node.importClause?.isTypeOnly ?? false;
+	const bindings: NonNullable<ModuleReference["bindings"]> = [];
+	let type: ModuleReference["type"] = "import";
+
+	if (!node.importClause) {
+		type = "import-side-effect";
+	} else if (node.importClause.namedBindings) {
+		if (ts.isNamespaceImport(node.importClause.namedBindings)) {
+			type = "import-namespace";
+			bindings.push({
+				name: node.importClause.namedBindings.name.text,
+				isType: isTypeOnly,
+			});
+		} else {
+			type = "import-named";
+			for (const element of node.importClause.namedBindings.elements) {
+				bindings.push({
+					name: element.propertyName?.text ?? element.name.text,
+					alias: element.propertyName ? element.name.text : undefined,
+					isType: element.isTypeOnly || isTypeOnly,
+				});
+			}
+		}
+	}
+
+	if (node.importClause?.name) {
+		bindings.unshift({
+			name: "default",
+			alias: node.importClause.name.text,
+			isType: isTypeOnly,
+		});
+	}
+
+	return { type, bindings, isTypeOnly };
+}
+
+function getExportReferenceShape(node: ts.ExportDeclaration): {
+	type: ModuleReference["type"];
+	bindings: NonNullable<ModuleReference["bindings"]>;
+	isTypeOnly: boolean;
+} {
+	const isTypeOnly = node.isTypeOnly;
+	const bindings: NonNullable<ModuleReference["bindings"]> = [];
+	let type: ModuleReference["type"] = "export-all";
+
+	if (node.exportClause) {
+		if (ts.isNamespaceExport(node.exportClause)) {
+			type = "export-all-as";
+			bindings.push({ name: node.exportClause.name.text, isType: isTypeOnly });
+		} else {
+			type = "export-from";
+			for (const element of node.exportClause.elements) {
+				bindings.push({
+					name: element.propertyName?.text ?? element.name.text,
+					alias: element.propertyName ? element.name.text : undefined,
+					isType: element.isTypeOnly || isTypeOnly,
+				});
+			}
+		}
+	}
+
+	return { type, bindings, isTypeOnly };
+}
+
+function getCallReferenceType(
+	node: ts.CallExpression
+): ModuleReference["type"] | null {
+	if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+		return "import-dynamic";
+	}
+	if (ts.isIdentifier(node.expression) && node.expression.text === "require") {
+		return "require";
+	}
+	if (ts.isPropertyAccessExpression(node.expression)) {
+		const { expression, name } = node.expression;
+		if (
+			name.text === "resolve" &&
+			ts.isIdentifier(expression) &&
+			expression.text === "require"
+		) {
+			return "require-resolve";
+		}
+		if (
+			name.text === "mock" &&
+			ts.isIdentifier(expression) &&
+			["jest", "vi", "vitest"].includes(expression.text)
+		) {
+			return "jest-mock";
+		}
+		if (
+			name.text === "module" &&
+			ts.isIdentifier(expression) &&
+			expression.text === "mock"
+		) {
+			return "jest-mock";
+		}
+	}
+	return null;
+}
+
+function buildSpecifierBindingMap(
+	references: readonly ModuleReference[]
+): Map<string, Set<string>> {
+	const existingSpecifiers = new Map<string, Set<string>>();
+	for (const ref of references) {
+		const bindings = existingSpecifiers.get(ref.specifier) ?? new Set<string>();
+		for (const binding of ref.bindings ?? []) {
+			bindings.add(binding.alias ?? binding.name);
+		}
+		existingSpecifiers.set(ref.specifier, bindings);
+	}
+	return existingSpecifiers;
+}
+
+function hasSpecifierConflict(
+	existingSpecifiers: Map<string, Set<string>>,
+	ref: ModuleReference,
+	newSpecifier: string,
+	mode: "duplicate" | "overlap"
+): boolean {
+	const existingBindings = existingSpecifiers.get(newSpecifier);
+	if (!existingBindings) {
+		return false;
+	}
+	if (mode === "duplicate") {
+		return true;
+	}
+	return (ref.bindings ?? []).some((binding) =>
+		existingBindings.has(binding.alias ?? binding.name)
 	);
 }
 
@@ -415,6 +886,19 @@ function printResults(
 			}
 			logger.empty();
 		}
+	}
+
+	if (result.conflicts.length > 0) {
+		logger.error(
+			`⚠️  Skipped ${result.conflicts.length} import(s) to avoid specifier conflicts:`
+		);
+		for (const conflict of result.conflicts) {
+			const relativePath = path.relative(pathBase, conflict.file);
+			logger.error(
+				`   ${relativePath}:${conflict.line}: "${conflict.oldSpecifier}" → "${conflict.newSpecifier}" ${conflict.reason}`
+			);
+		}
+		logger.empty();
 	}
 
 	if (!dryRun) {

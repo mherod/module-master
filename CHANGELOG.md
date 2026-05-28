@@ -6,6 +6,12 @@ All notable user-facing changes to this project are documented here.
 
 ### New Features
 
+- **`alias --rename-specifier` mode**: `resect alias <dir>
+  --rename-specifier="<from>=<to>"` rewrites exact import specifier strings,
+  including case-only alias moves such as `@utils/Foo` to `@utils/foo`.
+  Repeated flags are applied as one batch, dry runs list every file/line
+  change, duplicate target specifiers are reported as conflicts, and verified
+  writes roll back on new typecheck errors.
 - **`mock-cleanup` command**: `resect mock-cleanup <dir>` detects orphan
   keys in `jest.mock`, `vi.mock`, `vitest.mock`, and Bun `mock.module`
   object factories after exports are removed. `--fix` removes only the

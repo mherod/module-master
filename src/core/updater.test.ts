@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import ts from "typescript";
@@ -80,7 +80,7 @@ function makeWorkspace(dir: string): WorkspaceInfo {
 	};
 }
 
-afterEach(async () => {
+afterAll(async () => {
 	// Best-effort cleanup of any updater fixtures we created under __fixtures__
 	const fixturesDir = path.join(import.meta.dir, "../commands/__fixtures__");
 	try {

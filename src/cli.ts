@@ -16,6 +16,7 @@ const { values, positionals } = parseArgs({
 		project: { type: "string", short: "p" },
 		type: { type: "string", short: "t" },
 		prefer: { type: "string" },
+		"rename-specifier": { type: "string", multiple: true },
 		force: { type: "boolean" },
 		"no-verify": { type: "boolean" },
 		fix: { type: "boolean" },
@@ -85,6 +86,7 @@ Options:
   -p, --project     Path to project directory or tsconfig.json
   -t, --type        Filter type for find command (file, export, all)
   --prefer          Strategy for alias command (alias, relative, shortest)
+  --rename-specifier  Rewrite exact import specifier pairs: <from>=<to> (repeatable)
   --no-verify       Disable type checking verification (enabled by default)
   --verbose         Enable verbose output
   --json            Output results as JSON
@@ -119,6 +121,7 @@ Examples:
   ${name} find Entity -p /path/to/project
   ${name} analyze src/utils/helpers.ts
   ${name} alias src --prefer=alias --dry-run
+  ${name} alias src --rename-specifier="@utils/Foo=@utils/foo"
   ${name} move src/old/file.ts src/new/file.ts --dry-run
   ${name} rename src/components/Button.tsx Button PrimaryButton
   ${name} similar src --json

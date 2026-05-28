@@ -231,17 +231,22 @@ The command scans exports by parsing each TypeScript/JavaScript file with the TS
 
 ## Alias Command
 
-The `alias` command (`src/commands/alias.ts`) normalizes import specifiers:
+`alias` (`src/commands/alias.ts`) normalizes import specifiers:
 
-- **Three strategies**: `--prefer=alias` (use tsconfig paths), `--prefer=relative` (use ./... paths), `--prefer=shortest` (pick shorter option)
-- **Batch processing**: Works on single files or entire directories
-- **External package filtering**: Skips node_modules and any import that resolves outside the project root
-- **Processes all in-project imports**: Normalizes both relative (`./foo`) and alias (`@/foo`) imports — does not require the specifier to start with `.`
-- **Verification enabled by default**: Runs `tsc --noEmit` before and after to catch breaking changes
-- **Simple text replacement**: Uses regex-based replacement on file contents
-- **Delegates to resolver.ts**: Uses `calculateRelativeSpecifier()` and `findAliasForPath()` from `src/core/resolver.ts` rather than private copies
+- **Strategies**: `--prefer=alias`, `--prefer=relative`, `--prefer=shortest`
+- **Exact rewrites**: repeat `--rename-specifier="<from>=<to>"` for static specifier batches without strategy selection
+- **Scope**: single files or directories; skips node_modules and imports outside `project.rootDir`
+- **Coverage**: relative (`./foo`) and alias (`@/foo`) imports; specifiers need not start with `.`
+- **Safety**: default `tsc --noEmit` before/after verification
+- **Edits**: scanner/updater positions plus `applyTextChanges()`; never TypeScript-printer reserialize
+- **Resolver**: use `calculateRelativeSpecifier()` and `findAliasForPath()` from `src/core/resolver.ts`
 
-DON'T: Apply alias command to files with complex dynamic imports or computed module paths—verification will catch issues but manual review may be needed.
+Case-only alias rename flow:
+
+1. `move src/utils/Foo.ts src/utils/foo.ts` updates relative importers.
+2. `alias src --rename-specifier="@utils/Foo=@utils/foo"` updates alias importers.
+
+DON'T: Apply alias to complex dynamic imports or computed module paths; rely on verification and manual review.
 
 ## Type Checking Verification
 
@@ -292,6 +297,9 @@ Before moving a file, `moveModule()` checks:
 
 Before normalizing an import specifier, `normalizeImports()` checks:
 - **Duplicate specifier with overlapping bindings**: Would the new specifier match an existing import in the same file that already imports a binding with the same local name? Skips the change and warns instead of creating duplicate imports.
+
+Before `--rename-specifier`, `renameImportSpecifiers()` checks:
+- **Duplicate target specifier**: Reports a second target-specifier import in the same file, exits non-zero, and leaves files unchanged.
 
 ### `hasLocalBinding()` Helper
 

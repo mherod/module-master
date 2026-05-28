@@ -24,6 +24,7 @@ export interface CliValues {
 	project?: string;
 	type?: string;
 	prefer?: string;
+	"rename-specifier"?: string[];
 	force?: boolean;
 	"no-verify"?: boolean;
 	fix?: boolean;
@@ -334,14 +335,17 @@ Examples:
 		name: "alias",
 		helpText: `
 Usage: ${name} alias <target> --prefer=<strategy> [options]
+       ${name} alias <target> --rename-specifier="<from>=<to>" [options]
 
 Normalize import specifiers to use path aliases, relative paths, or the shortest option.
+Rewrite exact import specifiers with --rename-specifier for case-only alias moves.
 
 Arguments:
   target    File or directory to process
 
 Options:
-  --prefer        Strategy: alias, relative, or shortest (required)
+  --prefer        Strategy: alias, relative, or shortest (required unless --rename-specifier is used)
+  --rename-specifier  Exact specifier rewrite pair: <from>=<to> (repeatable)
   -p, --project   Path to project directory or tsconfig.json
   -n, --dry-run   Preview changes without modifying files
   --force         Allow operation when git worktree has uncommitted changes
@@ -363,6 +367,7 @@ Examples:
   ${name} alias src/utils --prefer=relative --dry-run
   ${name} alias src/components/Button.tsx --prefer=shortest
   ${name} alias src --prefer=alias --no-verify
+  ${name} alias src --rename-specifier="@utils/Foo=@utils/foo"
 `,
 		run: async ([target], values) => {
 			if (!target) {
@@ -370,13 +375,18 @@ Examples:
 				logger.error(`Run '${name} alias --help' for usage`);
 				process.exit(1);
 			}
-			if (!values.prefer) {
+			const renameSpecifiers = values["rename-specifier"] ?? [];
+			if (!(values.prefer || renameSpecifiers.length > 0)) {
 				logger.error("Error: alias requires --prefer option");
 				logger.error(`Run '${name} alias --help' for usage`);
 				process.exit(1);
 			}
-			const prefer = values.prefer as "alias" | "relative" | "shortest";
-			if (!["alias", "relative", "shortest"].includes(prefer)) {
+			const prefer = values.prefer as
+				| "alias"
+				| "relative"
+				| "shortest"
+				| undefined;
+			if (prefer && !["alias", "relative", "shortest"].includes(prefer)) {
 				logger.error(
 					"Error: --prefer must be 'alias', 'relative', or 'shortest'"
 				);
@@ -390,6 +400,7 @@ Examples:
 				verbose: values.verbose,
 				verify: !values["no-verify"],
 				project: values.project,
+				renameSpecifiers,
 				workspace: values.workspace,
 			});
 		},

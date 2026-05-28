@@ -36,7 +36,10 @@ import { version } from "../package.json";
 import {
 	type AliasResult,
 	applyChanges as applyAliasChanges,
+	applyChangesWithVerification as applyAliasChangesWithVerification,
 	normalizeImports,
+	parseSpecifierRenames,
+	renameImportSpecifiers,
 } from "./commands/alias.ts";
 import { analyze } from "./commands/analyze.ts";
 import { buildAuditReport } from "./commands/audit.ts";
@@ -60,7 +63,11 @@ import { buildDependencyGraph } from "./core/graph.ts";
 import { loadProject, resolveTsConfig } from "./core/project.ts";
 import { analyzeSimilarity } from "./core/similarity.ts";
 import { discoverProject } from "./core/tsconfig-discovery.ts";
-import { isIncompleteTypeCheck, runTypeCheck } from "./core/verify.ts";
+import {
+	isIncompleteTypeCheck,
+	runTypeCheck,
+	type VerificationResult,
+} from "./core/verify.ts";
 import { discoverWorkspace } from "./core/workspace.ts";
 import type { ProjectConfig } from "./types.ts";
 
@@ -1192,9 +1199,23 @@ async function renameTool(args: {
 	});
 }
 
+function verificationToDelta(result: VerificationResult): TypecheckDelta {
+	return {
+		errorsBefore: result.errorsBefore.length,
+		errorsAfter: result.errorsAfter.length,
+		newErrors: result.newErrors,
+		fixedCount: result.fixedErrors.length,
+		verificationIncomplete: result.verificationIncomplete,
+		incompleteReason: result.verificationIncomplete
+			? result.errorsAfter.slice(0, 5)
+			: undefined,
+	};
+}
+
 async function aliasTool(args: {
 	target: string;
-	prefer: "alias" | "relative" | "shortest";
+	prefer?: "alias" | "relative" | "shortest";
+	renameSpecifiers?: string[];
 	project?: string;
 	dryRun: boolean;
 	force: boolean;
@@ -1214,22 +1235,39 @@ async function aliasTool(args: {
 		);
 	}
 
-	const result: AliasResult = normalizeImports(
-		absoluteTarget,
-		args.prefer,
-		project
-	);
+	const renames = parseSpecifierRenames(args.renameSpecifiers ?? []);
+	if (renames.length === 0 && !args.prefer) {
+		return errorText("alias requires either prefer or renameSpecifiers");
+	}
+	const result: AliasResult =
+		renames.length > 0
+			? renameImportSpecifiers(absoluteTarget, renames, project)
+			: normalizeImports(absoluteTarget, args.prefer ?? "alias", project);
 
 	let delta: TypecheckDelta | undefined;
-	if (!args.dryRun && result.changes.length > 0) {
-		const guarded = args.verify
-			? await withTypecheckGuard(project, async () =>
-					applyAliasChanges(result.changes)
-				)
-			: { delta: undefined };
-		delta = guarded.delta;
-		if (!args.verify) {
-			await applyAliasChanges(result.changes);
+	let rolledBack = false;
+	if (
+		!args.dryRun &&
+		result.changes.length > 0 &&
+		result.conflicts.length === 0
+	) {
+		if (args.verify && renames.length > 0) {
+			const verification = await applyAliasChangesWithVerification(
+				result.changes,
+				project
+			);
+			delta = verificationToDelta(verification);
+			rolledBack = !verification.success;
+		} else {
+			const guarded = args.verify
+				? await withTypecheckGuard(project, async () =>
+						applyAliasChanges(result.changes)
+					)
+				: { delta: undefined };
+			delta = guarded.delta;
+			if (!args.verify) {
+				await applyAliasChanges(result.changes);
+			}
 		}
 	}
 
@@ -1238,7 +1276,9 @@ async function aliasTool(args: {
 		dryRun: args.dryRun,
 		force: args.force,
 		worktreeDirty: wt.dirty,
-		strategy: args.prefer,
+		success: result.conflicts.length === 0 && !rolledBack,
+		strategy: renames.length > 0 ? "rename-specifier" : args.prefer,
+		rolledBack,
 		filesProcessed: result.filesProcessed,
 		importsUpdated: result.importsUpdated,
 		changes: result.changes.map((c) => ({
@@ -1247,6 +1287,13 @@ async function aliasTool(args: {
 			oldSpecifier: c.oldSpecifier,
 			newSpecifier: c.newSpecifier,
 			strategy: c.strategy,
+		})),
+		conflicts: result.conflicts.map((c) => ({
+			file: path.relative(root, c.file),
+			line: c.line,
+			oldSpecifier: c.oldSpecifier,
+			newSpecifier: c.newSpecifier,
+			reason: c.reason,
 		})),
 		typecheck: delta,
 	});
@@ -1399,7 +1446,7 @@ server.registerTool(
 	"alias",
 	{
 		description:
-			"Normalize import specifiers across a file or directory to a chosen style. Strategies: `alias` rewrites relative paths to tsconfig `paths` aliases where available; `relative` rewrites alias paths to `./…` relative paths; `shortest` picks whichever resulting specifier is shorter per import. Skips external packages (node_modules) and any specifier that resolves outside the project root. Defaults to `dryRun: true`; when `dryRun: false` and `verify: true` (both default) runs `tsc --noEmit` before AND after and returns the diagnostic delta. A dirty worktree is returned as an error unless `force: true`. Returns the strategy used, files processed, import count updated, the per-change list (file, line, old/new specifier), and (when verified) the typecheck delta.",
+			"Normalize import specifiers across a file or directory to a chosen style, or rewrite exact specifier strings with `renameSpecifiers` for case-only alias moves. Strategies: `alias` rewrites relative paths to tsconfig `paths` aliases where available; `relative` rewrites alias paths to `./…` relative paths; `shortest` picks whichever resulting specifier is shorter per import. `renameSpecifiers` accepts repeated `<from>=<to>` strings and skips normalization logic. Defaults to `dryRun: true`; when `dryRun: false` and `verify: true` (both default) runs `tsc --noEmit` before AND after and returns the diagnostic delta. A dirty worktree is returned as an error unless `force: true`. Returns the strategy used, files processed, import count updated, conflicts, the per-change list, and (when verified) the typecheck delta.",
 		inputSchema: {
 			target: z
 				.string()
@@ -1408,8 +1455,15 @@ server.registerTool(
 				),
 			prefer: z
 				.enum(["alias", "relative", "shortest"])
+				.optional()
 				.describe(
-					"Normalization strategy: 'alias' = use tsconfig paths, 'relative' = use ./ paths, 'shortest' = pick the shorter option per import"
+					"Normalization strategy: 'alias' = use tsconfig paths, 'relative' = use ./ paths, 'shortest' = pick the shorter option per import. Required unless renameSpecifiers is provided"
+				),
+			renameSpecifiers: z
+				.array(z.string())
+				.optional()
+				.describe(
+					"Exact specifier rewrite pairs in '<from>=<to>' form, for example '@utils/Foo=@utils/foo'. When provided, normalization strategy is skipped"
 				),
 			project: z
 				.string()
@@ -1437,11 +1491,20 @@ server.registerTool(
 				),
 		},
 	},
-	async ({ target, prefer, project, dryRun, force, verify }) => {
+	async ({
+		target,
+		prefer,
+		renameSpecifiers,
+		project,
+		dryRun,
+		force,
+		verify,
+	}) => {
 		try {
 			return await aliasTool({
 				target,
 				prefer,
+				renameSpecifiers,
 				project,
 				dryRun: dryRun ?? true,
 				force: force ?? false,

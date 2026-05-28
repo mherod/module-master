@@ -149,9 +149,11 @@ resect alias src/components --prefer=alias    # Convert to tsconfig path aliases
 resect alias src --prefer=relative            # Convert to relative paths
 resect alias . --prefer=shortest              # Pick whichever is shorter
 resect alias src --prefer=alias --dry-run     # Preview changes
+resect alias src --rename-specifier="@utils/Foo=@utils/foo"
 ```
 
 - Processes both relative (`./foo`) and alias (`@/foo`) imports — normalizes in either direction
+- Rewrites exact specifier strings with repeatable `--rename-specifier <from>=<to>` for case-only alias moves
 - Handles all TypeScript/JavaScript/Vue extensions: `.ts`, `.tsx`, `.js`, `.jsx`, `.mts`, `.cts`, `.mjs`, `.cjs`, `.vue`
 - Detects and skips changes that would create duplicate bindings
 - Verification enabled by default; use `--no-verify` to skip
@@ -414,6 +416,7 @@ To remove it: `codex mcp remove resect`.
 | `--no-verify` | | Skip type checking verification (not recommended) |
 | `--type` | `-t` | Filter find results by type: `file`, `export`, or `all` |
 | `--prefer` | | Alias strategy: `alias`, `relative`, or `shortest` |
+| `--rename-specifier` | | Exact alias rewrite pair `<from>=<to>`; repeat for batch rewrites |
 | `--json` | | Output in JSON format (workspace/similar) |
 | `--threshold` | | Similarity threshold 0.0–1.0 (similar/extract-common) |
 | `--strict` | | Exit with error if similar functions found (CI mode) |
