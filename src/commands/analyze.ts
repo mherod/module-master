@@ -145,15 +145,23 @@ export async function analyze(
 					exports: [],
 				}));
 
-	// Cross-reference exports against imported-bindings map to find unused exports
-	const { buildImportedBindingsMap, isExportUsed } = await import(
-		"./unused.ts"
-	);
+	// Cross-reference exports against imported-bindings map to find unused exports.
+	// Each hit carries internalUsage so callers can tell a de-export candidate
+	// (keep the symbol, drop `export`) from a delete candidate (no usage anywhere).
+	const { buildImportedBindingsMap, countInternalReferences, isExportUsed } =
+		await import("./unused.ts");
 	const importedBindings = buildImportedBindingsMap(graph);
 	const fileImporters = importedBindings.get(filePath);
-	const unusedExports = exports.filter(
-		(exp) => !isExportUsed(exp, filePath, fileImporters, graph)
-	);
+	const unusedExports = exports
+		.filter((exp) => !isExportUsed(exp, filePath, fileImporters, graph))
+		.map((exp) => {
+			const internalRefCount = countInternalReferences(sourceFile, exp);
+			return {
+				...exp,
+				internalUsage: internalRefCount > 0,
+				internalRefCount,
+			};
+		});
 
 	return {
 		file: filePath,
@@ -250,12 +258,21 @@ function printAnalysis(
 		logger.empty();
 	}
 
-	// Unused exports
+	// Unused exports — split into de-export vs delete candidates
 	if (result.unusedExports.length > 0) {
-		logger.info(`🚫 Unused exports (${result.unusedExports.length}):`);
+		const deleteCount = result.unusedExports.filter(
+			(e) => !e.internalUsage
+		).length;
+		const deExportCount = result.unusedExports.length - deleteCount;
+		logger.info(
+			`🚫 Unused exports (${result.unusedExports.length}: ${deleteCount} delete, ${deExportCount} de-export):`
+		);
 		for (const exp of result.unusedExports) {
 			const typeMarker = exp.isType ? " (type)" : "";
-			logger.info(`   • ${exp.name}${typeMarker} (line ${exp.line})`);
+			const verdict = exp.internalUsage
+				? ` — de-export (${exp.internalRefCount} internal ref${exp.internalRefCount === 1 ? "" : "s"})`
+				: " — delete (no refs)";
+			logger.info(`   • ${exp.name}${typeMarker} (line ${exp.line})${verdict}`);
 		}
 		logger.empty();
 	}

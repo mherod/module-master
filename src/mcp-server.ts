@@ -192,6 +192,8 @@ async function analyzeTool(
 			name: e.name,
 			line: e.line,
 			isType: e.isType,
+			internalUsage: e.internalUsage,
+			internalRefCount: e.internalRefCount,
 		})),
 	});
 }
