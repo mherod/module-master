@@ -29,7 +29,7 @@ import {
 	updateBarrelExports,
 	updateFileReferences,
 } from "../core/updater.ts";
-import { runTypeCheck } from "../core/verify.ts";
+import { isIncompleteTypeCheck, runTypeCheck } from "../core/verify.ts";
 import {
 	discoverWorkspace,
 	filterToWorkspaceBoundary,
@@ -141,8 +141,11 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 		// Run type checking to verify the move didn't break anything
 		const errors = await runTypeCheck(project);
 		if (errors.length > 0) {
+			const incomplete = isIncompleteTypeCheck(errors);
 			logger.error(
-				`\n❌ Type checking failed after move - ${errors.length} error(s):`
+				incomplete
+					? `\n❌ Type checking did not complete after move (${errors.length} fatal/global diagnostic(s)) — the move may have introduced errors that could not be detected:`
+					: `\n❌ Type checking failed after move - ${errors.length} error(s):`
 			);
 			for (const error of errors.slice(0, 10)) {
 				logger.error(`   ${error}`);
@@ -151,7 +154,9 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 				logger.error(`   ... and ${errors.length - 10} more`);
 			}
 			logger.error(
-				"\n⚠️  Move completed but introduced type errors. Please review."
+				incomplete
+					? "\n⚠️  Move completed but verification was incomplete. Please review the moved file and any dependencies manually."
+					: "\n⚠️  Move completed but introduced type errors. Please review."
 			);
 			process.exit(1);
 		}

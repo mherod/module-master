@@ -203,6 +203,28 @@ describe("calculateRelativeSpecifier", () => {
 		);
 		expect(result).toBe("./b.tsx");
 	});
+
+	test("relative-target inputs are resolved against cwd, not stitched into the from-dir (regression #67)", () => {
+		// The reporter saw `move` produce `../src/core/cookies/cookieSpecsFromUrl`
+		// when the correct answer was `../cookieSpecsFromUrl`. That output is
+		// what you get if a relative target ("src/core/cookies/foo") is treated
+		// as cwd-relative AND the from-dir happens to be a sibling of `src` —
+		// the relative result then carries the `src/...` prefix back into the
+		// new file. The guard absolutises both inputs first, so the result
+		// always starts with a relative-style prefix and never contains a
+		// stray `src/...` repetition from the from-dir basis.
+		const result = calculateRelativeSpecifier(
+			"/abs/proj/src/core/cookies/__tests__/foo.test.ts",
+			"src/core/cookies/foo.ts"
+		);
+		// Whatever cwd is at test time, the specifier should be a valid
+		// relative path that does NOT contain the literal "src/core/cookies"
+		// segment as a re-rooted path under the from-dir. (Before the fix, a
+		// mis-anchored compute could produce `../src/core/cookies/foo` — the
+		// exact symptom from issue #67.)
+		expect(result.startsWith(".")).toBe(true);
+		expect(result).not.toBe("../src/core/cookies/foo");
+	});
 });
 
 // ─── matchPathAlias ────────────────────────────────────────────────────────

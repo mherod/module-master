@@ -8,8 +8,16 @@ export const TS_JS_EXTENSION_PATTERN = /\.[tj]sx?$/;
 /** Pattern to match any file extension */
 export const FILE_EXTENSION_PATTERN = /\.[^.]+$/;
 
-/** Pattern to identify TypeScript compiler error messages */
+/** Pattern to identify per-file TypeScript compiler error messages (file:line:col: error TS####). */
 export const TSC_ERROR_PATTERN = ": error TS";
+
+/**
+ * Pattern for global tsc errors that have no source file context — these are
+ * emitted before per-file checking can run, so a non-zero tsc exit accompanied
+ * only by these lines means verification was incomplete, not that the project
+ * has zero errors. Example: `error TS2688: Cannot find type definition file for 'jest'.`
+ */
+export const TSC_GLOBAL_ERROR_PATTERN = /^error TS\d+:/;
 
 /** Pattern to detect export statements in a file */
 export const EXPORT_STATEMENT_PATTERN =

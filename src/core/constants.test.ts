@@ -6,6 +6,7 @@ import {
 	TS_JS_EXTENSION_PATTERN,
 	TS_JS_EXTENSIONS,
 	TSC_ERROR_PATTERN,
+	TSC_GLOBAL_ERROR_PATTERN,
 } from "./constants.ts";
 
 describe("removeExtension", () => {
@@ -125,6 +126,38 @@ describe("TSC_ERROR_PATTERN", () => {
 	test("is absent from a warning line", () => {
 		const line = "src/foo.ts(10,5): warning TS1234: Some warning";
 		expect(line.includes(TSC_ERROR_PATTERN)).toBe(false);
+	});
+});
+
+describe("TSC_GLOBAL_ERROR_PATTERN", () => {
+	test("matches a global TS2688 emitted before per-file checks", () => {
+		expect(
+			TSC_GLOBAL_ERROR_PATTERN.test(
+				"error TS2688: Cannot find type definition file for 'jest'."
+			)
+		).toBe(true);
+	});
+
+	test("matches a global TS6053 'file not found'", () => {
+		expect(
+			TSC_GLOBAL_ERROR_PATTERN.test(
+				"error TS6053: File '/proj/missing.ts' not found."
+			)
+		).toBe(true);
+	});
+
+	test("does not match a per-file diagnostic (has source location prefix)", () => {
+		expect(
+			TSC_GLOBAL_ERROR_PATTERN.test(
+				"src/foo.ts(1,1): error TS2307: Cannot find module './bar'."
+			)
+		).toBe(false);
+	});
+
+	test("does not match an unrelated info line", () => {
+		expect(
+			TSC_GLOBAL_ERROR_PATTERN.test("Compiling project /proj/tsconfig.json")
+		).toBe(false);
 	});
 });
 

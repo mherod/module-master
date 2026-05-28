@@ -282,15 +282,25 @@ function updateAliasedSpecifier(
 }
 
 /**
- * Calculate a relative import specifier from one file to another
+ * Calculate a relative import specifier from one file to another.
+ *
+ * Both `fromFile` and `toFile` are resolved to absolute paths before computing
+ * the relative specifier. This is defensive against callers that may pass a
+ * cwd-relative path (e.g. when an upstream resolver returned an unnormalized
+ * path) — anchoring on absolute paths is the only way to guarantee the
+ * resulting specifier resolves back to the same file. See issue #67.
  */
 export function calculateRelativeSpecifier(
 	fromFile: string,
 	toFile: string,
 	oldSpecifier?: string
 ): string {
-	const fromDir = path.dirname(fromFile);
-	let relativePath = path.relative(fromDir, toFile);
+	const absFromFile = path.isAbsolute(fromFile)
+		? fromFile
+		: path.resolve(fromFile);
+	const absToFile = path.isAbsolute(toFile) ? toFile : path.resolve(toFile);
+	const fromDir = path.dirname(absFromFile);
+	let relativePath = path.relative(fromDir, absToFile);
 
 	// Preserve the original specifier's extension style:
 	// if the old specifier had a .ts/.tsx/etc extension, keep it;

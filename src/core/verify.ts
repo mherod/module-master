@@ -1,12 +1,15 @@
 import path from "node:path";
 import { logger } from "../cli-logger.ts";
 import type { ProjectConfig } from "../types.ts";
-import { TSC_ERROR_PATTERN } from "./constants.ts";
+import { TSC_ERROR_PATTERN, TSC_GLOBAL_ERROR_PATTERN } from "./constants.ts";
 import { createProgram } from "./project.ts";
 import {
 	scanUnresolvableImports,
 	type UnresolvableDiagnostic,
 } from "./scanner.ts";
+
+/** Marker prefix for the synthetic "tsc fatalled with no parseable diagnostic" error string. */
+export const VERIFY_INCOMPLETE_PREFIX = "VERIFY_INCOMPLETE:";
 
 export interface UnresolvableDiagnosticWithFile extends UnresolvableDiagnostic {
 	file: string;
@@ -38,6 +41,13 @@ export interface VerificationResult {
 	errorsAfter: string[];
 	newErrors: string[];
 	fixedErrors: string[];
+	/**
+	 * True when either the before- or after-change tsc run could not complete
+	 * a full project check (e.g. fatal TS2688 with no per-file diagnostics, or
+	 * a non-zero tsc exit with no parseable output). When this is true, the
+	 * before/after delta is not trustworthy and `success` will be false.
+	 */
+	verificationIncomplete: boolean;
 	/** Unresolvable imports detected after changes, with file paths and specifiers */
 	unresolvableDiagnostics?: UnresolvableDiagnosticWithFile[];
 }
@@ -51,7 +61,7 @@ export async function verifyTypeChecking(
 	applyChanges: () => Promise<void> | void
 ): Promise<VerificationResult> {
 	// Run type check before changes
-	const errorsBefore = await runTypeCheck(project);
+	const before = await runTypeCheckDetailed(project);
 
 	// Take snapshot if provided
 	beforeSnapshot();
@@ -60,16 +70,20 @@ export async function verifyTypeChecking(
 	await applyChanges();
 
 	// Run type check after changes
-	const errorsAfter = await runTypeCheck(project);
+	const after = await runTypeCheckDetailed(project);
 
 	// Collect unresolvable imports after changes are applied
 	const unresolvableDiagnostics = collectUnresolvableDiagnostics(project);
+
+	const errorsBefore = before.errors;
+	const errorsAfter = after.errors;
 
 	// Compare errors
 	const newErrors = errorsAfter.filter((err) => !errorsBefore.includes(err));
 	const fixedErrors = errorsBefore.filter((err) => !errorsAfter.includes(err));
 
-	const success = newErrors.length === 0;
+	const verificationIncomplete = before.incomplete || after.incomplete;
+	const success = newErrors.length === 0 && !verificationIncomplete;
 
 	return {
 		success,
@@ -77,18 +91,83 @@ export async function verifyTypeChecking(
 		errorsAfter,
 		newErrors,
 		fixedErrors,
+		verificationIncomplete,
 		unresolvableDiagnostics,
 	};
 }
 
+/** Structured result from a tsc invocation, including incompleteness signal. */
+export interface TypeCheckOutcome {
+	errors: string[];
+	/**
+	 * True when tsc exited non-zero but produced no per-file diagnostics, or
+	 * when it emitted a fatal global diagnostic (e.g. TS2688) that prevents
+	 * per-file checking. Callers MUST NOT trust an empty errors delta when
+	 * `incomplete` is true — the verification did not run to completion.
+	 */
+	incomplete: boolean;
+}
+
 /**
- * Run TypeScript compiler in noEmit mode and capture errors
+ * Parse tsc --noEmit output into structured errors. Pure function — no I/O.
+ * Distinguishes:
+ *   - per-file diagnostics: `path/file.ts(line,col): error TS####: message`
+ *   - global diagnostics:   `error TS####: message` (no source location;
+ *     emitted before per-file checks run when tsc cannot load its inputs).
+ * When tsc exits non-zero with neither form, returns a synthetic
+ * `VERIFY_INCOMPLETE: ...` error so callers cannot mistake it for success.
  */
-export async function runTypeCheck(project: ProjectConfig): Promise<string[]> {
+export function parseTsCompilerOutput(
+	output: string,
+	exitCode: number
+): TypeCheckOutcome {
+	if (exitCode === 0) {
+		return { errors: [], incomplete: false };
+	}
+
+	const trimmed = output.trim();
+	const lines = trimmed
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line.length > 0);
+
+	const errors: string[] = [];
+	let sawGlobal = false;
+	for (const line of lines) {
+		if (line.includes(TSC_ERROR_PATTERN)) {
+			errors.push(line);
+			continue;
+		}
+		if (TSC_GLOBAL_ERROR_PATTERN.test(line)) {
+			errors.push(line);
+			sawGlobal = true;
+		}
+	}
+
+	if (errors.length === 0) {
+		const detail = trimmed ? `: ${trimmed.slice(0, 200)}` : "";
+		return {
+			errors: [
+				`${VERIFY_INCOMPLETE_PREFIX} tsc exited with code ${exitCode} but emitted no parseable diagnostics — verification did not run${detail}`,
+			],
+			incomplete: true,
+		};
+	}
+
+	return { errors, incomplete: sawGlobal };
+}
+
+/**
+ * Run TypeScript compiler in noEmit mode and capture structured outcome.
+ * Distinguishes a clean project from an incomplete verification (fatal
+ * global errors or non-zero exit with no diagnostics).
+ */
+export async function runTypeCheckDetailed(
+	project: ProjectConfig
+): Promise<TypeCheckOutcome> {
 	const tsconfigPath = project.tsconfigPath;
 	const cwd = path.dirname(tsconfigPath);
 
-	// Run tsc --noEmit -p <tsconfig>
 	const proc = Bun.spawn(
 		["tsc", "--noEmit", "-p", tsconfigPath, "--pretty", "false"],
 		{ cwd, stdout: "pipe", stderr: "pipe" }
@@ -97,47 +176,52 @@ export async function runTypeCheck(project: ProjectConfig): Promise<string[]> {
 	const stderr = await new Response(proc.stderr).text();
 	await proc.exited;
 
-	if (proc.exitCode === 0) {
-		return [];
-	}
+	return parseTsCompilerOutput(stdout + stderr, proc.exitCode ?? 0);
+}
 
-	// Parse errors from stdout/stderr
-	const output = (stdout + stderr).trim();
-	if (!output) {
-		return [];
-	}
-
-	// Split by lines and filter out empty lines
-	const lines = output
-		.split("\n")
-		.map((line) => line.trim())
-		.filter((line) => line.length > 0);
-
-	// Group errors by file
-	const errors: string[] = [];
-	for (const line of lines) {
-		// TypeScript error format: path/to/file.ts(line,col): error TS####: message
-		if (line.includes(TSC_ERROR_PATTERN)) {
-			errors.push(line);
-		}
-	}
-
+/**
+ * Run TypeScript compiler in noEmit mode and capture errors.
+ * Includes both per-file diagnostics AND fatal global errors (e.g. TS2688).
+ * When tsc exits non-zero with no parseable diagnostics, returns a synthetic
+ * `VERIFY_INCOMPLETE: ...` error string so callers cannot silently treat
+ * fatal failures as a clean project. Prefer `runTypeCheckDetailed` when you
+ * need the incompleteness flag separately.
+ */
+export async function runTypeCheck(project: ProjectConfig): Promise<string[]> {
+	const { errors } = await runTypeCheckDetailed(project);
 	return errors;
 }
 
 /**
- * Simple verification that just checks if tsc passes
+ * Simple verification that just checks if tsc passes a complete project run.
+ * Returns false for both genuine errors and incomplete verifications.
  */
 export async function canTypeCheck(project: ProjectConfig): Promise<boolean> {
-	const errors = await runTypeCheck(project);
-	return errors.length === 0;
+	const { errors, incomplete } = await runTypeCheckDetailed(project);
+	return errors.length === 0 && !incomplete;
+}
+
+/** True when this errors list includes any incomplete-verification marker or global tsc error. */
+export function isIncompleteTypeCheck(errors: readonly string[]): boolean {
+	return errors.some(
+		(err) =>
+			err.startsWith(VERIFY_INCOMPLETE_PREFIX) ||
+			TSC_GLOBAL_ERROR_PATTERN.test(err)
+	);
 }
 
 /**
  * Print verification results
  */
 export function printVerificationResults(result: VerificationResult): void {
-	if (result.success) {
+	if (result.verificationIncomplete) {
+		logger.error(
+			"\n❌ Type checking did not complete — tsc fatalled before per-file checks could run. The before/after delta is not trustworthy."
+		);
+		for (const error of result.errorsAfter.slice(0, 5)) {
+			logger.error(`   ${error}`);
+		}
+	} else if (result.success) {
 		logger.info("✅ Type checking passed - no new errors introduced");
 
 		if (result.fixedErrors.length > 0) {

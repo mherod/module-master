@@ -50,7 +50,7 @@ import { buildDependencyGraph } from "./core/graph.ts";
 import { loadProject, resolveTsConfig } from "./core/project.ts";
 import { analyzeSimilarity } from "./core/similarity.ts";
 import { discoverProject } from "./core/tsconfig-discovery.ts";
-import { runTypeCheck } from "./core/verify.ts";
+import { isIncompleteTypeCheck, runTypeCheck } from "./core/verify.ts";
 import { discoverWorkspace } from "./core/workspace.ts";
 import type { ProjectConfig } from "./types.ts";
 
@@ -70,6 +70,17 @@ interface TypecheckDelta {
 	errorsAfter: number;
 	newErrors: string[];
 	fixedCount: number;
+	/**
+	 * True when either the before- or after-change tsc run failed to complete
+	 * (e.g. fatal TS2688 with no per-file diagnostics). When true, the delta
+	 * is not trustworthy — `errorsAfter: 0` does NOT mean the project is clean.
+	 */
+	verificationIncomplete: boolean;
+	/**
+	 * Up to 5 lines of fatal/global tsc output, present only when
+	 * verificationIncomplete is true, so callers see the root cause inline.
+	 */
+	incompleteReason?: string[];
 }
 
 /** Run tsc before/after the mutating op and return the diagnostic delta. */
@@ -82,6 +93,8 @@ async function withTypecheckGuard<T>(
 	const errorsAfter = await runTypeCheck(project);
 	const newErrors = errorsAfter.filter((e) => !errorsBefore.includes(e));
 	const fixedErrors = errorsBefore.filter((e) => !errorsAfter.includes(e));
+	const verificationIncomplete =
+		isIncompleteTypeCheck(errorsBefore) || isIncompleteTypeCheck(errorsAfter);
 	return {
 		result,
 		delta: {
@@ -89,6 +102,10 @@ async function withTypecheckGuard<T>(
 			errorsAfter: errorsAfter.length,
 			newErrors,
 			fixedCount: fixedErrors.length,
+			verificationIncomplete,
+			incompleteReason: verificationIncomplete
+				? errorsAfter.slice(0, 5)
+				: undefined,
 		},
 	};
 }
