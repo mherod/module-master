@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, realpath, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { getRuntime } from "../runtime/index.ts";
 import type { Runtime } from "../runtime/types.ts";
 
 const caseSensitivityCache = new Map<string, boolean>();
@@ -159,13 +160,9 @@ async function runGit(
 	cwd: string,
 	args: string[]
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-	const proc = Bun.spawn(["git", ...args], {
-		cwd,
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-	const stdout = await new Response(proc.stdout).text();
-	const stderr = await new Response(proc.stderr).text();
-	await proc.exited;
-	return { stdout, stderr, exitCode: proc.exitCode ?? 0 };
+	const { stdout, stderr, exitCode } = await getRuntime().process.exec(
+		["git", ...args],
+		{ cwd }
+	);
+	return { stdout, stderr, exitCode: exitCode ?? 0 };
 }

@@ -1,6 +1,12 @@
+import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { FileSystem, GlobRunner, Runtime } from "./types.ts";
+import type {
+	FileSystem,
+	GlobRunner,
+	ProcessRunner,
+	Runtime,
+} from "./types.ts";
 
 const nodeFs: FileSystem = {
 	async readFile(filePath: string): Promise<string> {
@@ -109,4 +115,35 @@ const nodeGlob: GlobRunner = {
 	},
 };
 
-export const nodeRuntime: Runtime = { fs: nodeFs, glob: nodeGlob };
+const nodeProcess: ProcessRunner = {
+	exec(command, options) {
+		return new Promise((resolve) => {
+			const [cmd, ...args] = command;
+			if (!cmd) {
+				resolve({ stdout: "", stderr: "", exitCode: null });
+				return;
+			}
+			const child = spawn(cmd, args, { cwd: options?.cwd });
+			let stdout = "";
+			let stderr = "";
+			child.stdout?.on("data", (chunk) => {
+				stdout += chunk;
+			});
+			child.stderr?.on("data", (chunk) => {
+				stderr += chunk;
+			});
+			child.on("error", () => resolve({ stdout, stderr, exitCode: null }));
+			child.on("close", (code) => resolve({ stdout, stderr, exitCode: code }));
+			if (options?.stdin !== undefined && child.stdin) {
+				child.stdin.write(options.stdin);
+				child.stdin.end();
+			}
+		});
+	},
+};
+
+export const nodeRuntime: Runtime = {
+	fs: nodeFs,
+	glob: nodeGlob,
+	process: nodeProcess,
+};

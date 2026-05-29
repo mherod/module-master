@@ -689,15 +689,10 @@ async function rollbackNamingFix(
 	const rt = getRuntime();
 
 	const runGit = async (args: string[]): Promise<void> => {
-		const proc = Bun.spawn(["git", ...args], {
+		const { stderr, exitCode } = await rt.process.exec(["git", ...args], {
 			cwd: projectRoot,
-			stdout: "pipe",
-			stderr: "pipe",
 		});
-		await new Response(proc.stdout).text();
-		const stderr = await new Response(proc.stderr).text();
-		await proc.exited;
-		if (proc.exitCode !== 0 && stderr.trim()) {
+		if (exitCode !== 0 && stderr.trim()) {
 			logger.error(`Rollback step failed (git ${args[0]}): ${stderr.trim()}`);
 		}
 	};

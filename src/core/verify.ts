@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { logger } from "../cli-logger.ts";
+import { getRuntime } from "../runtime/index.ts";
 import type { ProjectConfig } from "../types.ts";
 import { TSC_ERROR_PATTERN, TSC_GLOBAL_ERROR_PATTERN } from "./constants.ts";
 import { createProgram } from "./project.ts";
@@ -196,15 +197,12 @@ export async function runTypeCheckDetailed(
 	const cwd = path.dirname(tsconfigPath);
 	const tsc = findLocalTypeScriptBinary(project);
 
-	const proc = Bun.spawn(
+	const { stdout, stderr, exitCode } = await getRuntime().process.exec(
 		[tsc, "--noEmit", "-p", tsconfigPath, "--pretty", "false"],
-		{ cwd, stdout: "pipe", stderr: "pipe" }
+		{ cwd }
 	);
-	const stdout = await new Response(proc.stdout).text();
-	const stderr = await new Response(proc.stderr).text();
-	await proc.exited;
 
-	return parseTsCompilerOutput(stdout + stderr, proc.exitCode ?? 0);
+	return parseTsCompilerOutput(stdout + stderr, exitCode ?? 0);
 }
 
 /**

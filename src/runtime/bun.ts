@@ -1,5 +1,10 @@
 import { Glob } from "bun";
-import type { FileSystem, GlobRunner, Runtime } from "./types.ts";
+import type {
+	FileSystem,
+	GlobRunner,
+	ProcessRunner,
+	Runtime,
+} from "./types.ts";
 
 const bunFs: FileSystem = {
 	async readFile(path: string): Promise<string> {
@@ -45,4 +50,29 @@ const bunGlob: GlobRunner = {
 	},
 };
 
-export const bunRuntime: Runtime = { fs: bunFs, glob: bunGlob };
+const bunProcess: ProcessRunner = {
+	async exec(command, options) {
+		const proc = Bun.spawn(command, {
+			cwd: options?.cwd,
+			stdin: options?.stdin === undefined ? "ignore" : "pipe",
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		if (options?.stdin !== undefined && proc.stdin) {
+			proc.stdin.write(options.stdin);
+			await proc.stdin.end();
+		}
+		const [stdout, stderr] = await Promise.all([
+			new Response(proc.stdout).text(),
+			new Response(proc.stderr).text(),
+		]);
+		await proc.exited;
+		return { stdout, stderr, exitCode: proc.exitCode };
+	},
+};
+
+export const bunRuntime: Runtime = {
+	fs: bunFs,
+	glob: bunGlob,
+	process: bunProcess,
+};

@@ -244,18 +244,19 @@ async function runPackageBuilds(
 	logger.info("\n📦 Rebuilding affected packages...");
 
 	const { mapConcurrent } = await import("../core/concurrency.ts");
+	const { getRuntime } = await import("../runtime/index.ts");
 	await mapConcurrent(
 		packagesToRebuild,
 		async (pkg) => {
 			logger.info(`   Building ${pkg.name}...`);
-			const proc = Bun.spawn(["pnpm", "run", pkg.script], {
-				cwd: pkg.path,
-				stdout: verbose ? "inherit" : "pipe",
-				stderr: "pipe",
-			});
-			const stderr = await new Response(proc.stderr).text();
-			await proc.exited;
-			if (proc.exitCode === 0) {
+			const { stdout, stderr, exitCode } = await getRuntime().process.exec(
+				["pnpm", "run", pkg.script],
+				{ cwd: pkg.path }
+			);
+			if (verbose && stdout) {
+				logger.info(stdout);
+			}
+			if (exitCode === 0) {
 				logger.info(`   ✅ ${pkg.name} built successfully`);
 			} else {
 				logger.error(`   ❌ Build failed for ${pkg.name}`);
