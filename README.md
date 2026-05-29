@@ -430,6 +430,22 @@ To remove it: `codex mcp remove resect`.
 
 > **Tip:** every tool accepts an absolute `directory`/`project`/`file` path, so the server's working directory doesn't matter — point it at any project on disk.
 
+## Programmatic API
+
+resect is also an importable library — the third entry point alongside the `resect` CLI and the `resect-mcp` server. Every command is exported as a `<name>Command` function plus the underlying pure compute seams (`analyze`, `findUnusedExports`, `analyzeBarrels`, `moveModule`, `buildAuditReport`, …) and their option/report types.
+
+```ts
+import { analyze, findUnusedExports, setRuntime, nodeRuntime } from "@mherod/resect";
+
+// On Node (not Bun), select the Node runtime before any filesystem-touching call.
+setRuntime(nodeRuntime);
+
+const result = await analyze("src/core/graph.ts");
+const { unused } = await findUnusedExports("src");
+```
+
+Under Bun the default runtime works out of the box; subpath entry points `@mherod/resect/bun`, `@mherod/resect/node`, and `@mherod/resect/runtime` expose the runtime adapters directly.
+
 ## Features
 
 - **AST-level precision** — Uses TypeScript Compiler API, not regex (see [AST Node Coverage](./CLAUDE.md#ast-node-coverage) for the full node-kind support matrix)
