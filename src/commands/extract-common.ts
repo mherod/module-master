@@ -2,6 +2,10 @@ import path from "node:path";
 import { logger } from "../cli-logger.ts";
 import ts from "../core/ast-utils.ts";
 import {
+	compareDeclarations,
+	describeComparison,
+} from "../core/duplicate-detection.ts";
+import {
 	calculateRelativeSpecifier,
 	findCrossPackageImport,
 	isCrossPackageMove,
@@ -820,6 +824,48 @@ async function detectKeepExtension(
 }
 
 /**
+ * Detect declaration name clashes between the canonical declarations about to be
+ * appended to `absOutput` and declarations already present in that file. Returns
+ * null when the output file does not exist or has no clash. Each message is
+ * annotated with a similarity verdict (`describeComparison`) when the existing
+ * declaration is comparable, so the user learns whether it is a duplicate.
+ */
+async function checkOutputDeclarationConflicts(
+	absOutput: string,
+	plans: ExtractionPlan[],
+	baseDir: string
+): Promise<{ messages: string[] } | null> {
+	let existingOutput = "";
+	try {
+		existingOutput = await Bun.file(absOutput).text();
+	} catch {
+		return null; // output file doesn't exist yet — nothing to clash with
+	}
+	if (!existingOutput.trim()) {
+		return null;
+	}
+	const outputSf = createSourceFileFromText(absOutput, existingOutput);
+	const existingNames = getModuleScopeBindings(outputSf);
+	const rel = path.relative(baseDir, absOutput);
+	const messages: string[] = [];
+	for (const plan of plans) {
+		const name = plan.canonical.info.name;
+		if (!existingNames.has(name)) {
+			continue;
+		}
+		const canonicalSf = createSourceFileFromText(
+			plan.canonical.info.file,
+			plan.canonical.text
+		);
+		const detail = describeComparison(
+			compareDeclarations(canonicalSf, name, outputSf, name)
+		);
+		messages.push(`"${name}" already exists in ${rel}${detail}`);
+	}
+	return messages.length > 0 ? { messages } : null;
+}
+
+/**
  * Pure data path for extract-common — performs the similarity scan,
  * planning, and file updates and returns a structured `ExtractCommonResult`.
  * Does NOT log to stdout/stderr and does NOT call `process.exit` — the CLI
@@ -949,6 +995,31 @@ export async function runExtractCommon(
 		? false
 		: await detectKeepExtension(absoluteDir, project);
 	const fileUpdates = new Map<string, FileUpdate>();
+
+	// Duplicate-declaration guard: appending a canonical into an EXISTING output
+	// file must not silently shadow a declaration already there. Mirrors the
+	// move/rename guard — block unless force, annotated with a similarity verdict.
+	if (absOutput && !dryRun) {
+		const conflict = await checkOutputDeclarationConflicts(
+			absOutput,
+			plans,
+			absoluteDir
+		);
+		if (conflict && !force) {
+			return {
+				success: false,
+				totalGroups: 0,
+				groups: [],
+				totalRemoved: 0,
+				modifiedFiles: [],
+				dryRun,
+				worktreeDirty,
+				errors: conflict.messages.map((message) => ({
+					message: `Conflict: ${message}. Re-run with --force to proceed.`,
+				})),
+			};
+		}
+	}
 
 	for (const plan of plans) {
 		if (!plan) {

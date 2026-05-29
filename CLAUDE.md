@@ -279,11 +279,11 @@ The four mutating commands (`move`, `rename`, `alias`, `extract-common`) perform
 
 When a name conflict hits an existing declaration (`move` into a barrel declaring the same name; `rename` onto a name already declared locally), the conflict message gains a similarity verdict. `compareDeclarations(fileA, nameA, fileB, nameB)` reuses `similar` scoring (`collectFunctions` + `findSimilarGroups`), returning `{ comparable, similarity, isDuplicate }`; `isDuplicate` ≥ `DUPLICATE_DECLARATION_THRESHOLD` (0.85, `high` bucket). `describeComparison()` builds the suffix.
 
-- `move`/`rename` block these by default and require `--force`; under `--force` they `logger.warn("⚠️  Proceeding past conflict (--force)")` per conflict. `moveCommand`/`renameCommand` thread a trailing `force = false` into `moveModule()`/`renameSymbol()`.
+- `move`/`rename` block these by default and require `--force`; under `--force` they `logger.warn("⚠️  Proceeding past conflict (--force)")` per conflict. `moveCommand`/`renameCommand` thread a trailing `force = false` into `moveModule()`/`renameSymbol()`. `extract-common --output` runs the guard via `checkOutputDeclarationConflicts()` before appending a canonical into an existing output file.
 - Only `collectFunctions` kinds score (functions, const arrow/function exprs, type aliases, interfaces with enough tokens); classes/enums/tiny bodies → `comparable: false`.
 - `move` scores only when the destination barrel file itself declares the name; `export … from` re-exports aren't declarations (`scanExports` skips them).
 
-DON'T: Reimplement pairwise scoring in command files — call `compareDeclarations()`. Not yet wired into `extract-common --output` (appends into a possibly-existing file; tracked separately).
+DON'T: Reimplement pairwise scoring in command files — call `compareDeclarations()`.
 
 DON'T: Add a new mutating command without conflict detection. All commands that write files must check for export name and binding conflicts before applying changes.
 

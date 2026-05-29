@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { rm } from "node:fs/promises";
 import path from "node:path";
-import { extractCommonCommand } from "./extract-common.ts";
+import { makeTempDir } from "./__test-helpers.ts";
+import { extractCommonCommand, runExtractCommon } from "./extract-common.ts";
 
 const baseFixtureDir = path.join(
 	import.meta.dir,
@@ -765,6 +766,80 @@ function formatDate(input: Date): string {
 		// require b.ts to import from a.ts, creating a circular dependency
 		// since a.ts already imports from b.ts.
 		expect(bContent).toContain("function formatDate");
+
+		await rm(dir, { recursive: true, force: true });
+	});
+});
+
+describe("extract-common --output duplicate guard", () => {
+	// Use an OS temp dir (not a git repo) so the dirty-worktree guard is inert
+	// and `force: false` reaches the duplicate-declaration guard.
+	async function setupOutputFixture(): Promise<{
+		dir: string;
+		output: string;
+	}> {
+		const dir = await makeTempDir("extract-out-guard");
+		await Bun.write(
+			path.join(dir, "tsconfig.json"),
+			JSON.stringify({
+				compilerOptions: { target: "ES2020", module: "ESNext", strict: true },
+				include: ["*.ts"],
+			})
+		);
+		const formatDate = `function formatDate(input: Date): string {
+  const iso = input.toISOString();
+  const parts = iso.split("T");
+  return parts[0] ?? "";
+}`;
+		await Bun.write(path.join(dir, "a.ts"), `export ${formatDate}\n`);
+		await Bun.write(
+			path.join(dir, "b.ts"),
+			`${formatDate}\nexport const useB = formatDate;\n`
+		);
+		// Output file already declares a near-identical formatDate.
+		const output = path.join(dir, "shared.ts");
+		await Bun.write(
+			output,
+			`export function formatDate(value: Date): string {
+  const text = value.toISOString();
+  const segs = text.split("T");
+  return segs[0] ?? "";
+}\n`
+		);
+		return { dir, output };
+	}
+
+	test("blocks appending when the output already declares the name", async () => {
+		const { dir, output } = await setupOutputFixture();
+
+		const result = await runExtractCommon({
+			directory: dir,
+			output,
+			threshold: 0.95,
+			force: false,
+			dryRun: false,
+		});
+
+		expect(result.success).toBe(false);
+		const message = result.errors[0]?.message ?? "";
+		expect(message).toContain("already exists");
+		expect(message).toContain("duplicate");
+
+		await rm(dir, { recursive: true, force: true });
+	});
+
+	test("--force proceeds past the output conflict", async () => {
+		const { dir, output } = await setupOutputFixture();
+
+		const result = await runExtractCommon({
+			directory: dir,
+			output,
+			threshold: 0.95,
+			force: true,
+			dryRun: false,
+		});
+
+		expect(result.success).toBe(true);
 
 		await rm(dir, { recursive: true, force: true });
 	});
