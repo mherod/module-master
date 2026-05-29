@@ -26,6 +26,13 @@ All notable user-facing changes to this project are documented here.
   test. The read-only report suggests co-located `__tests__` or alongside moves
   based on project convention, and `--fix` applies moves through the existing
   move pipeline with a single closing typecheck.
+- **`unused --entrypoint-globs`**: pass one or more glob patterns (flag is
+  repeatable) to exclude convention entrypoints — files dispatched by
+  filename via a manifest or referenced only by a string-literal name — from
+  `orphanFiles` and dead-export reporting. Matching files are excluded from
+  the report candidates but still contribute to the usage graph, so genuinely
+  dead files are still flagged. Example:
+  `resect unused src --entrypoint-globs="hooks/**"`. Closes #91.
 - **`unused` orphan-file detection**: `resect unused <dir>` now reports
   `orphanFiles` for exported files with no external importers, excluding
   package entrypoints declared through `package.json` `main`, `module`, or
