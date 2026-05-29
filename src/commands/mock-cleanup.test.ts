@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import path from "node:path";
-import { CLI, cleanup, makeFixture, runCli } from "./__test-helpers";
+import { CLI, captureOutput, cleanup, makeFixture } from "./__test-helpers";
+import { mockCleanupCommand } from "./mock-cleanup.ts";
 
 function tsconfig(): string {
 	return JSON.stringify({
@@ -40,25 +41,27 @@ describe("mock-cleanup command", () => {
 		});
 
 		try {
-			const audit = await runCli(["mock-cleanup", dir, "--json"]);
-			expect(audit.exitCode).toBe(0);
+			const audit = await captureOutput(() =>
+				mockCleanupCommand({ directory: dir, json: true })
+			);
 			const report = JSON.parse(audit.stdout);
 			expect(report.orphans).toHaveLength(1);
 			expect(report.orphans[0].orphanKey).toBe("baz");
 
-			const human = await runCli(["mock-cleanup", dir]);
-			expect(human.exitCode).toBe(0);
+			const human = await captureOutput(() =>
+				mockCleanupCommand({ directory: dir })
+			);
 			expect(human.stdout).toContain("mod.test.ts:");
 			expect(human.stdout).toContain("baz -> ./mod");
 
-			const fix = await runCli([
-				"mock-cleanup",
-				dir,
-				"--fix",
-				"--force",
-				"--json",
-			]);
-			expect(fix.exitCode).toBe(0);
+			const fix = await captureOutput(() =>
+				mockCleanupCommand({
+					directory: dir,
+					fix: true,
+					force: true,
+					json: true,
+				})
+			);
 			const result = JSON.parse(fix.stdout);
 			expect(result.success).toBe(true);
 			expect(result.modifiedFiles).toHaveLength(1);
@@ -85,22 +88,23 @@ describe("mock-cleanup command", () => {
 		});
 
 		try {
-			const audit = await runCli(["mock-cleanup", dir, "--json"]);
-			expect(audit.exitCode).toBe(0);
+			const audit = await captureOutput(() =>
+				mockCleanupCommand({ directory: dir, json: true })
+			);
 			const report = JSON.parse(audit.stdout);
 			expect(report.orphans).toHaveLength(0);
 			expect(report.skipped).toHaveLength(1);
 			expect(report.skipped[0].reason).toBe("spread");
 
 			const before = await Bun.file(path.join(dir, "mod.test.ts")).text();
-			const fix = await runCli([
-				"mock-cleanup",
-				dir,
-				"--fix",
-				"--force",
-				"--json",
-			]);
-			expect(fix.exitCode).toBe(0);
+			await captureOutput(() =>
+				mockCleanupCommand({
+					directory: dir,
+					fix: true,
+					force: true,
+					json: true,
+				})
+			);
 			const after = await Bun.file(path.join(dir, "mod.test.ts")).text();
 			expect(after).toBe(before);
 		} finally {
@@ -121,14 +125,14 @@ describe("mock-cleanup command", () => {
 		});
 
 		try {
-			const fix = await runCli([
-				"mock-cleanup",
-				dir,
-				"--fix",
-				"--force",
-				"--json",
-			]);
-			expect(fix.exitCode).toBe(0);
+			await captureOutput(() =>
+				mockCleanupCommand({
+					directory: dir,
+					fix: true,
+					force: true,
+					json: true,
+				})
+			);
 
 			const next = await Bun.file(path.join(dir, "mod.test.ts")).text();
 			expect(next).toContain('jest.mock("./mod", () => ({}));');

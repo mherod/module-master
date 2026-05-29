@@ -59,6 +59,38 @@ export async function cleanup(dir: string) {
 	await rm(dir, { recursive: true, force: true });
 }
 
+/**
+ * Run a command function in-process while capturing everything it writes to
+ * stdout/stderr (the CLI logger and command output both go through
+ * `process.stdout/stderr.write`). Use this instead of `runCli` whenever the
+ * command can run in-process — it avoids a `bun cli.ts` subprocess cold-start
+ * (~300-500ms each), keeping the unit suite fast. Reserve `runCli` for tests
+ * that must exercise the real CLI entry point (arg parsing, process exit).
+ */
+export async function captureOutput(
+	fn: () => Promise<void> | void
+): Promise<{ stdout: string; stderr: string }> {
+	const originalStdout = process.stdout.write.bind(process.stdout);
+	const originalStderr = process.stderr.write.bind(process.stderr);
+	let stdout = "";
+	let stderr = "";
+	process.stdout.write = ((chunk: unknown) => {
+		stdout += String(chunk);
+		return true;
+	}) as typeof process.stdout.write;
+	process.stderr.write = ((chunk: unknown) => {
+		stderr += String(chunk);
+		return true;
+	}) as typeof process.stderr.write;
+	try {
+		await fn();
+	} finally {
+		process.stdout.write = originalStdout;
+		process.stderr.write = originalStderr;
+	}
+	return { stdout, stderr };
+}
+
 export async function runCli(args: string[]): Promise<CliResult> {
 	const proc = Bun.spawn([...CLI, ...args], {
 		stdout: "pipe",
