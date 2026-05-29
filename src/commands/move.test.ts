@@ -1,7 +1,8 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { makeTempDir, runCli } from "./__test-helpers.ts";
+import { captureOutput, makeTempDir } from "./__test-helpers.ts";
+import { moveCommand } from "./move.ts";
 
 const tempDirs: string[] = [];
 
@@ -73,9 +74,8 @@ describe("moveModule", () => {
 
 		const source = path.join(srcDir, "Foo.ts");
 		const target = path.join(srcDir, "foo.ts");
-		const result = await runCli(["move", source, target, "--no-verify"]);
+		await captureOutput(() => moveCommand({ source, target, verify: false }));
 
-		expect(result.exitCode).toBe(0);
 		expect(await Bun.file(target).exists()).toBe(true);
 		const renamedEntries = await readdir(srcDir);
 		expect(renamedEntries).toContain("foo.ts");

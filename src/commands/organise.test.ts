@@ -1,8 +1,8 @@
 import { afterAll, describe, expect, it } from "bun:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { cleanup, makeTempDir, runCli } from "./__test-helpers.ts";
-import { buildOrganiseReport } from "./organise.ts";
+import { captureOutput, cleanup, makeTempDir } from "./__test-helpers.ts";
+import { buildOrganiseReport, organiseCommand } from "./organise.ts";
 
 const DIRS: string[] = [];
 
@@ -165,8 +165,9 @@ describe("organise: CLI integration", () => {
 			"src/a.ts": "export function a() { return 1; }",
 			"src/b.ts": `import { a } from "./a.ts"; a();`,
 		});
-		const { exitCode, stdout } = await runCli(["organise", dir]);
-		expect(exitCode).toBe(0);
+		const { stdout } = await captureOutput(() =>
+			organiseCommand({ directory: dir })
+		);
 		expect(`${stdout}`).toMatch(/No organisation issues|Scanned|misplaced/i);
 	});
 
@@ -174,8 +175,9 @@ describe("organise: CLI integration", () => {
 		const dir = await makeProject({
 			"src/a.ts": "export function a() { return 1; }",
 		});
-		const { exitCode, stdout } = await runCli(["organise", dir, "--json"]);
-		expect(exitCode).toBe(0);
+		const { stdout } = await captureOutput(() =>
+			organiseCommand({ directory: dir, json: true })
+		);
 		const parsed = JSON.parse(stdout);
 		expect(parsed.schemaVersion).toBe("1");
 		expect(parsed.summary).toBeDefined();

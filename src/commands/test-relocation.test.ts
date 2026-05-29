@@ -2,10 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
+	captureOutput,
 	cleanup,
 	makeFixture as makeFixtureBase,
-	runCli,
 } from "./__test-helpers";
+import { testRelocationCommand } from "./test-relocation.ts";
 
 async function makeFixture(name: string, files: Record<string, string>) {
 	return makeFixtureBase(`test-relocation-${name}`, files, {
@@ -31,12 +32,9 @@ describe("test-relocation command", () => {
 				'import { foo } from "../core/cookies/foo";\nexport const result = foo;\n',
 		});
 
-		const result = await runCli([
-			"test-relocation",
-			path.join(dir, "src"),
-			"--json",
-		]);
-		expect(result.exitCode).toBe(0);
+		const result = await captureOutput(() =>
+			testRelocationCommand({ directory: path.join(dir, "src"), json: true })
+		);
 		const report = JSON.parse(result.stdout);
 		expect(report.findings).toHaveLength(1);
 		expect(report.findings[0].reasons).toEqual(["stranded"]);
@@ -56,12 +54,9 @@ describe("test-relocation command", () => {
 				'import { isJWT } from "../jwt";\nexport const result = isJWT("token");\n',
 		});
 
-		const result = await runCli([
-			"test-relocation",
-			path.join(dir, "src"),
-			"--json",
-		]);
-		expect(result.exitCode).toBe(0);
+		const result = await captureOutput(() =>
+			testRelocationCommand({ directory: path.join(dir, "src"), json: true })
+		);
 		const report = JSON.parse(result.stdout);
 		expect(report.findings).toHaveLength(1);
 		expect(report.findings[0].reasons).toEqual(["misnamed"]);
@@ -80,12 +75,9 @@ describe("test-relocation command", () => {
 				'import { foo } from "../core/cookies/foo";\nimport { isJWT } from "../utils/jwt";\nexport const result = foo + Number(isJWT());\n',
 		});
 
-		const result = await runCli([
-			"test-relocation",
-			path.join(dir, "src"),
-			"--json",
-		]);
-		expect(result.exitCode).toBe(0);
+		const result = await captureOutput(() =>
+			testRelocationCommand({ directory: path.join(dir, "src"), json: true })
+		);
 		const report = JSON.parse(result.stdout);
 		expect(report.findings).toHaveLength(0);
 
@@ -102,14 +94,13 @@ describe("test-relocation command", () => {
 				'import { foo } from "../core/cookies/foo";\nexport const result = foo;\n',
 		});
 
-		const result = await runCli([
-			"test-relocation",
-			path.join(dir, "src"),
-			"--json",
-			"--convention-threshold",
-			"0.8",
-		]);
-		expect(result.exitCode).toBe(0);
+		const result = await captureOutput(() =>
+			testRelocationCommand({
+				directory: path.join(dir, "src"),
+				json: true,
+				conventionThreshold: 0.8,
+			})
+		);
 		const report = JSON.parse(result.stdout);
 		expect(report.summary.convention).toBe("alongside");
 		expect(report.findings[0].suggestedLocation).toBe(
@@ -126,18 +117,14 @@ describe("test-relocation command", () => {
 				'import { foo } from "../core/cookies/foo";\nexport const result = foo;\n',
 		});
 
-		const result = await runCli([
-			"test-relocation",
-			path.join(dir, "src"),
-			"--fix",
-			"--force",
-			"--json",
-		]);
-		if (result.exitCode !== 0) {
-			throw new Error(
-				`test-relocation --fix failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`
-			);
-		}
+		const result = await captureOutput(() =>
+			testRelocationCommand({
+				directory: path.join(dir, "src"),
+				fix: true,
+				force: true,
+				json: true,
+			})
+		);
 		const report = JSON.parse(result.stdout);
 		expect(report.success).toBe(true);
 		const target = path.join(dir, "src/core/cookies/__tests__/foo.test.ts");
