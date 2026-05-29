@@ -45,7 +45,9 @@ All notable user-facing changes to this project are documented here.
   chosen strategy as part of the tidy fix batch — same dirty-worktree guard,
   `--max-changes` ceiling, single closing `tsc --noEmit` gate, and rollback as
   `dead-exports`. Without `--alias-prefer` the category is skipped, so bare
-  `tidy --fix` never imposes a project-wide import style by default. Closes #89.
+  `tidy --fix` never imposes a project-wide import style by default. The MCP
+  `tidy` tool exposes the matching `aliasPrefer` parameter so MCP clients have
+  full parity with the CLI. Closes #89.
 - **`naming` command**: `resect naming <dir>` audits per-directory
   filename casing conventions and reports outliers with suggested
   names, primary export kind, sibling majority, and confidence. `--fix`
