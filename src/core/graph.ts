@@ -1,3 +1,4 @@
+import { statSync } from "node:fs";
 import path from "node:path";
 import type ts from "typescript";
 import type { BarrelExport, ModuleReference } from "../types/graph.ts";
@@ -59,15 +60,55 @@ interface FileScanResult {
 
 /** Per-invocation cache for dependency graphs, keyed by tsconfig path */
 const graphCache = new Map<string, DependencyGraph>();
+/**
+ * Per-tsconfig snapshot of each project file's mtime at the moment its graph
+ * was built. Lets the cache invalidate when a file's content changes even
+ * though the file set is unchanged — critical for the long-lived MCP server
+ * process, where files are edited between tool calls.
+ */
+const graphCacheMtimes = new Map<string, Map<string, number>>();
 
-function hasSameFileSet(
+/** Cheap sync mtime probe. NaN on an unreadable file forces a cache miss. */
+function fileMtimeMs(file: string): number {
+	try {
+		return statSync(file).mtimeMs;
+	} catch {
+		return Number.NaN;
+	}
+}
+
+/** Snapshot the mtime of every project file (one sync stat per file). */
+function snapshotMtimes(files: readonly string[]): Map<string, number> {
+	const mtimes = new Map<string, number>();
+	for (const file of files) {
+		mtimes.set(file, fileMtimeMs(file));
+	}
+	return mtimes;
+}
+
+/**
+ * A cached graph is reusable only when the file SET is unchanged (count +
+ * membership) AND no file's content has changed since the build (mtime match).
+ * The mtime pass is a per-file sync stat — cheap enough to run on every lookup
+ * without forcing a rebuild when nothing changed.
+ */
+function isCacheValid(
 	cached: DependencyGraph,
+	cachedMtimes: Map<string, number>,
 	currentFiles: readonly string[]
 ): boolean {
 	if (cached.imports.size !== currentFiles.length) {
 		return false;
 	}
-	return currentFiles.every((file) => cached.imports.has(file));
+	for (const file of currentFiles) {
+		if (!cached.imports.has(file)) {
+			return false;
+		}
+		if (cachedMtimes.get(file) !== fileMtimeMs(file)) {
+			return false;
+		}
+	}
+	return true;
 }
 
 /**
@@ -79,9 +120,13 @@ export async function buildDependencyGraph(
 ): Promise<DependencyGraph> {
 	const files = getProjectFiles(project).map(normalizePath);
 	const cached = graphCache.get(project.tsconfigPath);
-	if (cached && hasSameFileSet(cached, files)) {
+	const cachedMtimes = graphCacheMtimes.get(project.tsconfigPath);
+	if (cached && cachedMtimes && isCacheValid(cached, cachedMtimes, files)) {
 		return cached;
 	}
+	// Snapshot mtimes before parsing so an edit made mid-build invalidates the
+	// next lookup rather than being masked by a post-build timestamp.
+	const mtimes = snapshotMtimes(files);
 	const program = createProgram(project, files);
 
 	// Scan all files concurrently — each scan is independent
@@ -136,6 +181,7 @@ export async function buildDependencyGraph(
 		program,
 	};
 	graphCache.set(project.tsconfigPath, result);
+	graphCacheMtimes.set(project.tsconfigPath, mtimes);
 	return result;
 }
 

@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	mkdtemp,
+	rm,
+	unlink,
+	utimes,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ModuleReference } from "../types/graph";
@@ -194,6 +201,61 @@ describe("findAllReferences", () => {
 					?.some((ref) => ref.sourceFile === normalizePath(deletedFile)) ??
 					false
 			).toBe(false);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("rebuilds cached dependency graph when a file's content changes (same file set)", async () => {
+		const dir = await mkdtemp(path.join(tmpdir(), "resect-graph-content-"));
+		try {
+			const srcDir = path.join(dir, "src");
+			await mkdir(srcDir, { recursive: true });
+			const tsconfigPath = path.join(dir, "tsconfig.json");
+			await writeFile(
+				tsconfigPath,
+				JSON.stringify({
+					compilerOptions: { strict: true },
+					include: ["src/**/*.ts"],
+				})
+			);
+			const consumer = path.join(srcDir, "consumer.ts");
+			const helper = path.join(srcDir, "helper.ts");
+			await writeFile(helper, "export const value = 1;\n");
+			await writeFile(
+				consumer,
+				'import { value } from "./helper";\nexport const used = value;\n'
+			);
+
+			const resolvedHelper = normalizePath(helper);
+			const normalizedConsumer = normalizePath(consumer);
+			const firstGraph = await buildDependencyGraph(
+				loadProject(tsconfigPath, dir)
+			);
+			expect(
+				firstGraph.importedBy
+					.get(resolvedHelper)
+					?.some((ref) => ref.sourceFile === normalizedConsumer)
+			).toBe(true);
+
+			// Rewrite consumer.ts to drop the import — the file SET is unchanged
+			// (still consumer.ts + helper.ts), only the content differs. Force a
+			// distinctly-later mtime so staleness is detectable on any filesystem,
+			// regardless of mtime resolution.
+			await writeFile(consumer, "export const used = 1;\n");
+			const future = new Date(Date.now() + 10_000);
+			await utimes(consumer, future, future);
+
+			const secondGraph = await buildDependencyGraph(
+				loadProject(tsconfigPath, dir)
+			);
+			// A stale cache would still report the now-removed import edge.
+			expect(
+				secondGraph.importedBy
+					.get(resolvedHelper)
+					?.some((ref) => ref.sourceFile === normalizedConsumer) ?? false
+			).toBe(false);
+			expect(secondGraph.imports.get(normalizedConsumer)?.length ?? 0).toBe(0);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

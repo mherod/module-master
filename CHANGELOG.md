@@ -65,6 +65,12 @@ All notable user-facing changes to this project are documented here.
   runs cached dependency graphs across invocations, so files removed
   between calls kept appearing as ghost entries. The cache is now
   invalidated when the project's file set changes (#78).
+- **MCP analysis no longer serves stale graphs after edits**: The
+  dependency-graph cache was keyed by file set only, so editing a file's
+  contents between long-lived MCP calls (without adding or removing files)
+  returned analysis built from the pre-edit version. The cache now also
+  snapshots each file's mtime at build time and rebuilds when any file
+  changes (#87).
 
 ## [1.7.0] — 2026-05-28
 

@@ -565,13 +565,12 @@ Every call to `discoverWorkspace` traverses the directory tree, globs all `packa
 DON'T: Call `discoverWorkspace` in a loop or in a hot path. Call it once per command invocation and pass the result downstream.
 DO: When adding a per-invocation workspace cache, mirror the `graphCache` Map pattern in `graph.ts` — key by absolute directory, store `WorkspaceInfo | null`.
 
-### `graphCache` Invalidation — Test-First, Measure Timeouts (issue #87)
+### `graphCache` Invalidation — Hot Path (issues #78, #87)
 
-`graphCache` (graph.ts) invalidates only on **file-set** change (`hasSameFileSet` — count + membership), NOT on file-content change. Adding content-staleness detection (#87) is a real open gap, but it is a **hot-path** change: `buildProjectGraphs` builds and re-checks one graph per non-solution tsconfig, and the `unused` command exercises that across many sibling configs. A naive per-file `Bun.file().lastModified` stat in the validity check, or a hash that forces re-validation every call, makes `unused`/`audit` tests blow past the 20s `bun test` timeout — full rebuilds on every invocation.
+`graphCache` (graph.ts) invalidates on BOTH **file-set** change (`isCacheValid` — count + membership, #78) AND **file-content** change (per-file mtime snapshotted at build time by `snapshotMtimes`, re-checked with sync `statSync().mtimeMs` in `isCacheValid`, #87). Content-staleness matters for the long-lived MCP server, where files are edited between tool calls. Cache invalidation is a **hot-path** change: `buildProjectGraphs` builds and re-checks one graph per non-solution tsconfig, and `unused` exercises that across many sibling configs.
 
-DO: When changing graph cache invalidation, write the failing content-staleness regression test FIRST (extend `graph.test.ts`), then implement against it.
-DON'T: Iterate cache-invalidation implementations against the full suite. On a timeout, run the single failing test (`bun test src/commands/unused.test.ts -t "<name>"`) to measure the rebuild cost before changing the approach again.
-DON'T: Mark #87 done from a file-set-only change — that is #78's fix, already shipped. Content-staleness requires cheap per-file change detection (mtime cached at build time, compared without re-statting on the hot path) proven not to regress `unused`/`audit` timing.
+DO: Keep the validity probe a cheap sync `statSync().mtimeMs` so unchanged files never force a rebuild. When changing invalidation, write the regression test FIRST (extend `graph.test.ts`) and re-measure `unused`/`audit` against the 20s `bun test` timeout.
+DON'T: Use async `Bun.file().lastModified` or a content hash in the validity check — both make `unused`/`audit` blow past the 20s timeout with full rebuilds every call.
 
 ### Parallelize Independent File Writes With `mapConcurrent`
 
