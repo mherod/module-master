@@ -582,11 +582,14 @@ DO: write them via `mapConcurrent([...updates], ([filePath, content]) => rt.fs.w
 
 ## Commit Flow & Sandbox Constraints (this repo's hook environment)
 
-Commits here are hook-gated in a fixed order. Run the preflight BEFORE the first `git commit`, not reactively after a block:
+Commits, pushes, and memory-file edits are hook-gated — independent gates checking "skill used in the last 30 turns / 20 min". Invoke the skill BEFORE the action:
 
-DO: Invoke the `/commit` skill, then call `TaskList` (sync must be recent), then `git commit`. Both are enforced by hooks; skipping either blocks the commit.
-DON'T: Re-issue an identical `git commit -m "..."` after a block — a retry-guard fires on the repeated command even when each block had a different cause. After the second block, switch form: write the message to a file and `git commit -F <file>`.
-DON'T: Write scratch files (commit messages, query files) to `~/.claude/...` — hidden home-dir paths are write-blocked in this sandbox, including the job tmp dir. Use `/tmp` or a repo-local path instead.
-DON'T: `rm`/`rm -f` scratch files — the delete-safety hook blocks it. Leave `/tmp` files (OS-cleaned) or use `trash <path>`.
+DO: `/commit` skill → `TaskList` (recent sync) → `git commit`. Skipping either blocks the commit.
+DO: `/push` skill before `git push` (separate gate; `/commit` does not satisfy it). After pushing, run the hard-success-gate + `gh run watch` per [CI Gate Authority].
+DO: `/update-memory` skill before editing any memory file (`CLAUDE.md`, `GEMINI.md`, `AGENTS.md`, `.cursorrules`).
+DO: Keep ≥1 task `in_progress` and ≥2 pending before Bash/Edit/Write (`pretooluse-require-tasks` + planning-buffer hooks).
+DON'T: Re-issue an identical `git commit -m "..."` after a block — a retry-guard fires on the repeat; switch to `git commit -F <file>`.
+DON'T: Write scratch files to `~/.claude/...` — hidden home paths are write-blocked. Use `/tmp` or repo-local.
+DON'T: `rm` scratch files — delete-safety hook blocks it. Leave `/tmp` files or use `trash <path>`.
 
-This repo is solo trunk-based (single author, trunk-mode enabled). DO commit refactors/fixes directly to `main`; the generic "branch first on default branch" rule does not apply here — follow the project's trunk signal.
+Solo trunk-based repo: commit refactors/fixes directly to `main` (the generic "branch first on default branch" rule does not apply).
