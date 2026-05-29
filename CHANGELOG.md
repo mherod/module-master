@@ -40,7 +40,8 @@ All notable user-facing changes to this project are documented here.
   `tsc --noEmit` gate, and rollback on new type errors or incomplete
   verification. `--dry-run` previews the planned renames. The MCP
   `naming` tool exposes `fix`/`dryRun`/`force` and defaults
-  `dryRun: true`.
+  `dryRun: true`. Closes #68 (use case 1 — naming-convention audit;
+  use case 2 — folder-organisation — tracked in #80).
 - **Experimental `tidy` command**: `resect tidy --experimental <dir>`
   composes the existing `unused`, `similar`, and `audit` analyses into one
   grouped report. JSON output uses schema version `1-experimental`, which may
