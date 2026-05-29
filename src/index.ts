@@ -28,6 +28,17 @@ export {
 	computeMetrics,
 	detectCycles,
 } from "./commands/audit.ts";
+// ── Commands: barrel ────────────────────────────────────────────────
+export type {
+	BarrelOptions,
+	BarrelReportContext,
+} from "./commands/barrel.ts";
+export {
+	analyzeBarrels,
+	barrelCommand,
+	barrelReportToJson,
+	buildBarrelReport,
+} from "./commands/barrel.ts";
 // ── Commands: discover ──────────────────────────────────────────────
 export type { DiscoverOptions } from "./commands/discover.ts";
 export { discoverCommand } from "./commands/discover.ts";
@@ -89,6 +100,22 @@ export {
 	formatTidyReport,
 	tidyCommand,
 } from "./commands/tidy.ts";
+// ── Commands: unused ────────────────────────────────────────────────
+export type {
+	UnusedExport,
+	UnusedOptions,
+	UnusedReport,
+} from "./commands/unused.ts";
+export {
+	buildImportedBindingsMap,
+	computeOrphanFiles,
+	countInternalReferences,
+	findUnusedExports,
+	findUnusedExportsFromGraphs,
+	hasNoExternalUsage,
+	isExportUsed,
+	unusedCommand,
+} from "./commands/unused.ts";
 // ── Commands: workspace ─────────────────────────────────────────────
 export type { WorkspaceOptions } from "./commands/workspace.ts";
 export { workspaceCommand } from "./commands/workspace.ts";
@@ -160,6 +187,13 @@ export {
 	setRuntime,
 } from "./runtime/index.ts";
 export type { AnalysisResult, ExportInfo } from "./types/analysis.ts";
+// ── Types: barrel ──────────────────────────────────────────────────
+export type {
+	BarrelInfo,
+	BarrelReport,
+	BarrelScan,
+	SubpathShadowing,
+} from "./types/barrel.ts";
 export type { MutatingCommandOptions } from "./types/commands.ts";
 export type {
 	BarrelExport,

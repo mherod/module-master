@@ -4,6 +4,20 @@ All notable user-facing changes to this project are documented here.
 
 ## [Unreleased]
 
+### Library API
+
+- **`unused` and `barrel` are now part of the programmatic library API**
+  (`src/index.ts`, the package `.` export). Both commands were already
+  reachable via the CLI and the MCP server but were the only two of the 17
+  commands not re-exported from the importable library surface. Now exported:
+  `unusedCommand`, `findUnusedExports`, `findUnusedExportsFromGraphs`,
+  `countInternalReferences`, `buildImportedBindingsMap`, `isExportUsed`,
+  `computeOrphanFiles`, `hasNoExternalUsage` (+ `UnusedOptions`,
+  `UnusedExport`, `UnusedReport` types); `barrelCommand`, `analyzeBarrels`,
+  `buildBarrelReport`, `barrelReportToJson` (+ `BarrelOptions`,
+  `BarrelReportContext`, `BarrelReport`, `BarrelInfo`, `BarrelScan`,
+  `SubpathShadowing` types). This closes CLI/MCP/library entry-point parity.
+
 ### New Features
 
 - **`barrel` command**: `resect barrel <dir>` (and the `barrel` MCP tool)
