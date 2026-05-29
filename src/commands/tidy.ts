@@ -604,6 +604,27 @@ async function planAliasNormalisationChanges(
 	return plannedByFile.flat();
 }
 
+async function planMockCleanupChanges(
+	target: string,
+	project: ProjectConfig
+): Promise<PlannedTidyChange[]> {
+	const { computeMockCleanupChanges } = await import("./mock-cleanup.ts");
+
+	const fileChanges = await computeMockCleanupChanges(
+		target,
+		project.tsconfigPath
+	);
+
+	return fileChanges.map<PlannedTidyChange>(
+		({ file, orphanKeys, changes }) => ({
+			category: "mock-cleanup",
+			file,
+			exportName: orphanKeys.join(", "),
+			changes,
+		})
+	);
+}
+
 async function planTidyFixes(
 	report: TidyReport,
 	options: TidyOptions,
@@ -636,6 +657,16 @@ async function planTidyFixes(
 		}
 	}
 
+	// mock-cleanup is an aggressive category: not in SAFE_TIDY_FIX_CATEGORIES, so
+	// it only runs when explicitly selected via --fix=mock-cleanup, never under
+	// bare --fix.
+	if (categories.has("mock-cleanup")) {
+		const target = options.scope
+			? path.resolve(options.scope)
+			: reportDirectory;
+		planned.push(...(await planMockCleanupChanges(target, project)));
+	}
+
 	return planned;
 }
 
@@ -665,6 +696,19 @@ function typecheckDelta(options: {
 	};
 }
 
+const MUTATION_KIND_BY_CATEGORY: Partial<
+	Record<TidyFixCategory, TidyAppliedFix["mutationKind"]>
+> = {
+	"alias-normalisation": "alias-normalise",
+	"mock-cleanup": "mock-cleanup",
+};
+
+function mutationKindForCategory(
+	category: TidyFixCategory
+): TidyAppliedFix["mutationKind"] {
+	return MUTATION_KIND_BY_CATEGORY[category] ?? "de-export";
+}
+
 async function applyPlannedTidyFixes(
 	planned: PlannedTidyChange[],
 	reportDirectory: string
@@ -690,10 +734,7 @@ async function applyPlannedTidyFixes(
 			return changes.map<TidyAppliedFix>((change) => ({
 				category: change.category,
 				file: toRelativePath(reportDirectory, change.file),
-				mutationKind:
-					change.category === "alias-normalisation"
-						? "alias-normalise"
-						: "de-export",
+				mutationKind: mutationKindForCategory(change.category),
 				target: change.exportName,
 				wasRolledBack: false,
 			}));

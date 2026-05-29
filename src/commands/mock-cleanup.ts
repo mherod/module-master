@@ -15,7 +15,11 @@ import {
 	createSourceFileFromText,
 	withSourceFile,
 } from "../core/source-file.ts";
-import { applyTextChanges, deduplicateChanges } from "../core/text-changes.ts";
+import {
+	applyTextChanges,
+	deduplicateChanges,
+	type TextChange,
+} from "../core/text-changes.ts";
 import { runTypeCheckDetailed } from "../core/verify.ts";
 import { getRuntime } from "../runtime/index.ts";
 import type { ModuleReference } from "../types/graph.ts";
@@ -258,6 +262,36 @@ function buildRemovalChanges(sourceText: string, orphans: MockOrphan[]) {
 			newText: formatFactoryContent(sourceText, factoryOrphans),
 		};
 	});
+}
+
+/**
+ * Compute per-file text changes that remove orphan mock keys, without writing
+ * them. This is the reuse seam for the `tidy --fix=mock-cleanup` category: it
+ * exposes the same orphan detection + removal-change computation that
+ * `applyMockCleanup` uses, so the tidy orchestrator can feed the changes into
+ * its shared plan/verify/rollback flow instead of re-implementing detection.
+ */
+export async function computeMockCleanupChanges(
+	directory: string,
+	project?: string
+): Promise<{ file: string; orphanKeys: string[]; changes: TextChange[] }[]> {
+	const report = await buildMockCleanupReport({ directory, project });
+	const results: {
+		file: string;
+		orphanKeys: string[];
+		changes: TextChange[];
+	}[] = [];
+	for (const [file, fileOrphans] of groupOrphansByFile(report.orphans)) {
+		const sourceText = await getRuntime().fs.readFile(file);
+		const changes = deduplicateChanges(
+			buildRemovalChanges(sourceText, fileOrphans)
+		);
+		const orphanKeys = [
+			...new Set(fileOrphans.map((orphan) => orphan.orphanKey)),
+		];
+		results.push({ file, orphanKeys, changes });
+	}
+	return results;
 }
 
 async function writeMockCleanupChanges(

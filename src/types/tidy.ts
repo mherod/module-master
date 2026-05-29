@@ -32,7 +32,7 @@ export type TidyFixCategory =
 export interface TidyAppliedFix {
 	category: TidyFixCategory;
 	file: string;
-	mutationKind: "de-export" | "alias-normalise";
+	mutationKind: "de-export" | "alias-normalise" | "mock-cleanup";
 	target: string;
 	wasRolledBack: boolean;
 }

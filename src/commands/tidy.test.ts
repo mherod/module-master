@@ -600,4 +600,108 @@ export function usedInternal() {
 
 		await cleanup(dir);
 	});
+
+	test("--fix=mock-cleanup removes orphan mock factory keys", async () => {
+		const dir = await makeGitFixture("mock-cleanup", {
+			"tsconfig.json": JSON.stringify({
+				compilerOptions: {
+					strict: true,
+					target: "ESNext",
+					module: "Preserve",
+					moduleResolution: "bundler",
+					skipLibCheck: true,
+				},
+				include: ["**/*.ts"],
+			}),
+			"src/mod.ts": "export const foo = 1;\nexport const bar = 2;\n",
+			"src/mod.test.ts": `
+				declare const vi: {
+					fn(): unknown;
+					mock(specifier: string, factory: () => Record<string, unknown>): void;
+				};
+				vi.mock("./mod", () => ({ foo: vi.fn(), bar: vi.fn(), baz: vi.fn() }));
+			`,
+		});
+
+		const proc = Bun.spawn(
+			[
+				...CLI,
+				"tidy",
+				path.join(dir, "src"),
+				"--experimental",
+				"--fix=mock-cleanup",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" }
+		);
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+		expect(report.applied).toContainEqual(
+			expect.objectContaining({
+				category: "mock-cleanup",
+				file: "mod.test.ts",
+				mutationKind: "mock-cleanup",
+				wasRolledBack: false,
+			})
+		);
+		expect(report.typecheckDelta).toEqual(
+			expect.objectContaining({ verificationIncomplete: false })
+		);
+		const content = await readFile(path.join(dir, "src/mod.test.ts"), "utf8");
+		expect(content).not.toContain("baz");
+		expect(content).toContain("foo");
+
+		await cleanup(dir);
+	});
+
+	test("bare --fix leaves mock factories untouched (safe-default exclusion)", async () => {
+		const dir = await makeGitFixture("mock-cleanup-safe-default", {
+			"tsconfig.json": JSON.stringify({
+				compilerOptions: {
+					strict: true,
+					target: "ESNext",
+					module: "Preserve",
+					moduleResolution: "bundler",
+					skipLibCheck: true,
+				},
+				include: ["**/*.ts"],
+			}),
+			"src/mod.ts": "export const foo = 1;\n",
+			"src/mod.test.ts": `
+				declare const vi: {
+					fn(): unknown;
+					mock(specifier: string, factory: () => Record<string, unknown>): void;
+				};
+				vi.mock("./mod", () => ({ foo: vi.fn(), baz: vi.fn() }));
+			`,
+		});
+		const file = path.join(dir, "src/mod.test.ts");
+		const before = await readFile(file, "utf8");
+
+		const proc = Bun.spawn(
+			[
+				...CLI,
+				"tidy",
+				path.join(dir, "src"),
+				"--experimental",
+				"--fix",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" }
+		);
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+		expect(
+			report.applied.some(
+				(fix: { category: string }) => fix.category === "mock-cleanup"
+			)
+		).toBe(false);
+		expect(await readFile(file, "utf8")).toBe(before);
+
+		await cleanup(dir);
+	});
 });

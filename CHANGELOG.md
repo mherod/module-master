@@ -6,6 +6,14 @@ All notable user-facing changes to this project are documented here.
 
 ### New Features
 
+- **`tidy --fix=mock-cleanup`**: the first aggressive `tidy --fix` category is
+  now wired in. `resect tidy <dir> --experimental --fix=mock-cleanup` removes
+  orphan keys from `jest.mock`/`vi.mock`/`vitest.mock`/`mock.module` factories
+  (keys whose names are no longer exports of the mocked module), reusing the
+  existing `mock-cleanup` detection via the shared `computeMockCleanupChanges`
+  seam and the standard tidy plan/verify/rollback flow. It is **explicit
+  opt-in only** — never runs under bare `tidy --fix` (only the safe categories
+  do). First slice of #90.
 - **Case-only `move` renames**: `resect move Foo.ts foo.ts` now detects
   case-only basename changes on case-insensitive filesystems and uses a
   two-step rename so the lowercase target exists, importers are rewritten, and
