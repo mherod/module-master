@@ -1,9 +1,9 @@
-import { statSync } from "node:fs";
 import path from "node:path";
 import type ts from "typescript";
 import type { BarrelExport, ModuleReference } from "../types/graph.ts";
 import type { ProjectConfig } from "../types.ts";
 import { mapConcurrent } from "./concurrency.ts";
+import { mtimesUnchanged, snapshotMtimes } from "./path-utils.ts";
 import { createProgram, getProjectFiles, loadProject } from "./project.ts";
 import { normalizePath } from "./resolver.ts";
 import { scanBarrelExports, scanModuleReferences } from "./scanner.ts";
@@ -68,28 +68,10 @@ const graphCache = new Map<string, DependencyGraph>();
  */
 const graphCacheMtimes = new Map<string, Map<string, number>>();
 
-/** Cheap sync mtime probe. NaN on an unreadable file forces a cache miss. */
-function fileMtimeMs(file: string): number {
-	try {
-		return statSync(file).mtimeMs;
-	} catch {
-		return Number.NaN;
-	}
-}
-
-/** Snapshot the mtime of every project file (one sync stat per file). */
-function snapshotMtimes(files: readonly string[]): Map<string, number> {
-	const mtimes = new Map<string, number>();
-	for (const file of files) {
-		mtimes.set(file, fileMtimeMs(file));
-	}
-	return mtimes;
-}
-
 /**
  * A cached graph is reusable only when the file SET is unchanged (count +
- * membership) AND no file's content has changed since the build (mtime match).
- * The mtime pass is a per-file sync stat — cheap enough to run on every lookup
+ * membership) AND no file's content has changed since the build (mtime match
+ * via the shared `mtimesUnchanged` probe). Cheap enough to run on every lookup
  * without forcing a rebuild when nothing changed.
  */
 function isCacheValid(
@@ -104,11 +86,8 @@ function isCacheValid(
 		if (!cached.imports.has(file)) {
 			return false;
 		}
-		if (cachedMtimes.get(file) !== fileMtimeMs(file)) {
-			return false;
-		}
 	}
-	return true;
+	return mtimesUnchanged(cachedMtimes);
 }
 
 /**

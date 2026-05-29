@@ -1,6 +1,7 @@
 import path from "node:path";
 import ts from "typescript";
 import type { ProjectConfig, ProjectReference } from "../types.ts";
+import { mtimesUnchanged, snapshotMtimes } from "./path-utils.ts";
 
 /** Directories to skip during tsconfig discovery */
 const SKIP_DIRECTORIES = new Set([
@@ -48,6 +49,13 @@ export interface ProjectDiscovery {
 
 /** Per-invocation cache for discoverProject results, keyed by resolved path */
 const discoveryCache = new Map<string, ProjectDiscovery>();
+/**
+ * Per-directory snapshot of each discovered tsconfig's mtime at discovery time.
+ * Lets the cache invalidate when a tsconfig is edited in place or removed —
+ * matters for the long-lived MCP server, where tsconfigs change between calls.
+ * Adding a brand-new tsconfig is not detected here (would need a re-glob).
+ */
+const discoveryCacheMtimes = new Map<string, Map<string, number>>();
 
 /**
  * Discover all tsconfig files in a directory and build ownership maps.
@@ -56,7 +64,8 @@ const discoveryCache = new Map<string, ProjectDiscovery>();
 export function discoverProject(projectDir: string): ProjectDiscovery {
 	const absoluteDir = path.resolve(projectDir);
 	const cached = discoveryCache.get(absoluteDir);
-	if (cached) {
+	const cachedMtimes = discoveryCacheMtimes.get(absoluteDir);
+	if (cached && cachedMtimes && mtimesUnchanged(cachedMtimes)) {
 		return cached;
 	}
 	const configs: TsConfigInfo[] = [];
@@ -64,6 +73,9 @@ export function discoverProject(projectDir: string): ProjectDiscovery {
 
 	// Find all tsconfig files
 	const tsconfigPaths = findAllTsConfigs(absoluteDir);
+	// Snapshot tsconfig mtimes before parsing so an in-place edit invalidates
+	// the next lookup rather than being masked by a post-parse timestamp.
+	const mtimes = snapshotMtimes(tsconfigPaths);
 
 	// Parse each config
 	for (const tsconfigPath of tsconfigPaths) {
@@ -96,6 +108,7 @@ export function discoverProject(projectDir: string): ProjectDiscovery {
 
 	const result: ProjectDiscovery = { configs, fileOwnership, rootConfig };
 	discoveryCache.set(absoluteDir, result);
+	discoveryCacheMtimes.set(absoluteDir, mtimes);
 	return result;
 }
 

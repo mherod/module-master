@@ -565,11 +565,11 @@ Every call to `discoverWorkspace` traverses the directory tree, globs all `packa
 DON'T: Call `discoverWorkspace` in a loop or in a hot path. Call it once per command invocation and pass the result downstream.
 DO: When adding a per-invocation workspace cache, mirror the `graphCache` Map pattern in `graph.ts` — key by absolute directory, store `WorkspaceInfo | null`.
 
-### `graphCache` Invalidation — Hot Path (issues #78, #87)
+### `graphCache` / `discoveryCache` Invalidation — Hot Path (issues #78, #87, #88)
 
-`graphCache` (graph.ts) invalidates on BOTH **file-set** change (`isCacheValid` — count + membership, #78) AND **file-content** change (per-file mtime snapshotted at build time by `snapshotMtimes`, re-checked with sync `statSync().mtimeMs` in `isCacheValid`, #87). Content-staleness matters for the long-lived MCP server, where files are edited between tool calls. Cache invalidation is a **hot-path** change: `buildProjectGraphs` builds and re-checks one graph per non-solution tsconfig, and `unused` exercises that across many sibling configs.
+`graphCache` (graph.ts) and `discoveryCache` (tsconfig-discovery.ts) both invalidate on content change via the shared mtime helpers in `path-utils.ts`: `snapshotMtimes(paths)` records mtimes at build time and `mtimesUnchanged(snapshot)` re-probes with cheap sync `statSync().mtimeMs` (catches in-place edits + deletions, NOT additions). `graphCache` keys by file set (`isCacheValid` — count + membership, #78) + per-file content mtime (#87); `discoveryCache` keys by discovered-tsconfig mtime (#88 — catches tsconfig edits/removals; a brand-new tsconfig needs a re-glob, deferred). Matters for the long-lived MCP server, where files/tsconfigs change between tool calls. Cache invalidation is a **hot-path** change: `buildProjectGraphs` builds and re-checks one graph per non-solution tsconfig, and `unused` exercises that across many sibling configs.
 
-DO: Keep the validity probe a cheap sync `statSync().mtimeMs` so unchanged files never force a rebuild. When changing invalidation, write the regression test FIRST (extend `graph.test.ts`) and re-measure `unused`/`audit` against the 20s `bun test` timeout.
+DO: Keep the validity probe the shared cheap sync `mtimesUnchanged` (`statSync().mtimeMs`) so unchanged files never force a rebuild. When changing invalidation, write the regression test FIRST (extend `graph.test.ts` / `tsconfig-discovery.test.ts`) and re-measure `unused`/`audit` against the 20s `bun test` timeout.
 DON'T: Use async `Bun.file().lastModified` or a content hash in the validity check — both make `unused`/`audit` blow past the 20s timeout with full rebuilds every call.
 
 ### Parallelize Independent File Writes With `mapConcurrent`

@@ -1,3 +1,4 @@
+import { statSync } from "node:fs";
 import path from "node:path";
 
 interface TsconfigPathResult {
@@ -29,4 +30,37 @@ export function dedupeTsconfigResults<T extends TsconfigPathResult>(
 		deduped.push(item);
 	}
 	return deduped;
+}
+
+/** Cheap sync mtime probe. NaN on an unreadable file forces a cache miss. */
+export function fileMtimeMs(file: string): number {
+	try {
+		return statSync(file).mtimeMs;
+	} catch {
+		return Number.NaN;
+	}
+}
+
+/** Snapshot the mtime of every path (one sync stat per path). */
+export function snapshotMtimes(paths: readonly string[]): Map<string, number> {
+	const mtimes = new Map<string, number>();
+	for (const p of paths) {
+		mtimes.set(p, fileMtimeMs(p));
+	}
+	return mtimes;
+}
+
+/**
+ * True when every path in a prior mtime snapshot still has the same mtime.
+ * Re-stats with a cheap sync probe; a changed or now-unreadable path returns
+ * false (NaN !== NaN), so in-place edits and deletions invalidate but
+ * additions (paths not in the snapshot) do not.
+ */
+export function mtimesUnchanged(snapshot: Map<string, number>): boolean {
+	for (const [file, mtime] of snapshot) {
+		if (fileMtimeMs(file) !== mtime) {
+			return false;
+		}
+	}
+	return true;
 }

@@ -71,6 +71,13 @@ All notable user-facing changes to this project are documented here.
   returned analysis built from the pre-edit version. The cache now also
   snapshots each file's mtime at build time and rebuilds when any file
   changes (#87).
+- **MCP discovery no longer serves stale tsconfig data after edits**: The
+  tsconfig discovery cache was keyed by directory only, so editing a
+  `tsconfig.json` (e.g. changing `include`) or deleting one between
+  long-lived MCP calls returned stale config and ownership data. Discovery
+  now snapshots each discovered tsconfig's mtime and rebuilds when one is
+  edited or removed. Detecting a brand-new tsconfig added mid-session is
+  tracked separately (#88).
 
 ## [1.7.0] — 2026-05-28
 
