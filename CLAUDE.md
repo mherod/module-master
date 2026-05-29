@@ -496,9 +496,21 @@ DON'T: Add an import in one Edit and its usage in a subsequent Edit. Biome will 
 
 ## npm Publish — pnpm v10 and .npmignore
 
-pnpm v10 treats `package.json`'s `files` field as a whitelist; `.npmignore` exclusions inside that whitelist are **ignored** during `pnpm publish`/`pnpm pack`. Test files in `files` appear in the tarball.
+pnpm v10 treats `files` as a whitelist; `.npmignore` exclusions inside it are **ignored** during `pnpm publish`/`pnpm pack`.
 
-DON'T: Expect `.npmignore` patterns like `**/*.test.ts` to filter files explicitly listed in `files` under pnpm v10. Remove them from `files` instead.
+DON'T: Expect `.npmignore` patterns like `**/*.test.ts` to filter files listed in `files`. Remove them from `files` instead, or use `!`-negations within `files` (ship `bin/resect.js`, not the whole `bin/`, so `bun --compile` artifacts never leak).
+
+### OTP-safe release ordering
+
+`prepublishOnly` runs `verify:all` (`typecheck && lint && test && build:lib && verify:size`, ~45s — longer than a 30s TOTP code). `pnpm publish --otp=<code>` consumes the code at start but authenticates only after `prepublishOnly` finishes, so a hand-typed code expires mid-run (`EOTP`).
+
+DO: For TOTP releases, run checks first then publish with `--ignore-scripts` (skips the `prepublishOnly` re-run, ~1s OTP window):
+```bash
+pnpm run verify:all && pnpm publish --ignore-scripts --otp=$(op item get "Npmjs" --otp)
+```
+`prepublishOnly` stays as the safety net for bare `pnpm publish`.
+
+DON'T: Pass `--otp` to a bare `pnpm publish` whose `prepublishOnly` runs the full suite — the code expires before auth.
 
 ## Async Function Guidelines
 
@@ -530,69 +542,43 @@ DON'T: Ship three commits for what is logically one fix (e.g. offset-correction,
 
 ## Performance Patterns
 
-### `withSourceFile` — Always Use the Program Overload When a Program Is Available
+### `withSourceFile` — use the Program overload in loops
 
-`withSourceFile` has two overloads:
+`withSourceFile` has a file-path overload (`(filePath, cb, fallback)` — `ts.sys.readFile()` + `ts.createSourceFile()` every call, full disk read + parse) and a Program overload (`(program, filePath, cb, fallback)` — zero I/O, reuses the parsed source).
 
+DON'T: use the file-path overload inside loops when a `ts.Program` is in scope.
 ```typescript
-// File-path overload — reads from disk + creates a new ts.SourceFile every call
-withSourceFile(filePath: string, callback, fallback)
-
-// Program overload — retrieves already-parsed source file from memory, zero I/O
-withSourceFile(program: ts.Program, filePath: string, callback, fallback)
-```
-
-**DON'T** use the file-path overload inside loops when a `ts.Program` is available in scope. Every call to `withSourceFile(filePath, ...)` invokes `ts.sys.readFile()` + `ts.createSourceFile()` — a full disk read and parse pass. The known violation is `audit.ts:81`:
-
-```typescript
-// WRONG — re-reads and re-parses every project file from disk
+// WRONG — re-reads + re-parses from disk
 const exportCount = withSourceFile(file, scanExports, []).length;
-
-// CORRECT — zero I/O, uses already-parsed source file from graph Program
+// CORRECT — zero I/O, reuses the graph Program (known violation: audit.ts:81)
 const exportCount = withSourceFile(graph.program, file, scanExports, []).length;
 ```
 
 ### `buildDependencyGraph` Does Not Expose Its Internal `ts.Program`
 
-`buildDependencyGraph` builds a `ts.Program` internally but only returns `DependencyGraph`. Commands needing source file access (`move.ts`, `rename.ts`) call `createProgram()` a second time. If ever fixed, add a `program: ts.Program` field to `DependencyGraph`.
+`buildDependencyGraph` builds a `ts.Program` internally but returns only `DependencyGraph`, so `move.ts`/`rename.ts` call `createProgram()` a second time. If fixed, add a `program: ts.Program` field to `DependencyGraph`.
 
-DON'T: Add a third `createProgram` call to `move.ts` or `rename.ts` for any reason — the existing dual build is already a known inefficiency.
+DON'T: Add a third `createProgram` call to `move.ts`/`rename.ts` — the dual build is already a known inefficiency.
 
 ### `discoverWorkspace` Has No Cache
 
-`discoverProject` (tsconfig-discovery.ts) has `discoveryCache`. `buildDependencyGraph` (graph.ts) has `graphCache`. `discoverWorkspace` (workspace.ts) has **no cache**.
-
-Every call to `discoverWorkspace` traverses the directory tree, globs all `package.json` files, and reads each one. For a 20-package monorepo this is 20+ file reads per call. It is called at 9 sites across commands.
+`discoverProject` (tsconfig-discovery.ts) has `discoveryCache` and `buildDependencyGraph` (graph.ts) has `graphCache`, but `discoverWorkspace` (workspace.ts) has **no cache** — every call re-globs and reads all `package.json` files (20+ reads per call in a 20-package monorepo), and it is called at 9 sites.
 
 DON'T: Call `discoverWorkspace` in a loop or in a hot path. Call it once per command invocation and pass the result downstream.
 DO: When adding a per-invocation workspace cache, mirror the `graphCache` Map pattern in `graph.ts` — key by absolute directory, store `WorkspaceInfo | null`.
 
 ### `graphCache` / `discoveryCache` Invalidation — Hot Path (issues #78, #87, #88)
 
-`graphCache` (graph.ts) and `discoveryCache` (tsconfig-discovery.ts) both invalidate on content change via the shared mtime helpers in `path-utils.ts`: `snapshotMtimes(paths)` records mtimes at build time and `mtimesUnchanged(snapshot)` re-probes with cheap sync `statSync().mtimeMs` (catches in-place edits + deletions, NOT additions). `graphCache` keys by file set (`isCacheValid` — count + membership, #78) + per-file content mtime (#87); `discoveryCache` keys by discovered-tsconfig mtime (#88 — catches tsconfig edits/removals; additions caught by a throttled ~2s re-glob). Matters for the long-lived MCP server, where files/tsconfigs change between tool calls. Cache invalidation is a **hot-path** change: `buildProjectGraphs` builds and re-checks one graph per non-solution tsconfig, and `unused` exercises that across many sibling configs.
+`graphCache` (graph.ts) and `discoveryCache` (tsconfig-discovery.ts) both invalidate on content change via the shared mtime helpers in `path-utils.ts`: `snapshotMtimes(paths)` records mtimes at build time and `mtimesUnchanged(snapshot)` re-probes with cheap sync `statSync().mtimeMs` (catches in-place edits + deletions, NOT additions). `graphCache` keys by file set (`isCacheValid` — count + membership, #78) + per-file content mtime (#87); `discoveryCache` keys by discovered-tsconfig mtime (#88 — catches tsconfig edits/removals; additions caught by a throttled ~2s re-glob). Matters for the long-lived MCP server. Cache invalidation is **hot-path**: `buildProjectGraphs` builds and re-checks one graph per non-solution tsconfig, and `unused` exercises that across many sibling configs.
 
 DO: Keep the validity probe the shared cheap sync `mtimesUnchanged` (`statSync().mtimeMs`) so unchanged files never force a rebuild. When changing invalidation, write the regression test FIRST (extend `graph.test.ts` / `tsconfig-discovery.test.ts`) and re-measure `unused`/`audit` against the 20s `bun test` timeout.
 DON'T: Use async `Bun.file().lastModified` or a content hash in the validity check — both make `unused`/`audit` blow past the 20s timeout with full rebuilds every call.
 
 ### Parallelize Independent File Writes With `mapConcurrent`
 
-Sequential `for...of` loops with `await writeFile(...)` per file serializes all writes. Each file write in `move`, `rename`, and `alias` is independent — no file's content depends on another's write result.
+File writes in `move`, `rename`, `alias` are independent — a sequential `for...of` with `await rt.fs.writeFile(...)` needlessly serializes them.
 
-```typescript
-// WRONG — sequential writes
-for (const [filePath, content] of updates) {
-    await rt.fs.writeFile(filePath, content);
-}
-
-// CORRECT — parallel writes with bounded concurrency
-await mapConcurrent(
-    [...updates],
-    ([filePath, content]) => rt.fs.writeFile(filePath, content),
-    { concurrency: 4 }
-);
-```
-
-Use `mapConcurrent` (default concurrency=4) from `src/core/concurrency.ts` rather than bare `Promise.all` to avoid exhausting file descriptors on large graphs.
+DO: write them via `mapConcurrent([...updates], ([filePath, content]) => rt.fs.writeFile(filePath, content), { concurrency: 4 })` from `src/core/concurrency.ts` — not bare `Promise.all`, which exhausts file descriptors on large graphs.
 
 ## Commit Flow & Sandbox Constraints (this repo's hook environment)
 
