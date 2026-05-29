@@ -1,20 +1,12 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import {
-	mkdir,
-	mkdtemp,
-	readdir,
-	readFile,
-	rm,
-	writeFile,
-} from "node:fs/promises";
-import os from "node:os";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { runCli } from "./__test-helpers.ts";
+import { makeTempDir, runCli } from "./__test-helpers.ts";
 
 const tempDirs: string[] = [];
 
 async function tempDir(): Promise<string> {
-	const dir = await mkdtemp(path.join(os.tmpdir(), "resect-move-"));
+	const dir = await makeTempDir("move");
 	tempDirs.push(dir);
 	return dir;
 }

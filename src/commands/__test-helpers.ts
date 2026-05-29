@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -41,6 +41,17 @@ export async function makeFixture(
 		await mkdir(path.dirname(full), { recursive: true });
 		await writeFile(full, content);
 	}
+	return dir;
+}
+
+/**
+ * Create a uniquely-named throwaway temp directory under the OS tmpdir,
+ * named `resect-<prefix>-XXXXXX`. The caller owns cleanup (track the returned
+ * path and `rm` it in an afterAll). Shared by tests needing a real on-disk
+ * working directory outside the repo (e.g. move, filesystem-case).
+ */
+export async function makeTempDir(prefix: string): Promise<string> {
+	const dir = await mkdtemp(path.join(tmpdir(), `resect-${prefix}-`));
 	return dir;
 }
 

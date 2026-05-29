@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { makeTempDir } from "../commands/__test-helpers.ts";
 import { nodeRuntime } from "../runtime/node.ts";
 import {
 	isCaseInsensitiveFs,
@@ -13,7 +13,7 @@ import {
 const tempDirs: string[] = [];
 
 async function tempDir(): Promise<string> {
-	const dir = await mkdtemp(path.join(os.tmpdir(), "resect-case-"));
+	const dir = await makeTempDir("case");
 	tempDirs.push(dir);
 	return dir;
 }
