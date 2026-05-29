@@ -44,15 +44,6 @@ bun src/cli.ts audit <directory>                     # Module health: fan-out, f
 bun src/cli.ts unused <directory>                    # Find exports never imported by other files
 ```
 
-Use `-p <project>` to specify a project directory for find/analyze:
-```bash
-bun src/cli.ts find Entity -p /path/to/project              # Find Entity files and exports
-bun src/cli.ts find User -p . --type export                 # Find only User exports
-bun src/cli.ts analyze /path/to/file.ts -p /path/to/project
-bun src/cli.ts alias src --prefer=alias                     # Normalize to tsconfig aliases
-bun src/cli.ts alias src --prefer=shortest --no-verify     # Pick shortest path, skip verification
-```
-
 ## Architecture
 
 The codebase uses the TypeScript Compiler API (`typescript` package) for parsing and analyzing TypeScript/JavaScript files. This enables precise handling of all import/export variants, path aliases, and barrel files.
@@ -83,14 +74,6 @@ The codebase uses the TypeScript Compiler API (`typescript` package) for parsing
 - **move.ts** - Move files and update all references (supports cross-package moves)
 - **rename.ts** - Rename exports and update all imports
 - **audit.ts** - Module health metrics: fan-out, fan-in, instability, cycle detection
-
-### Data Flow
-
-1. **Load project** → Parse tsconfig.json, extract compiler options and path aliases
-2. **Build graph** → Scan all project files, create import/importedBy maps
-3. **Find references** → Query graph for files importing target module
-4. **Calculate changes** → Determine new import specifiers based on operation
-5. **Apply updates** → Modify source text at precise AST node positions
 
 ### Key Types
 
@@ -219,15 +202,7 @@ DON'T: Modify string literals in fs/Bun.file calls—these are not module paths 
 
 ## Find Command
 
-The `find` command (`src/commands/find.ts`) searches for files and exports across a project:
-
-- **Discovery-based**: Uses `discoverProject()` to get all files from tsconfig ownership
-- **Case-insensitive**: Searches are case-insensitive with partial matching
-- **Dual search**: Searches both filenames and export names simultaneously
-- **Smart sorting**: Exact matches appear first, then alphabetical order
-- **Type filtering**: Use `--type file|export|all` to filter results
-
-The command scans exports by parsing each TypeScript/JavaScript file with the TS Compiler API and extracting exports using `scanExports()`. Files that fail to parse are silently skipped.
+Case-insensitive dual search (filenames + exports) via `discoverProject()` + `scanExports()`. Exact matches sort first. `--type file|export|all` filters results. Files that fail to parse are silently skipped.
 
 ## Alias Command
 
@@ -418,20 +393,9 @@ The move command supports cross-package refactoring in monorepos:
 bun src/cli.ts move apps/web/src/utils/foo.ts packages/shared/src/foo.ts --dry-run
 ```
 
-### How It Works
-
-1. **Workspace discovery**: Automatically discovers workspace packages at move start
-2. **Package detection**: Identifies source and destination packages using `findPackageForPath()`
-3. **Import updates**: Uses package name (e.g., `@scope/package`) instead of relative paths for cross-package moves
-4. **Destination barrel update**: Adds `export * from "./foo"` to the destination package's index.ts
-
 ### Barrel Export Insertion
 
-When moving to a new package, `addExportToDestinationBarrel()`:
-- Calculates relative path from barrel to moved file
-- Generates `export * from "./relative-path"` statement
-- Inserts after the last existing export (or at end if no exports)
-- Skips if export already exists
+`addExportToDestinationBarrel()` inserts `export * from "./relative-path"` after the last existing export; skips if already present.
 
 ### Import Path Resolution
 
@@ -518,33 +482,15 @@ DON'T: Use `files.includes: ["**", "!!**/.swiz"]` — Biome's formatter removes 
 
 Biome runs as a PostToolUse hook after every file edit and auto-removes unused imports. This has one important implication when adding new imports:
 
-**When adding a new import to a file, include its first usage site in the same Edit call.** If you add an import in one Edit and its usage in a separate Edit, Biome will strip the import between the two calls, causing a type error on the next Edit.
-
-```typescript
-// WRONG: two separate Edits
-// Edit 1: adds import — Biome strips it because not yet used
-import { findAliasForPath } from "../core/resolver.ts";
-
-// Edit 2: adds usage — finds import missing, type error
-const alias = findAliasForPath(toFile, project);
-```
-
-```typescript
-// CORRECT: one Edit covering both import and first usage
-import { findAliasForPath } from "../core/resolver.ts";
-// ... other code ...
-const alias = findAliasForPath(toFile, project);
-```
+**When adding a new import to a file, include its first usage site in the same Edit call.** Biome strips unused imports after each Edit, so an import added without a usage in the same Edit will be gone before the next Edit lands.
 
 DON'T: Add an import in one Edit and its usage in a subsequent Edit. Biome will strip the import before the usage lands.
 
 ## npm Publish — pnpm v10 and .npmignore
 
-When `package.json` has a `files` field, pnpm v10 includes those paths as a whitelist and does **not** apply `.npmignore` exclusions within them during `pnpm publish` or `pnpm pack --dry-run`. Test files and other patterns in `.npmignore` will still appear in the tarball listing.
+pnpm v10 treats `package.json`'s `files` field as a whitelist; `.npmignore` exclusions inside that whitelist are **ignored** during `pnpm publish`/`pnpm pack`. Test files in `files` appear in the tarball.
 
-This is cosmetic (source test files contain no secrets), but if exclusion is required, remove test patterns from the `files` whitelist at the `package.json` level instead of relying on `.npmignore`.
-
-DON'T: Expect `.npmignore` glob patterns like `**/*.test.ts` to filter files that are explicitly whitelisted via the `files` field when using pnpm v10.
+DON'T: Expect `.npmignore` patterns like `**/*.test.ts` to filter files explicitly listed in `files` under pnpm v10. Remove them from `files` instead.
 
 ## Async Function Guidelines
 
