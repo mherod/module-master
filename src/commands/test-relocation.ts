@@ -3,7 +3,7 @@ import path from "node:path";
 import { logger } from "../cli-logger.ts";
 import { mapConcurrent } from "../core/concurrency.ts";
 import { TS_JS_VUE_EXTENSIONS } from "../core/constants.ts";
-import { ensureCleanWorktree } from "../core/git.ts";
+import { ensureCleanWorktree, rollbackFiles } from "../core/git.ts";
 import {
 	buildProjectGraphs,
 	type DependencyGraph,
@@ -336,20 +336,7 @@ async function rollbackRelocations(
 		const { source, target } = absoluteRelocation(relocation, reportDirectory);
 		return [source, target];
 	});
-	const proc = Bun.spawn(
-		["git", "restore", "--staged", "--worktree", "--", ...paths],
-		{
-			cwd: reportDirectory,
-			stdout: "pipe",
-			stderr: "pipe",
-		}
-	);
-	await new Response(proc.stdout).text();
-	const stderr = await new Response(proc.stderr).text();
-	await proc.exited;
-	if (proc.exitCode !== 0) {
-		throw new Error(stderr || "git restore rollback failed");
-	}
+	await rollbackFiles(reportDirectory, paths);
 
 	const rt = getRuntime();
 	for (const relocation of relocations) {

@@ -114,3 +114,40 @@ export async function ensureCleanWorktree(
 		process.exit(1);
 	}
 }
+
+/**
+ * Roll back files to their committed state by discarding both staged and
+ * worktree changes via `git restore --staged --worktree`.
+ *
+ * Used by mutating commands (tidy, mock-cleanup, alias, test-relocation) to
+ * undo applied edits when post-change verification fails.
+ *
+ * @param dir - git working directory the restore runs in (typically project root)
+ * @param files - paths to restore (absolute or relative to `dir`); no-op when empty
+ * @throws when `git restore` exits non-zero
+ */
+export async function rollbackFiles(
+	dir: string,
+	files: readonly string[]
+): Promise<void> {
+	if (files.length === 0) {
+		return;
+	}
+
+	const proc = Bun.spawn(
+		["git", "restore", "--staged", "--worktree", "--", ...files],
+		{
+			cwd: dir,
+			stdout: "pipe",
+			stderr: "pipe",
+		}
+	);
+	await new Response(proc.stdout).text();
+	const stderr = await new Response(proc.stderr).text();
+	await proc.exited;
+	if (proc.exitCode !== 0) {
+		throw new Error(
+			`Rollback failed: ${stderr.trim() || `git restore exited ${proc.exitCode}`}`
+		);
+	}
+}

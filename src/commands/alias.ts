@@ -2,7 +2,7 @@ import path from "node:path";
 import { logger } from "../cli-logger.ts";
 import ts from "../core/ast-utils.ts";
 import { mapConcurrent } from "../core/concurrency.ts";
-import { ensureCleanWorktree } from "../core/git.ts";
+import { ensureCleanWorktree, rollbackFiles } from "../core/git.ts";
 import {
 	createProgram,
 	loadProject,
@@ -503,23 +503,7 @@ async function rollbackChanges(
 	const files = [...new Set(changes.map((change) => change.file))].map((file) =>
 		path.relative(rootDir, file)
 	);
-	if (files.length === 0) {
-		return;
-	}
-	const proc = Bun.spawn(
-		["git", "restore", "--staged", "--worktree", "--", ...files],
-		{
-			cwd: rootDir,
-			stdout: "pipe",
-			stderr: "pipe",
-		}
-	);
-	await new Response(proc.stdout).text();
-	const stderr = await new Response(proc.stderr).text();
-	await proc.exited;
-	if (proc.exitCode !== 0) {
-		throw new Error(stderr || "git restore rollback failed");
-	}
+	await rollbackFiles(rootDir, files);
 }
 
 export async function applyChanges(changes: AliasChange[]): Promise<void> {

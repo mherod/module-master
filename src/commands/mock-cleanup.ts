@@ -1,6 +1,6 @@
 import path from "node:path";
 import { logger } from "../cli-logger.ts";
-import { ensureCleanWorktree } from "../core/git.ts";
+import { ensureCleanWorktree, rollbackFiles } from "../core/git.ts";
 import {
 	buildProjectGraphs,
 	type DependencyGraph,
@@ -284,26 +284,6 @@ async function writeMockCleanupChanges(
 	}
 
 	return modifiedFiles.sort();
-}
-
-async function rollbackFiles(cwd: string, files: string[]): Promise<void> {
-	if (files.length === 0) {
-		return;
-	}
-	const proc = Bun.spawn(
-		["git", "restore", "--staged", "--worktree", "--", ...files],
-		{
-			cwd,
-			stdout: "pipe",
-			stderr: "pipe",
-		}
-	);
-	await new Response(proc.stdout).text();
-	const stderr = await new Response(proc.stderr).text();
-	await proc.exited;
-	if (proc.exitCode !== 0) {
-		throw new Error(stderr || "git restore rollback failed");
-	}
 }
 
 export async function applyMockCleanup(

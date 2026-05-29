@@ -3,7 +3,11 @@ import ts from "typescript";
 import { logger } from "../cli-logger.ts";
 import { mapConcurrent } from "../core/concurrency.ts";
 import { TS_JS_VUE_EXTENSIONS } from "../core/constants.ts";
-import { ensureCleanWorktree, isWorktreeDirty } from "../core/git.ts";
+import {
+	ensureCleanWorktree,
+	isWorktreeDirty,
+	rollbackFiles,
+} from "../core/git.ts";
 import {
 	buildProjectGraphs,
 	type DependencyGraph,
@@ -628,32 +632,6 @@ async function applyPlannedTidyFixes(
 	);
 
 	return appliedByFile.flat();
-}
-
-async function rollbackFiles(
-	projectRoot: string,
-	files: readonly string[]
-): Promise<void> {
-	if (files.length === 0) {
-		return;
-	}
-
-	const proc = Bun.spawn(
-		["git", "restore", "--staged", "--worktree", "--", ...files],
-		{
-			cwd: projectRoot,
-			stdout: "pipe",
-			stderr: "pipe",
-		}
-	);
-	await new Response(proc.stdout).text();
-	const stderr = await new Response(proc.stderr).text();
-	await proc.exited;
-	if (proc.exitCode !== 0) {
-		throw new Error(
-			`Rollback failed: ${stderr.trim() || `git restore exited ${proc.exitCode}`}`
-		);
-	}
 }
 
 function markRolledBack(applied: TidyAppliedFix[]): TidyAppliedFix[] {
