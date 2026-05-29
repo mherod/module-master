@@ -6,6 +6,7 @@ import { auditCommand } from "./audit.ts";
 import { barrelCommand } from "./barrel.ts";
 import { discoverCommand } from "./discover.ts";
 import { extractCommonCommand } from "./extract-common.ts";
+import { extractComponentCommand } from "./extract-component.ts";
 import { findCommand } from "./find.ts";
 import { mockCleanupCommand } from "./mock-cleanup.ts";
 import { moveCommand } from "./move.ts";
@@ -620,6 +621,50 @@ Examples:
 					: undefined,
 				sameNameOnly: values["same-name-only"],
 				skipWrappers: values["skip-wrappers"],
+			});
+		},
+	},
+
+	{
+		name: "extract-component",
+		helpText: `
+Usage: ${name} extract-component <file> <selector> <new-file> [options]
+
+Locate a JSX/TSX subtree to extract into its own typed sub-component.
+
+NOTE: This is slice 1 of the feature — read-only / dry-run only. It resolves the
+selector to a single JSX node and reports it; it does not yet write files.
+Free-variable analysis, codegen, and the call-site rewrite land in later slices.
+
+Arguments:
+  file        Path to the source file containing the JSX
+  selector    Either a line range (L<start>-<end> or <start>-<end>, 1-based,
+              inclusive) or a JSX tag/component name (e.g. Card, div)
+  new-file    Destination module the extracted component will live in
+
+Options:
+  --json          Output the located-node report as JSON
+  -p, --project   Path to project directory or tsconfig.json
+
+Examples:
+  ${name} extract-component src/App.tsx Card src/Card.tsx
+  ${name} extract-component src/App.tsx L12-40 src/Panel.tsx --json
+`,
+		run: ([file, selector, newFile], values) => {
+			if (!(file && selector && newFile)) {
+				logger.error(
+					"Error: extract-component requires <file>, <selector>, and <new-file> arguments"
+				);
+				logger.error(`Run '${name} extract-component --help' for usage`);
+				process.exit(1);
+			}
+			extractComponentCommand({
+				file,
+				selector,
+				newFile,
+				json: values.json,
+				verbose: values.verbose,
+				project: values.project,
 			});
 		},
 	},

@@ -45,6 +45,19 @@ export { discoverCommand } from "./commands/discover.ts";
 // ── Commands: extract-common ────────────────────────────────────────
 export type { ExtractCommonOptions } from "./commands/extract-common.ts";
 export { extractCommonCommand } from "./commands/extract-common.ts";
+// ── Commands: extract-component ─────────────────────────────────────
+export type {
+	ExtractComponentOptions,
+	ExtractComponentReport,
+	JsxNodeKind,
+	LocatedJsxNode,
+} from "./commands/extract-component.ts";
+export {
+	extractComponentCommand,
+	locateExtractComponentTarget,
+	locateJsxNode,
+	parseSelector,
+} from "./commands/extract-component.ts";
 // ── Commands: find ──────────────────────────────────────────────────
 export type {
 	ExportMatch,

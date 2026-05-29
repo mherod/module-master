@@ -45,6 +45,7 @@ import { analyze } from "./commands/analyze.ts";
 import { buildAuditReport } from "./commands/audit.ts";
 import { analyzeBarrels, barrelReportToJson } from "./commands/barrel.ts";
 import { runExtractCommon } from "./commands/extract-common.ts";
+import { locateExtractComponentTarget } from "./commands/extract-component.ts";
 import { search } from "./commands/find.ts";
 import {
 	applyMockCleanup,
@@ -214,6 +215,16 @@ async function analyzeTool(
 		})),
 		noExternalUsage: result.noExternalUsage,
 	});
+}
+
+function extractComponentTool(
+	file: string,
+	selector: string,
+	newFile: string
+): CallToolResult {
+	const absolutePath = path.resolve(file);
+	const report = locateExtractComponentTarget(absolutePath, selector, newFile);
+	return jsonText(report);
 }
 
 function discoverTool(directory: string): CallToolResult {
@@ -703,6 +714,38 @@ server.registerTool(
 	async ({ file, project }) => {
 		try {
 			return await analyzeTool(file, project);
+		} catch (error) {
+			return toError(error);
+		}
+	}
+);
+
+server.registerTool(
+	"extract-component",
+	{
+		description:
+			"Locate the JSX/TSX subtree you intend to split into its own typed sub-component, BEFORE any mutation. Resolves a selector — a line range ('L12-40' or '12-40', 1-based inclusive) or a JSX tag/component name ('Card', 'div') — to exactly ONE JSX node and reports its kind (element/self-closing/fragment), tag name, character span, and line range. Errors clearly when nothing matches or the selector is ambiguous (lists the candidates so you can narrow with a line range). This is slice 1 of the extract-component feature: it is READ-ONLY and writes nothing — free-variable/hook classification, Props-interface codegen, and the call-site rewrite + tsc verify/rollback arrive in later slices.",
+		inputSchema: {
+			file: z
+				.string()
+				.describe(
+					"Absolute or cwd-relative path to the source file containing the JSX (e.g. 'src/App.tsx')"
+				),
+			selector: z
+				.string()
+				.describe(
+					"Line range ('L12-40' or '12-40', 1-based inclusive) or a JSX tag/component name ('Card', 'div')"
+				),
+			newFile: z
+				.string()
+				.describe(
+					"Destination module the extracted component will eventually live in (e.g. 'src/Card.tsx'). Validated now; written in a later slice"
+				),
+		},
+	},
+	({ file, selector, newFile }) => {
+		try {
+			return extractComponentTool(file, selector, newFile);
 		} catch (error) {
 			return toError(error);
 		}
