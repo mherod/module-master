@@ -3,6 +3,10 @@ import { logger, printCommandResult } from "../cli-logger.ts";
 import ts from "../core/ast-utils.ts";
 import { mapConcurrent } from "../core/concurrency.ts";
 import { checkAllConflicts } from "../core/conflict-detection.ts";
+import {
+	compareDeclarations,
+	describeComparison,
+} from "../core/duplicate-detection.ts";
 import { ensureCleanWorktree } from "../core/git.ts";
 import { buildDependencyGraph, findAllReferences } from "../core/graph.ts";
 import {
@@ -101,7 +105,8 @@ export async function renameCommand(options: RenameOptions): Promise<void> {
 		project,
 		dryRun,
 		verbose,
-		extraProjects
+		extraProjects,
+		force
 	);
 
 	printCommandResult(
@@ -125,7 +130,8 @@ export async function renameSymbol(
 	project: ProjectConfig,
 	dryRun: boolean,
 	verbose: boolean,
-	extraProjects: ProjectConfig[] = []
+	extraProjects: ProjectConfig[] = [],
+	force = false
 ): Promise<RenameResult> {
 	const errors: { file: string; message: string }[] = [];
 	const updatedReferences: UpdatedReference[] = [];
@@ -230,15 +236,40 @@ export async function renameSymbol(
 	});
 
 	if (conflictResult.hasConflict) {
-		return {
-			success: false,
-			renamedSymbol: { file: filePath, oldName, newName },
-			updatedReferences: [],
-			errors: conflictResult.conflicts.map((c) => ({
+		// Enrich each conflict with a duplicate-similarity verdict. When the
+		// target name already exists as a declaration in the source file, compare
+		// it against the declaration being renamed so the user learns whether the
+		// existing one is essentially a duplicate. The conflict blocks unless
+		// --force.
+		const conflicts = conflictResult.conflicts.map((c) => {
+			let detail = "";
+			if (normalizePath(c.file) === normalizePath(sourceAst.fileName)) {
+				detail = describeComparison(
+					compareDeclarations(sourceAst, oldName, sourceAst, c.name)
+				);
+			}
+			const location = c.line ? ` at ${c.line}:${c.column}` : "";
+			return {
 				file: c.file,
-				message: `"${c.name}" already exists${c.line ? ` at ${c.line}:${c.column}` : ""} — rename would cause a conflict`,
-			})),
-		};
+				message: `"${c.name}" already exists${location}${detail} — rename would cause a conflict`,
+			};
+		});
+
+		if (force) {
+			for (const c of conflicts) {
+				logger.warn(`⚠️  Proceeding past conflict (--force): ${c.message}`);
+			}
+		} else {
+			return {
+				success: false,
+				renamedSymbol: { file: filePath, oldName, newName },
+				updatedReferences: [],
+				errors: conflicts.map((c) => ({
+					...c,
+					message: `${c.message}. Re-run with --force to proceed.`,
+				})),
+			};
+		}
 	}
 
 	// Rename in source file

@@ -251,42 +251,39 @@ DON'T: Duplicate unresolvable-import scanning across command files. Call `collec
 
 ## Dirty Worktree Guard
 
-All four mutating commands (`move`, `rename`, `alias`, `extract-common`) refuse to write files when the git working tree has uncommitted changes (staged, unstaged, or untracked). This prevents accidental data loss by ensuring refactoring happens on a clean commit boundary.
-
-- **`--force`** overrides the guard and allows mutation on a dirty worktree.
-- **`--dry-run`** bypasses the guard automatically (dry runs don't write files).
-- Non-git directories are silently allowed (no guard applies).
-- The guard is implemented in `src/core/git.ts` (`ensureCleanWorktree()`) and called at the top of each mutating command before any file I/O.
+The four mutating commands (`move`, `rename`, `alias`, `extract-common`) refuse to write when the git tree has uncommitted changes (staged/unstaged/untracked), keeping refactors on a clean commit boundary. `--force` overrides; `--dry-run` bypasses (no writes); non-git dirs are allowed. Implemented in `src/core/git.ts` (`ensureCleanWorktree()`), called before any file I/O.
 
 DON'T: Add a new mutating command without calling `ensureCleanWorktree()` before writes.
 
 ## Conflict Detection
 
-All four mutating commands (`move`, `rename`, `alias`, `extract-common`) perform conflict detection before applying changes. The read-only commands (`find`, `discover`, `workspace`, `analyze`) have no write operations and need no conflict guards.
+The four mutating commands (`move`, `rename`, `alias`, `extract-common`) perform conflict detection before applying changes; read-only commands (`find`, `discover`, `workspace`, `analyze`) need none.
 
 ### Rename Conflict Detection (`src/commands/rename.ts`)
 
-Before renaming an export, `renameSymbol()` checks:
-1. **Source file export conflict**: Does `newName` already exist as an export in the source file? Uses `findExport(sourceAst, newName)`.
-2. **Importer binding conflict**: For each file importing the old symbol without an alias (`import { oldName }`), does that file already declare a local binding named `newName`? Uses `hasLocalBinding()`.
+`renameSymbol()` checks: **export conflict** — `newName` already an export in the source file (`findExport`); **importer binding conflict** — a file importing `oldName` unaliased already declares a local `newName` (`hasLocalBinding()`).
 
 ### Move Conflict Detection (`src/commands/move.ts`)
 
-Before moving a file, `moveModule()` checks:
-1. **Destination barrel conflict**: If a destination barrel exists, do any of the moved file's export names already exist in the barrel's exports? Parses the barrel with `scanExports()`.
-2. **Importer binding conflict**: For each file importing from the moved module with non-aliased bindings, does that file already declare a local binding with the same name? Uses `hasLocalBinding()`.
+`moveModule()` checks: **destination barrel conflict** — a moved export name already in the destination barrel's exports (`scanExports()`); **importer binding conflict** — an importer with non-aliased bindings already declares the same local name (`hasLocalBinding()`).
 
 ### Alias Conflict Detection (`src/commands/alias.ts`)
 
-Before normalizing an import specifier, `normalizeImports()` checks:
-- **Duplicate specifier with overlapping bindings**: Would the new specifier match an existing import in the same file that already imports a binding with the same local name? Skips the change and warns instead of creating duplicate imports.
-
-Before `--rename-specifier`, `renameImportSpecifiers()` checks:
-- **Duplicate target specifier**: Reports a second target-specifier import in the same file, exits non-zero, and leaves files unchanged.
+`normalizeImports()`: skip + warn when the new specifier would duplicate an existing import sharing a local binding name. `renameImportSpecifiers()` (`--rename-specifier`): reports a second target-specifier import in the same file, exits non-zero, leaves files unchanged.
 
 ### `hasLocalBinding()` Helper
 
-Both `move.ts` and `rename.ts` implement `hasLocalBinding()` — an AST walker that checks if a file already declares a given name via variable/function/class/type/interface/enum declarations or import bindings (excluding the import being changed). When adding new mutating commands, include equivalent conflict detection.
+`move.ts` and `rename.ts` each implement `hasLocalBinding()` — an AST walker checking whether a file already declares a name via variable/function/class/type/interface/enum declarations or import bindings (excluding the import being changed). New mutating commands need equivalent detection.
+
+### Duplicate-Declaration Similarity Guard (`src/core/duplicate-detection.ts`)
+
+When a name conflict hits an existing declaration (`move` into a barrel declaring the same name; `rename` onto a name already declared locally), the conflict message gains a similarity verdict. `compareDeclarations(fileA, nameA, fileB, nameB)` reuses `similar` scoring (`collectFunctions` + `findSimilarGroups`), returning `{ comparable, similarity, isDuplicate }`; `isDuplicate` ≥ `DUPLICATE_DECLARATION_THRESHOLD` (0.85, `high` bucket). `describeComparison()` builds the suffix.
+
+- `move`/`rename` block these by default and require `--force`; under `--force` they `logger.warn("⚠️  Proceeding past conflict (--force)")` per conflict. `moveCommand`/`renameCommand` thread a trailing `force = false` into `moveModule()`/`renameSymbol()`.
+- Only `collectFunctions` kinds score (functions, const arrow/function exprs, type aliases, interfaces with enough tokens); classes/enums/tiny bodies → `comparable: false`.
+- `move` scores only when the destination barrel file itself declares the name; `export … from` re-exports aren't declarations (`scanExports` skips them).
+
+DON'T: Reimplement pairwise scoring in command files — call `compareDeclarations()`. Not yet wired into `extract-common --output` (appends into a possibly-existing file; tracked separately).
 
 DON'T: Add a new mutating command without conflict detection. All commands that write files must check for export name and binding conflicts before applying changes.
 

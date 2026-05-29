@@ -3,6 +3,10 @@ import { logger, printCommandResult } from "../cli-logger.ts";
 import type ts from "../core/ast-utils.ts";
 import { checkAllConflicts } from "../core/conflict-detection.ts";
 import {
+	compareDeclarations,
+	describeComparison,
+} from "../core/duplicate-detection.ts";
+import {
 	isSameDirectoryCaseOnlyRename,
 	safeCaseRename,
 	shouldUseSafeCaseRename,
@@ -126,7 +130,8 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 		project,
 		dryRun,
 		verbose,
-		workspace ?? undefined
+		workspace ?? undefined,
+		force
 	);
 
 	// For cross-package moves, run build scripts to update dist/
@@ -269,7 +274,8 @@ export async function moveModule(
 	project: ProjectConfig,
 	dryRun: boolean,
 	verbose: boolean,
-	workspace?: WorkspaceInfo
+	workspace?: WorkspaceInfo,
+	force = false
 ): Promise<MoveResult> {
 	const errors: MoveError[] = [];
 	const updatedReferences: UpdatedReference[] = [];
@@ -411,16 +417,45 @@ export async function moveModule(
 		});
 
 		if (conflictResult.hasConflict) {
-			return {
-				success: false,
-				movedFile: { from: sourcePath, to: targetPath },
-				updatedReferences: [],
-				errors: conflictResult.conflicts.map((c) => ({
+			// Enrich each conflict with a duplicate-similarity verdict. When the
+			// destination already declares an export with the same name, compare the
+			// two bodies so the user learns whether the existing declaration is
+			// essentially a duplicate of the one being moved (issue: transparent
+			// duplicate detection). The conflict still blocks unless --force.
+			const conflicts = conflictResult.conflicts.map((c) => {
+				let detail = "";
+				if (
+					sourceAst &&
+					targetBarrelAst &&
+					normalizePath(c.file) === normalizePath(targetBarrelAst.fileName)
+				) {
+					detail = describeComparison(
+						compareDeclarations(sourceAst, c.name, targetBarrelAst, c.name)
+					);
+				}
+				const location = c.line ? ` at ${c.line}:${c.column}` : "";
+				return {
 					file: c.file,
-					message: `Conflict: "${c.name}" already exists${c.line ? ` at ${c.line}:${c.column}` : ""}`,
+					message: `Conflict: "${c.name}" already exists${location}${detail}`,
 					recoverable: false,
-				})),
-			};
+				};
+			});
+
+			if (force) {
+				for (const c of conflicts) {
+					logger.warn(`⚠️  Proceeding past conflict (--force): ${c.message}`);
+				}
+			} else {
+				return {
+					success: false,
+					movedFile: { from: sourcePath, to: targetPath },
+					updatedReferences: [],
+					errors: conflicts.map((c) => ({
+						...c,
+						message: `${c.message}. Re-run with --force to proceed.`,
+					})),
+				};
+			}
 		}
 	}
 
