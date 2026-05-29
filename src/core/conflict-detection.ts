@@ -149,21 +149,6 @@ export function findLocalBinding(
 }
 
 /**
- * Check if a file already declares a local binding with the given name.
- * Convenience wrapper around findLocalBinding for boolean checks.
- */
-export function hasLocalBinding(
-	sourceFile: ts.SourceFile,
-	name: string,
-	skipSpecifier: string,
-	skipImportedName?: string
-): boolean {
-	return (
-		findLocalBinding(sourceFile, name, skipSpecifier, skipImportedName) !== null
-	);
-}
-
-/**
  * Check all importing files for binding conflicts that would result
  * from renaming an export or moving a module.
  *
