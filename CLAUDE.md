@@ -619,6 +619,14 @@ Every call to `discoverWorkspace` traverses the directory tree, globs all `packa
 DON'T: Call `discoverWorkspace` in a loop or in a hot path. Call it once per command invocation and pass the result downstream.
 DO: When adding a per-invocation workspace cache, mirror the `graphCache` Map pattern in `graph.ts` — key by absolute directory, store `WorkspaceInfo | null`.
 
+### `graphCache` Invalidation — Test-First, Measure Timeouts (issue #87)
+
+`graphCache` (graph.ts) invalidates only on **file-set** change (`hasSameFileSet` — count + membership), NOT on file-content change. Adding content-staleness detection (#87) is a real open gap, but it is a **hot-path** change: `buildProjectGraphs` builds and re-checks one graph per non-solution tsconfig, and the `unused` command exercises that across many sibling configs. A naive per-file `Bun.file().lastModified` stat in the validity check, or a hash that forces re-validation every call, makes `unused`/`audit` tests blow past the 20s `bun test` timeout — full rebuilds on every invocation.
+
+DO: When changing graph cache invalidation, write the failing content-staleness regression test FIRST (extend `graph.test.ts`), then implement against it.
+DON'T: Iterate cache-invalidation implementations against the full suite. On a timeout, run the single failing test (`bun test src/commands/unused.test.ts -t "<name>"`) to measure the rebuild cost before changing the approach again.
+DON'T: Mark #87 done from a file-set-only change — that is #78's fix, already shipped. Content-staleness requires cheap per-file change detection (mtime cached at build time, compared without re-statting on the hot path) proven not to regress `unused`/`audit` timing.
+
 ### Parallelize Independent File Writes With `mapConcurrent`
 
 Sequential `for...of` loops with `await writeFile(...)` per file serializes all writes. Each file write in `move`, `rename`, and `alias` is independent — no file's content depends on another's write result.
@@ -638,3 +646,14 @@ await mapConcurrent(
 ```
 
 Use `mapConcurrent` (default concurrency=4) from `src/core/concurrency.ts` rather than bare `Promise.all` to avoid exhausting file descriptors on large graphs.
+
+## Commit Flow & Sandbox Constraints (this repo's hook environment)
+
+Commits here are hook-gated in a fixed order. Run the preflight BEFORE the first `git commit`, not reactively after a block:
+
+DO: Invoke the `/commit` skill, then call `TaskList` (sync must be recent), then `git commit`. Both are enforced by hooks; skipping either blocks the commit.
+DON'T: Re-issue an identical `git commit -m "..."` after a block — a retry-guard fires on the repeated command even when each block had a different cause. After the second block, switch form: write the message to a file and `git commit -F <file>`.
+DON'T: Write scratch files (commit messages, query files) to `~/.claude/...` — hidden home-dir paths are write-blocked in this sandbox, including the job tmp dir. Use `/tmp` or a repo-local path instead.
+DON'T: `rm`/`rm -f` scratch files — the delete-safety hook blocks it. Leave `/tmp` files (OS-cleaned) or use `trash <path>`.
+
+This repo is solo trunk-based (single author, trunk-mode enabled). DO commit refactors/fixes directly to `main`; the generic "branch first on default branch" rule does not apply here — follow the project's trunk signal.
