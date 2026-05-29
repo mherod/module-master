@@ -38,7 +38,8 @@
     }
   },
   "files": [
-    "bin",
+    "bin/resect.js",
+    "bin/resect-mcp.js",
     "src",
     "dist",
     "README.md",
