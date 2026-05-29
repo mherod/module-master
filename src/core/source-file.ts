@@ -47,6 +47,20 @@ export function parseSourceFile(filePath: string): ts.SourceFile | null {
 }
 
 /**
+ * Return a node's parent, typed as possibly-undefined.
+ *
+ * `ts.Node.parent` is declared non-nullable, but it is `undefined` at the
+ * SourceFile root and throughout trees parsed without parent pointers. Reading
+ * `.parent` directly hides that runtime nullability, so the linter flags the
+ * defensive guards walkers need (`no-unnecessary-condition`). Routing parent
+ * access through this helper restores the honest `ts.Node | undefined` type:
+ * the guard stays necessary to the compiler and keeps its crash protection.
+ */
+export function parentOf(node: ts.Node | undefined): ts.Node | undefined {
+	return node?.parent;
+}
+
+/**
  * Run a callback with a parsed source file from disk or an existing program.
  *
  * @example

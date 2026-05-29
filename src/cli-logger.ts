@@ -52,7 +52,7 @@ export class CLILogger {
 		dryRun?: boolean;
 		symbol?: string;
 	}): void {
-		const prefix = options.dryRun ? "🔍 Dry run:" : options.symbol || "⚡";
+		const prefix = options.dryRun ? "🔍 Dry run:" : (options.symbol ?? "⚡");
 		this.info(`${prefix} ${options.operation}...`);
 		if (options.target) {
 			this.info(`   Target: ${options.target}`);

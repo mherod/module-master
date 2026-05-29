@@ -290,7 +290,7 @@ function buildReport(options: {
 async function buildGraphSet(
 	tsconfigPath: string
 ): Promise<Awaited<ReturnType<typeof buildProjectGraphs>>> {
-	return await buildProjectGraphs(tsconfigPath);
+	return buildProjectGraphs(tsconfigPath);
 }
 
 export function findTestRelocations(
@@ -396,7 +396,7 @@ export async function applyRelocations(
 				relocation,
 				options.reportDirectory
 			);
-			return await moveModule(
+			return moveModule(
 				source,
 				target,
 				options.project,

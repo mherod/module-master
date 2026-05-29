@@ -126,15 +126,19 @@ const nodeProcess: ProcessRunner = {
 			const child = spawn(cmd, args, { cwd: options?.cwd });
 			let stdout = "";
 			let stderr = "";
-			child.stdout?.on("data", (chunk) => {
+			child.stdout.on("data", (chunk) => {
 				stdout += chunk;
 			});
-			child.stderr?.on("data", (chunk) => {
+			child.stderr.on("data", (chunk) => {
 				stderr += chunk;
 			});
-			child.on("error", () => resolve({ stdout, stderr, exitCode: null }));
-			child.on("close", (code) => resolve({ stdout, stderr, exitCode: code }));
-			if (options?.stdin !== undefined && child.stdin) {
+			child.on("error", () => {
+				resolve({ stdout, stderr, exitCode: null });
+			});
+			child.on("close", (code) => {
+				resolve({ stdout, stderr, exitCode: code });
+			});
+			if (options?.stdin !== undefined) {
 				child.stdin.write(options.stdin);
 				child.stdin.end();
 			}

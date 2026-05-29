@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { scanExports } from "./scanner.ts";
+import { parentOf } from "./source-file.ts";
 
 interface ConflictResult {
 	hasConflict: boolean;
@@ -119,7 +120,7 @@ export function findLocalBinding(
 				return;
 			}
 			// For move: skip imports from the module being changed
-			const importDecl = node.parent?.parent?.parent;
+			const importDecl = parentOf(parentOf(parentOf(node)));
 			if (
 				importDecl &&
 				ts.isImportDeclaration(importDecl) &&
@@ -136,7 +137,7 @@ export function findLocalBinding(
 			return;
 		}
 
-		if (ts.isImportClause(node) && node.name && node.name.text === name) {
+		if (ts.isImportClause(node) && node.name?.text === name) {
 			result = pos(node.name);
 			return;
 		}

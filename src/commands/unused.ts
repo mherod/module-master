@@ -153,7 +153,7 @@ export async function findUnusedExports(
 	// script on tsconfig.scripts.json) is falsely reported dead (#59).
 	const graphs = await buildProjectGraphs(tsconfigPath);
 
-	return await findUnusedExportsFromGraphs(directory, graphs, {
+	return findUnusedExportsFromGraphs(directory, graphs, {
 		ignore: options?.ignore,
 		entrypointGlobs: options?.entrypointGlobs,
 	});
@@ -633,9 +633,13 @@ function resolveExportSymbol(
 				return;
 			}
 		}
-		ts.forEachChild(node, (child) => visit(child, node));
+		ts.forEachChild(node, (child) => {
+			visit(child, node);
+		});
 	};
-	ts.forEachChild(sourceFile, (child) => visit(child, sourceFile));
+	ts.forEachChild(sourceFile, (child) => {
+		visit(child, sourceFile);
+	});
 	return symbol;
 }
 
@@ -666,9 +670,13 @@ function countReferencesBySymbol(
 				count++;
 			}
 		}
-		ts.forEachChild(node, (child) => visit(child, node));
+		ts.forEachChild(node, (child) => {
+			visit(child, node);
+		});
 	};
-	ts.forEachChild(sourceFile, (child) => visit(child, sourceFile));
+	ts.forEachChild(sourceFile, (child) => {
+		visit(child, sourceFile);
+	});
 	return count;
 }
 
@@ -686,9 +694,13 @@ function countReferencesByName(
 		) {
 			count++;
 		}
-		ts.forEachChild(node, (child) => visit(child, node));
+		ts.forEachChild(node, (child) => {
+			visit(child, node);
+		});
 	};
-	ts.forEachChild(sourceFile, (child) => visit(child, sourceFile));
+	ts.forEachChild(sourceFile, (child) => {
+		visit(child, sourceFile);
+	});
 	return count;
 }
 

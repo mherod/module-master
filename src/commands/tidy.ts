@@ -141,7 +141,7 @@ async function buildGraphSet(options: {
 
 	const packageGraphs = await mapConcurrent(
 		workspace.packages.filter((pkg) => pkg.tsconfigPath),
-		async (pkg) => await buildProjectGraphs(pkg.tsconfigPath as string),
+		async (pkg) => buildProjectGraphs(pkg.tsconfigPath as string),
 		{ onError: () => [] as ProjectGraphResult[] }
 	);
 

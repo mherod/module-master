@@ -249,7 +249,7 @@ export async function auditCommand(options: AuditOptions): Promise<void> {
 				eligiblePkgs,
 				async (pkg) => {
 					const pkgProject = loadProject(pkg.tsconfigPath as string);
-					return await buildDependencyGraph(pkgProject);
+					return buildDependencyGraph(pkgProject);
 				},
 				{ onError: () => null }
 			);

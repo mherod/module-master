@@ -44,7 +44,7 @@ export function extractVueScript(source: string): VueSfcScript | null {
 		// Offset: position of content start in original source.
 		// The opening tag closes at the first ">" in the full match string.
 		const openTagLen = match[0].indexOf(">") + 1;
-		const offset = (match.index ?? 0) + openTagLen;
+		const offset = match.index + openTagLen;
 
 		const block: VueSfcScript = { content, lang, isSetup, offset };
 
@@ -52,9 +52,7 @@ export function extractVueScript(source: string): VueSfcScript | null {
 		if (isSetup) {
 			return block;
 		}
-		if (!fallback) {
-			fallback = block;
-		}
+		fallback ??= block;
 	}
 
 	return fallback;

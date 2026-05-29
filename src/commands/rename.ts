@@ -16,6 +16,7 @@ import {
 } from "../core/project.ts";
 import { normalizePath } from "../core/resolver.ts";
 import { getNameNode, hasExportModifier } from "../core/scanner.ts";
+import { parentOf } from "../core/source-file.ts";
 import {
 	applyTextChanges,
 	deduplicateChanges,
@@ -483,7 +484,7 @@ export function renameInSourceFile(
 	// Returns true if this identifier is declaring a new (inner-scope) binding,
 	// rather than referencing the exported symbol.
 	function isDeclaringIdentifier(node: ts.Identifier): boolean {
-		const { parent } = node;
+		const parent = parentOf(node);
 		if (!parent) {
 			return false;
 		}
@@ -526,14 +527,16 @@ export function renameInSourceFile(
 	function visit(node: ts.Node, isShadowed = false) {
 		// Inside a scope where oldName is shadowed — skip all renames, recurse only
 		if (isShadowed) {
-			ts.forEachChild(node, (child) => visit(child, true));
+			ts.forEachChild(node, (child) => {
+				visit(child, true);
+			});
 			return;
 		}
 
 		// Rename in declaration: export class OldName / export function oldName / export const oldName
 		if (hasExportModifier(node)) {
 			const nameNode = getNameNode(node);
-			if (nameNode && nameNode.text === oldName) {
+			if (nameNode?.text === oldName) {
 				const { line } = sourceFile.getLineAndCharacterOfPosition(
 					node.getStart(sourceFile)
 				);
@@ -626,25 +629,27 @@ export function renameInSourceFile(
 				}
 
 				if (symbolAtNode !== renamedSymbol) {
-					ts.forEachChild(node, (child) => visit(child, false));
+					ts.forEachChild(node, (child) => {
+						visit(child, false);
+					});
 					return;
 				}
 			} else {
 				// Heuristic fallback (best-effort without binder)
+				const parent = parentOf(node);
 				// Skip if this is a property access (obj.oldName)
 				if (
-					node.parent &&
-					ts.isPropertyAccessExpression(node.parent) &&
-					node.parent.name === node
+					parent &&
+					ts.isPropertyAccessExpression(parent) &&
+					parent.name === node
 				) {
 					// This is accessing a property, not our symbol
 					return;
 				}
 				// Skip import/export specifiers (handled separately)
 				if (
-					node.parent &&
-					(ts.isImportSpecifier(node.parent) ||
-						ts.isExportSpecifier(node.parent))
+					parent &&
+					(ts.isImportSpecifier(parent) || ts.isExportSpecifier(parent))
 				) {
 					return;
 				}
@@ -672,7 +677,9 @@ export function renameInSourceFile(
 
 		// Propagate shadow into function scopes whose parameters introduce a new binding for oldName
 		const childIsShadowed = nodeIntroducesShadow(node);
-		ts.forEachChild(node, (child) => visit(child, childIsShadowed));
+		ts.forEachChild(node, (child) => {
+			visit(child, childIsShadowed);
+		});
 	}
 
 	visit(sourceFile);

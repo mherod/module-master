@@ -125,7 +125,7 @@ async function findGitRoot(dir: string): Promise<string | null> {
 		return null;
 	}
 	const root = result.stdout.trim();
-	return root ? await realpath(root) : null;
+	return root ? realpath(root) : null;
 }
 
 async function twoStepMove(

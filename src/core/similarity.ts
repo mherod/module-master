@@ -158,7 +158,6 @@ export function collectFunctions(
 				const init = decl.initializer;
 				if (
 					(ts.isArrowFunction(init) || ts.isFunctionExpression(init)) &&
-					init.body &&
 					ts.isBlock(init.body)
 				) {
 					const bodyText = init.body.getText(sourceFile);
@@ -189,7 +188,7 @@ export function collectFunctions(
 			}
 		}
 		// type Foo = ... or export type Foo = ...
-		else if (ts.isTypeAliasDeclaration(stmt) && stmt.name) {
+		else if (ts.isTypeAliasDeclaration(stmt)) {
 			const bodyText = stmt.type.getText(sourceFile);
 			const normalized = normalizeBody(bodyText);
 			const tokens = tokenize(normalized);
@@ -215,7 +214,7 @@ export function collectFunctions(
 			}
 		}
 		// interface Foo { ... } or export interface Foo extends Bar { ... }
-		else if (ts.isInterfaceDeclaration(stmt) && stmt.name) {
+		else if (ts.isInterfaceDeclaration(stmt)) {
 			// Body spans from heritage clauses (if any) through the closing brace
 			const heritageClauses = stmt.heritageClauses;
 			const bodyStart =
@@ -241,11 +240,7 @@ export function collectFunctions(
 				// Extract member property names and type reference names
 				const memberNames: string[] = [];
 				for (const member of stmt.members) {
-					if (
-						ts.isPropertySignature(member) &&
-						member.name &&
-						ts.isIdentifier(member.name)
-					) {
+					if (ts.isPropertySignature(member) && ts.isIdentifier(member.name)) {
 						memberNames.push(member.name.text);
 					}
 					// Capture type references used in member types (e.g. SimilarityGroup[])
@@ -582,17 +577,22 @@ export function findSimilarGroups(
  * tsconfig.json. Returns `dir` itself if none is found (graceful fallback).
  */
 function findProjectRoot(dir: string): string {
-	let current = path.resolve(dir);
-	while (true) {
+	const start = path.resolve(dir);
+	let current = start;
+	let parent = path.dirname(current);
+	// Walk up until the filesystem root (where dirname(current) === current).
+	while (parent !== current) {
 		if (ts.sys.fileExists(path.join(current, "tsconfig.json"))) {
 			return current;
 		}
-		const parent = path.dirname(current);
-		if (parent === current) {
-			return path.resolve(dir);
-		}
 		current = parent;
+		parent = path.dirname(current);
 	}
+	// Check the root itself, then fall back to the original directory.
+	if (ts.sys.fileExists(path.join(current, "tsconfig.json"))) {
+		return current;
+	}
+	return start;
 }
 
 /**
@@ -643,7 +643,7 @@ export async function scanProjectFunctions(
 		(f) => TS_JS_VUE_EXTENSIONS.test(f) && f.startsWith(absoluteDir)
 	);
 
-	return await collectFunctionsFromFiles(allFiles);
+	return collectFunctionsFromFiles(allFiles);
 }
 
 /**

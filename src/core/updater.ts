@@ -313,41 +313,49 @@ function createSplit(
 	newSpecifier: string,
 	kind: "import" | "export"
 ): ImportSplitChange | null {
-	let nodePosition: { start: number; end: number } | null = null;
+	// Return-based search so the nullable result flows through a function return
+	// type. (Mutating a captured `let` from the visitor confuses control-flow
+	// analysis into treating the post-walk value as always-assigned.)
+	const findPosition = (): { start: number; end: number } | null => {
+		let found: { start: number; end: number } | null = null;
 
-	function visit(node: ts.Node) {
-		if (nodePosition) {
-			return;
-		}
+		function visit(node: ts.Node) {
+			if (found) {
+				return;
+			}
 
-		let specifierText: string | null = null;
-		if (kind === "import") {
-			if (
-				ts.isImportDeclaration(node) &&
+			let specifierText: string | null = null;
+			if (kind === "import") {
+				if (
+					ts.isImportDeclaration(node) &&
+					ts.isStringLiteral(node.moduleSpecifier)
+				) {
+					specifierText = node.moduleSpecifier.text;
+				}
+			} else if (
+				ts.isExportDeclaration(node) &&
+				node.moduleSpecifier &&
 				ts.isStringLiteral(node.moduleSpecifier)
 			) {
 				specifierText = node.moduleSpecifier.text;
 			}
-		} else if (
-			ts.isExportDeclaration(node) &&
-			node.moduleSpecifier &&
-			ts.isStringLiteral(node.moduleSpecifier)
-		) {
-			specifierText = node.moduleSpecifier.text;
-		}
 
-		if (specifierText === ref.specifier) {
-			const start = node.getStart(sourceFile);
-			const { line } = sourceFile.getLineAndCharacterOfPosition(start);
-			if (line + 1 === ref.line) {
-				nodePosition = { start, end: node.getEnd() };
+			if (specifierText === ref.specifier) {
+				const start = node.getStart(sourceFile);
+				const { line } = sourceFile.getLineAndCharacterOfPosition(start);
+				if (line + 1 === ref.line) {
+					found = { start, end: node.getEnd() };
+				}
 			}
+
+			ts.forEachChild(node, visit);
 		}
 
-		ts.forEachChild(node, visit);
-	}
+		visit(sourceFile);
+		return found;
+	};
 
-	visit(sourceFile);
+	const nodePosition = findPosition();
 
 	if (!nodePosition) {
 		return null;

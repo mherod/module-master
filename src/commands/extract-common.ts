@@ -14,6 +14,7 @@ import type { SimilarityDiscoveryOptions } from "../core/similarity.ts";
 import { analyzeSimilarity } from "../core/similarity.ts";
 import {
 	createSourceFileFromText,
+	parentOf,
 	withSourceFile,
 } from "../core/source-file.ts";
 import { applyTextChanges, type TextChange } from "../core/text-changes.ts";
@@ -220,7 +221,7 @@ function getModuleScopeBindings(sourceFile: ts.SourceFile): Set<string> {
 			bindings.add(stmt.name.text);
 		} else if (ts.isClassDeclaration(stmt) && stmt.name) {
 			bindings.add(stmt.name.text);
-		} else if (ts.isEnumDeclaration(stmt) && stmt.name) {
+		} else if (ts.isEnumDeclaration(stmt)) {
 			bindings.add(stmt.name.text);
 		}
 	}
@@ -236,7 +237,7 @@ function collectUsedIdentifiers(node: ts.Node): Set<string> {
 	const refs = new Set<string>();
 	function visit(n: ts.Node): void {
 		if (ts.isIdentifier(n)) {
-			const parent = n.parent;
+			const parent = parentOf(n);
 			// Skip property access names: the `foo` in `obj.foo`
 			if (
 				parent &&
@@ -1022,9 +1023,6 @@ export async function runExtractCommon(
 	}
 
 	for (const plan of plans) {
-		if (!plan) {
-			continue;
-		}
 		if (absOutput) {
 			totalRemoved += [plan.canonical, ...plan.duplicates].length;
 		} else {
@@ -1134,7 +1132,7 @@ export async function extractCommonCommand(
 			process.stdout.write(`${JSON.stringify(empty, null, 2)}\n`);
 		} else {
 			logger.info(
-				result.groups.length === 0 && result.totalGroups === 0
+				result.groups.length === 0
 					? "✅ No similar function groups found at this threshold."
 					: "No extractable groups found (functions could not be located in AST)."
 			);

@@ -810,16 +810,13 @@ function calculatePreferredSpecifier(
 		return aliasSpecifier ?? relativeSpecifier;
 	}
 
-	if (prefer === "shortest") {
-		if (!aliasSpecifier) {
-			return relativeSpecifier;
-		}
-		return relativeSpecifier.length <= aliasSpecifier.length
-			? relativeSpecifier
-			: aliasSpecifier;
+	// prefer is narrowed to "shortest" here (relative/alias handled above).
+	if (!aliasSpecifier) {
+		return relativeSpecifier;
 	}
-
-	return null;
+	return relativeSpecifier.length <= aliasSpecifier.length
+		? relativeSpecifier
+		: aliasSpecifier;
 }
 
 function printResults(

@@ -408,7 +408,7 @@ function getCandidateFiles(
 		if (directory && !isWithinPath(directory, file)) {
 			return false;
 		}
-		return options.includeTests || !isTestFile(file);
+		return (options.includeTests ?? false) || !isTestFile(file);
 	});
 	return [...new Set(files)].sort();
 }
@@ -461,7 +461,7 @@ function findMajority(files: FileNamingInfo[]): Majority | null {
 		count: counts.get(casing) ?? 0,
 	})).sort((a, b) => b.count - a.count || a.casing.localeCompare(b.casing));
 	const [top, second] = ranked;
-	if (!(top && top.count > 0) || (second && top.count === second.count)) {
+	if (!(top && top.count > 0) || top.count === second?.count) {
 		return null;
 	}
 	return {
@@ -575,7 +575,7 @@ async function buildGraphSet(options: {
 
 	const packageGraphs = await mapConcurrent(
 		workspace.packages.filter((pkg) => pkg.tsconfigPath),
-		async (pkg) => await buildProjectGraphs(pkg.tsconfigPath as string),
+		async (pkg) => buildProjectGraphs(pkg.tsconfigPath as string),
 		{ onError: () => [] as ProjectGraphResult[] }
 	);
 	return dedupeTsconfigResults([...baseGraphs, ...packageGraphs.flat()]);

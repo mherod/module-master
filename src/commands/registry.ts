@@ -518,8 +518,8 @@ Examples:
 				logger.error("Error: --bucket must be 'exact', 'high', or 'medium'");
 				process.exit(1);
 			}
-			const formatArg = values.format as "compact" | undefined;
-			if (formatArg && formatArg !== "compact") {
+			const formatArg = values.format;
+			if (formatArg !== undefined && formatArg !== "compact") {
 				logger.error("Error: --format must be 'compact'");
 				process.exit(1);
 			}
