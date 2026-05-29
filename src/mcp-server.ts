@@ -388,6 +388,7 @@ async function tidyTool(
 			| "case-renames"
 			| "layout-relocations"
 		>;
+		aliasPrefer?: "alias" | "relative" | "shortest";
 		maxChanges?: number;
 		fanOutThreshold?: number;
 		fanInThreshold?: number;
@@ -435,6 +436,7 @@ async function tidyTool(
 			workspace: options.workspace,
 			fix: true,
 			fixCategories: options.fixCategories,
+			aliasPrefer: options.aliasPrefer,
 			force: options.force,
 			maxChanges: options.maxChanges,
 			fanOutThreshold: options.fanOutThreshold,
@@ -955,6 +957,12 @@ server.registerTool(
 				.describe(
 					"Fix categories to apply. Omit for safe defaults: dead-exports and alias-normalisation"
 				),
+			aliasPrefer: z
+				.enum(["alias", "relative", "shortest"])
+				.optional()
+				.describe(
+					"Strategy for the alias-normalisation fix category. Required to apply it; omitting it skips alias-normalisation."
+				),
 			maxChanges: z
 				.number()
 				.int()
@@ -984,6 +992,7 @@ server.registerTool(
 		dryRun,
 		force,
 		fixCategories,
+		aliasPrefer,
 		maxChanges,
 		fanOutThreshold,
 		fanInThreshold,
@@ -998,6 +1007,7 @@ server.registerTool(
 				dryRun,
 				force,
 				fixCategories,
+				aliasPrefer,
 				maxChanges,
 				fanOutThreshold,
 				fanInThreshold,
