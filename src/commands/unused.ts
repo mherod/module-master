@@ -85,6 +85,12 @@ export interface OrphanFile {
 	exportNames: string[];
 	externalImporterCount: number;
 	noExternalUsage: true;
+	/**
+	 * True when the file imports nothing from other project files — only from
+	 * external packages or not at all. Self-contained orphans are likely
+	 * convention entrypoints dispatched by filename rather than genuinely dead.
+	 */
+	selfContained: boolean;
 }
 
 export interface UnusedReport {
@@ -331,11 +337,25 @@ export function computeOrphanFiles(
 			continue;
 		}
 
+		// An orphan is self-contained when it imports nothing from other project
+		// files — all its imports are external packages or unresolved. Such files
+		// are likely convention entrypoints dispatched by filename rather than
+		// genuinely dead modules (which typically import from the project).
+		const normalizedFile = normalizePath(file);
+		const fileRefs = graph.imports.get(normalizedFile) ?? [];
+		const selfContained = fileRefs.every((ref) => {
+			const resolved = normalizePath(ref.resolvedPath);
+			return (
+				!resolved || resolved === normalizedFile || !graph.imports.has(resolved)
+			);
+		});
+
 		orphanFiles.push({
 			file,
 			exportNames: exports.map((exp) => exp.name),
 			externalImporterCount,
 			noExternalUsage: true,
+			selfContained,
 		});
 	}
 
@@ -711,6 +731,17 @@ export async function unusedCommand(options: UnusedOptions): Promise<void> {
 		for (const orphan of report.orphanFiles) {
 			const rel = path.relative(absoluteDir, orphan.file);
 			logger.info(`  ${rel} — ${orphan.exportNames.length} export(s)`);
+		}
+		const selfContainedCount = report.orphanFiles.filter(
+			(o) => o.selfContained
+		).length;
+		if (selfContainedCount > 0 && !entrypointGlobs) {
+			logger.info(
+				`\n💡 ${selfContainedCount} orphan file(s) import nothing from the project ` +
+					"— likely convention entrypoints dispatched by filename rather than " +
+					"genuinely dead code. Use --entrypoint-globs to exclude them, e.g. " +
+					'--entrypoint-globs="hooks/**".'
+			);
 		}
 		logger.empty();
 	}

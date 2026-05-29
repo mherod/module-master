@@ -499,6 +499,41 @@ describe("unused command", () => {
 		await cleanup(dir);
 	});
 
+	test("orphan files carry selfContained from the import graph", async () => {
+		const dir = await makeFixture("self-contained", {
+			// Imports nothing from the project → self-contained (entrypoint-like)
+			"hooks/entry.ts": "export function runHook() {\n  return 1;\n}",
+			// Imported by dead.ts, so not an orphan itself
+			"util.ts": "export function shared() {\n  return 1;\n}",
+			// Orphan, but imports a project file → NOT self-contained (likely dead)
+			"dead.ts":
+				'import { shared } from "./util";\nexport function deadThing() {\n  return shared();\n}',
+		});
+
+		const proc = Bun.spawn([...CLI, "unused", dir, "--json"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+		const orphanByBase = new Map<string, { selfContained: boolean }>(
+			report.orphanFiles.map((f: { file: string; selfContained: boolean }) => [
+				path.relative(dir, f.file),
+				f,
+			])
+		);
+		// Entrypoint-like orphan: imports nothing from the project
+		expect(
+			orphanByBase.get(path.join("hooks", "entry.ts"))?.selfContained
+		).toBe(true);
+		// Genuinely dead orphan: imports a project file
+		expect(orphanByBase.get("dead.ts")?.selfContained).toBe(false);
+
+		await cleanup(dir);
+	});
+
 	test("export-all-as marks all exports as used", async () => {
 		const dir = await makeFixture("export-all-as", {
 			"math.ts":

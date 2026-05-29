@@ -33,6 +33,13 @@ All notable user-facing changes to this project are documented here.
   the report candidates but still contribute to the usage graph, so genuinely
   dead files are still flagged. Example:
   `resect unused src --entrypoint-globs="hooks/**"`. Closes #91.
+- **`unused` self-contained orphan hint**: each `orphanFiles` entry now carries
+  a graph-derived `selfContained` flag (true when the file imports nothing from
+  other project files — the signal of a convention entrypoint dispatched by
+  filename rather than genuinely dead code). The CLI and MCP `unused` output
+  surface a `--entrypoint-globs` suggestion when self-contained orphans are
+  present, steering toward verification instead of deletion. The signal is
+  computed from the import graph, not filename heuristics.
 - **`unused` orphan-file detection**: `resect unused <dir>` now reports
   `orphanFiles` for exported files with no external importers, excluding
   package entrypoints declared through `package.json` `main`, `module`, or

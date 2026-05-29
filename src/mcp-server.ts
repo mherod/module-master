@@ -289,13 +289,25 @@ async function auditTool(
 
 async function unusedTool(
 	directory: string,
-	options: { project?: string; ignore?: string }
+	options: {
+		project?: string;
+		ignore?: string;
+		entrypointGlobs?: string | string[];
+	}
 ): Promise<CallToolResult> {
 	const absoluteDir = path.resolve(directory);
 	const report = await findUnusedExports(directory, {
 		project: options.project,
 		ignore: options.ignore,
+		entrypointGlobs: options.entrypointGlobs,
 	});
+	const selfContainedOrphans = report.orphanFiles.filter(
+		(o) => o.selfContained
+	);
+	const falsePositiveHint =
+		selfContainedOrphans.length > 0 && !options.entrypointGlobs
+			? `${selfContainedOrphans.length} orphan file(s) import nothing from the project — likely convention entrypoints dispatched by filename. Use entrypoint-globs to exclude them.`
+			: null;
 	return jsonText({
 		schemaVersion: report.schemaVersion,
 		totalExports: report.totalExports,
@@ -313,6 +325,7 @@ async function unusedTool(
 			exportNames: orphan.exportNames,
 			externalImporterCount: orphan.externalImporterCount,
 			noExternalUsage: orphan.noExternalUsage,
+			selfContained: orphan.selfContained,
 		})),
 		unused: report.unused.map((u) => ({
 			name: u.name,
@@ -323,6 +336,7 @@ async function unusedTool(
 			internalUsage: u.internalUsage,
 			internalRefCount: u.internalRefCount,
 		})),
+		...(falsePositiveHint === null ? undefined : { falsePositiveHint }),
 	});
 }
 
