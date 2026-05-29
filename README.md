@@ -360,6 +360,7 @@ resect ships a stdio [Model Context Protocol](https://modelcontextprotocol.io) s
 | `alias` | Normalize import specifiers to `alias`, `relative`, or `shortest` style |
 | `mock-cleanup` | Remove orphan mock factory keys with typecheck rollback |
 | `tidy` | Apply safe grouped tidy fixes with typecheck rollback |
+| `extract-common` | Consolidate duplicate functions into one canonical copy and rewrite callers |
 
 Each mutating tool:
 
@@ -368,7 +369,7 @@ Each mutating tool:
 - When `dryRun: false` and `verify: true` (the default), runs `tsc --noEmit` before AND after and returns the diagnostic delta as `typecheck: { errorsBefore, errorsAfter, newErrors, fixedCount }` — the caller sees exactly which type errors the refactor introduced or fixed.
 - Refuses to mutate a dirty worktree unless `force: true` (returned as a structured error, never as a process exit).
 
-`extract-common` is intentionally still CLI-only — its output shape needs a structured-result rewrite first. Tracked in [#60](https://github.com/mherod/resect/issues/60).
+`extract-common` defaults to `dryRun: true` like the other mutating tools and returns the extraction plan (canonical copy, removed duplicates, modified files, and the typecheck delta when applied). It skips any group whose consolidation would create a circular import.
 
 ### Setup
 

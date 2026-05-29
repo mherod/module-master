@@ -22,9 +22,9 @@
  *  - Mutating tools use `isWorktreeDirty` (not `ensureCleanWorktree`, which
  *    calls `process.exit`). A dirty worktree becomes a structured error
  *    unless `force: true` is set.
- *  - `extract-common` is intentionally not exposed yet — its output shape and
- *    interactive ordering need a structured-result rewrite first. Tracked in
- *    issue #60.
+ *  - `extract-common` is exposed via `runExtractCommon` with the same
+ *    `dryRun: true` default and structured-result contract as the other
+ *    mutating tools (#60).
  */
 
 import path from "node:path";
