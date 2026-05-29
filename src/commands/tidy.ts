@@ -84,6 +84,7 @@ interface TidyApplyResult {
 interface PlannedTidyChange {
 	category: TidyFixCategory;
 	file: string;
+	/** Display label: export name (dead-exports) or "old → new" specifier (alias-normalisation). */
 	exportName: string;
 	changes: TextChange[];
 }
@@ -535,16 +536,10 @@ function planDeadExportChangesForFile(options: {
 	return planned;
 }
 
-async function planTidyFixes(
+async function planDeadExportChanges(
 	report: TidyReport,
-	options: TidyOptions,
 	reportDirectory: string
 ): Promise<PlannedTidyChange[]> {
-	const categories = new Set(selectedFixCategories(options));
-	if (!categories.has("dead-exports")) {
-		return [];
-	}
-
 	const byFile = new Map<string, TidyUnusedFinding[]>();
 	for (const finding of report.findings.unused) {
 		if (!finding.internalUsage || finding.exportKind !== "named") {
@@ -570,6 +565,78 @@ async function planTidyFixes(
 	);
 
 	return plannedByFile.flat();
+}
+
+async function planAliasNormalisationChanges(
+	prefer: "alias" | "relative" | "shortest",
+	target: string,
+	project: ProjectConfig
+): Promise<PlannedTidyChange[]> {
+	const { normalizeImports } = await import("./alias.ts");
+	const { specifierEditsToTextChanges } = await import("../core/updater.ts");
+
+	const result = normalizeImports(target, prefer, project);
+	const byFile = new Map<string, typeof result.changes>();
+	for (const change of result.changes) {
+		const fileChanges = byFile.get(change.file) ?? [];
+		fileChanges.push(change);
+		byFile.set(change.file, fileChanges);
+	}
+
+	const plannedByFile = await mapConcurrent(
+		Array.from(byFile.entries()),
+		async ([file, fileChanges]) => {
+			const content = await Bun.file(file).text();
+			const sourceFile = createSourceFileFromText(file, content);
+			return specifierEditsToTextChanges(
+				sourceFile,
+				fileChanges
+			).map<PlannedTidyChange>((pair) => ({
+				category: "alias-normalisation",
+				file,
+				exportName: `${pair.edit.oldSpecifier} → ${pair.edit.newSpecifier}`,
+				changes: [pair.change],
+			}));
+		},
+		{ concurrency: FIX_WRITE_CONCURRENCY }
+	);
+
+	return plannedByFile.flat();
+}
+
+async function planTidyFixes(
+	report: TidyReport,
+	options: TidyOptions,
+	reportDirectory: string,
+	project: ProjectConfig
+): Promise<PlannedTidyChange[]> {
+	const categories = new Set(selectedFixCategories(options));
+	const planned: PlannedTidyChange[] = [];
+
+	if (categories.has("dead-exports")) {
+		planned.push(...(await planDeadExportChanges(report, reportDirectory)));
+	}
+
+	if (categories.has("alias-normalisation")) {
+		if (options.aliasPrefer) {
+			const target = options.scope
+				? path.resolve(options.scope)
+				: reportDirectory;
+			planned.push(
+				...(await planAliasNormalisationChanges(
+					options.aliasPrefer,
+					target,
+					project
+				))
+			);
+		} else {
+			logger.warn(
+				"tidy --fix: alias-normalisation skipped — pass --alias-prefer=<alias|relative|shortest> to enable import rewriting."
+			);
+		}
+	}
+
+	return planned;
 }
 
 function typecheckDelta(options: {
@@ -623,7 +690,10 @@ async function applyPlannedTidyFixes(
 			return changes.map<TidyAppliedFix>((change) => ({
 				category: change.category,
 				file: toRelativePath(reportDirectory, change.file),
-				mutationKind: "de-export",
+				mutationKind:
+					change.category === "alias-normalisation"
+						? "alias-normalise"
+						: "de-export",
 				target: change.exportName,
 				wasRolledBack: false,
 			}));
@@ -672,7 +742,12 @@ export async function applyTidyFixes(
 		);
 	}
 
-	const planned = await planTidyFixes(report, options, context.reportDirectory);
+	const planned = await planTidyFixes(
+		report,
+		options,
+		context.reportDirectory,
+		context.project
+	);
 	if (planned.length > maxChanges) {
 		return {
 			report,

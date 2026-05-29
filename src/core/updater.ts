@@ -419,6 +419,46 @@ function findExportDeclarationRange(
 /**
  * Find the exact location of a module specifier in the source
  */
+/**
+ * Convert semantic specifier edits ({ oldSpecifier, newSpecifier, line }) into
+ * precise text changes by locating each import specifier in the parsed source
+ * file. Returns { edit, change } pairs so callers keep the source edit aligned
+ * with the produced TextChange. Shared by the `alias` command's applyChanges
+ * and `tidy --fix`'s alias-normalisation planner so both derive positions the
+ * same way (avoids duplicating the location loop).
+ */
+export function specifierEditsToTextChanges<
+	T extends { oldSpecifier: string; newSpecifier: string; line: number },
+>(
+	sourceFile: ts.SourceFile,
+	edits: readonly T[]
+): { edit: T; change: TextChange }[] {
+	const pairs: { edit: T; change: TextChange }[] = [];
+	for (const edit of edits) {
+		const ref: ModuleReference = {
+			sourceFile: sourceFile.fileName,
+			specifier: edit.oldSpecifier,
+			resolvedPath: "",
+			type: "import",
+			line: edit.line,
+			column: 0,
+			isTypeOnly: false,
+		};
+		const location = findSpecifierLocation(sourceFile, ref);
+		if (location) {
+			pairs.push({
+				edit,
+				change: {
+					start: location.start,
+					end: location.end,
+					newText: edit.newSpecifier,
+				},
+			});
+		}
+	}
+	return pairs;
+}
+
 export function findSpecifierLocation(
 	sourceFile: ts.SourceFile,
 	ref: ModuleReference

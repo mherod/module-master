@@ -471,4 +471,133 @@ export function usedInternal() {
 
 		await cleanup(dir);
 	});
+
+	test("--fix=alias-normalisation rewrites specifiers per --alias-prefer", async () => {
+		const dir = await makeGitFixture("alias-normalise", {
+			"tsconfig.json": JSON.stringify({
+				compilerOptions: {
+					strict: true,
+					baseUrl: ".",
+					paths: { "@/*": ["src/*"] },
+				},
+			}),
+			"src/a.ts": "export const a = 1;\n",
+			"src/b.ts":
+				'import { a } from "./a";\n\nexport function useA() {\n\treturn a;\n}\n',
+		});
+
+		const proc = Bun.spawn(
+			[
+				...CLI,
+				"tidy",
+				path.join(dir, "src"),
+				"--experimental",
+				"--fix=alias-normalisation",
+				"--alias-prefer=alias",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" }
+		);
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+		expect(report.applied).toContainEqual(
+			expect.objectContaining({
+				category: "alias-normalisation",
+				file: "b.ts",
+				mutationKind: "alias-normalise",
+				wasRolledBack: false,
+			})
+		);
+		expect(report.typecheckDelta).toEqual(
+			expect.objectContaining({ verificationIncomplete: false })
+		);
+		const content = await readFile(path.join(dir, "src/b.ts"), "utf8");
+		expect(content).toContain('from "@/a"');
+		expect(content).not.toContain('from "./a"');
+
+		await cleanup(dir);
+	});
+
+	test("--fix leaves imports untouched when --alias-prefer is absent", async () => {
+		const dir = await makeGitFixture("alias-no-prefer", {
+			"tsconfig.json": JSON.stringify({
+				compilerOptions: {
+					strict: true,
+					baseUrl: ".",
+					paths: { "@/*": ["src/*"] },
+				},
+			}),
+			"src/a.ts": "export const a = 1;\n",
+			"src/b.ts":
+				'import { a } from "./a";\n\nexport function useA() {\n\treturn a;\n}\n',
+		});
+		const file = path.join(dir, "src/b.ts");
+		const before = await readFile(file, "utf8");
+
+		const proc = Bun.spawn(
+			[
+				...CLI,
+				"tidy",
+				path.join(dir, "src"),
+				"--experimental",
+				"--fix=alias-normalisation",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" }
+		);
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+		expect(
+			report.applied.some(
+				(fix: { category: string }) => fix.category === "alias-normalisation"
+			)
+		).toBe(false);
+		expect(await readFile(file, "utf8")).toBe(before);
+
+		await cleanup(dir);
+	});
+
+	test("--max-changes counts alias-normalisation changes and aborts", async () => {
+		const dir = await makeGitFixture("alias-max-changes", {
+			"tsconfig.json": JSON.stringify({
+				compilerOptions: {
+					strict: true,
+					baseUrl: ".",
+					paths: { "@/*": ["src/*"] },
+				},
+			}),
+			"src/a.ts": "export const a = 1;\n",
+			"src/b.ts":
+				'import { a } from "./a";\n\nexport function useAinB() {\n\treturn a;\n}\n',
+			"src/c.ts":
+				'import { a } from "./a";\n\nexport function useAinC() {\n\treturn a + 1;\n}\n',
+		});
+		const fileB = path.join(dir, "src/b.ts");
+		const before = await readFile(fileB, "utf8");
+
+		const proc = Bun.spawn(
+			[
+				...CLI,
+				"tidy",
+				path.join(dir, "src"),
+				"--experimental",
+				"--fix=alias-normalisation",
+				"--alias-prefer=alias",
+				"--max-changes=1",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" }
+		);
+		const stderr = await new Response(proc.stderr).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(1);
+		expect(stderr).toContain("exceeds --max-changes");
+		expect(await readFile(fileB, "utf8")).toBe(before);
+
+		await cleanup(dir);
+	});
 });

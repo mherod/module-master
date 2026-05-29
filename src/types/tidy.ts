@@ -13,6 +13,7 @@ export interface TidyOptions {
 	out?: string;
 	fix?: boolean;
 	fixCategories?: TidyFixCategory[];
+	aliasPrefer?: "alias" | "relative" | "shortest";
 	force?: boolean;
 	maxChanges?: number;
 	fanOutThreshold?: number;
@@ -31,7 +32,7 @@ export type TidyFixCategory =
 export interface TidyAppliedFix {
 	category: TidyFixCategory;
 	file: string;
-	mutationKind: "de-export";
+	mutationKind: "de-export" | "alias-normalise";
 	target: string;
 	wasRolledBack: boolean;
 }

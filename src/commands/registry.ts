@@ -25,6 +25,7 @@ export interface CliValues {
 	project?: string;
 	type?: string;
 	prefer?: string;
+	"alias-prefer"?: string;
 	"rename-specifier"?: string[];
 	force?: boolean;
 	"no-verify"?: boolean;
@@ -883,6 +884,7 @@ Options:
   --workspace            Scan across all workspace packages where supported
   --fix                  Apply safe fixes (dead-exports, alias-normalisation)
   --fix=<categories>     Apply comma-separated tidy fix categories
+  --alias-prefer=<s>     Alias-normalisation strategy: alias, relative, or shortest
   --max-changes          Abort --fix when planned changes exceed this limit (default: 50)
   --force                Allow --fix when the git worktree is dirty
   --verbose              Show extra operational messages
@@ -892,6 +894,7 @@ Examples:
   ${name} tidy src --experimental --json
   ${name} tidy src --experimental --fix
   ${name} tidy src --experimental --fix=dead-exports
+  ${name} tidy src --experimental --fix=alias-normalisation --alias-prefer=relative
   ${name} tidy src --experimental --scope src/core
   ${name} tidy src --experimental --out tidy-report.json --json
 `,
@@ -916,6 +919,20 @@ Examples:
 					logger.error("Error: --max-changes must be a positive integer");
 					process.exit(1);
 				}
+				const aliasPrefer = values["alias-prefer"] as
+					| "alias"
+					| "relative"
+					| "shortest"
+					| undefined;
+				if (
+					aliasPrefer &&
+					!["alias", "relative", "shortest"].includes(aliasPrefer)
+				) {
+					logger.error(
+						"Error: --alias-prefer must be 'alias', 'relative', or 'shortest'"
+					);
+					process.exit(1);
+				}
 				await tidyCommand({
 					directory,
 					project: values.project,
@@ -927,6 +944,7 @@ Examples:
 					out: values.out,
 					fix: values.fix,
 					fixCategories,
+					aliasPrefer,
 					force: values.force,
 					maxChanges,
 					fanOutThreshold: values["fan-out-threshold"]

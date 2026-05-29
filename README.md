@@ -287,6 +287,7 @@ resect tidy src --experimental
 resect tidy src --experimental --json
 resect tidy src --experimental --fix
 resect tidy src --experimental --fix=dead-exports
+resect tidy src --experimental --fix=alias-normalisation --alias-prefer=relative
 resect tidy src --experimental --scope src/core
 resect tidy src --experimental --json --out tidy-report.json
 ```

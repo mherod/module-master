@@ -39,6 +39,13 @@ All notable user-facing changes to this project are documented here.
   export same-named symbols with structurally different type signatures.
   `--json` emits a structured report. `--ignore` excludes files from the
   candidate set. The MCP `organise` tool is read-only. Closes #80.
+- **`tidy --fix` alias-normalisation**: the `alias-normalisation` safe category
+  is now wired into `tidy --fix`. Pass
+  `--alias-prefer=<alias|relative|shortest>` to rewrite import specifiers to the
+  chosen strategy as part of the tidy fix batch — same dirty-worktree guard,
+  `--max-changes` ceiling, single closing `tsc --noEmit` gate, and rollback as
+  `dead-exports`. Without `--alias-prefer` the category is skipped, so bare
+  `tidy --fix` never imposes a project-wide import style by default. Closes #89.
 - **`naming` command**: `resect naming <dir>` audits per-directory
   filename casing conventions and reports outliers with suggested
   names, primary export kind, sibling majority, and confidence. `--fix`

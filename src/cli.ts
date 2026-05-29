@@ -24,6 +24,7 @@ const { values, positionals } = parseArgs({
 		project: { type: "string", short: "p" },
 		type: { type: "string", short: "t" },
 		prefer: { type: "string" },
+		"alias-prefer": { type: "string" },
 		"rename-specifier": { type: "string", multiple: true },
 		force: { type: "boolean" },
 		"no-verify": { type: "boolean" },

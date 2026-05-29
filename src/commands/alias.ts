@@ -518,10 +518,11 @@ export async function applyChanges(changes: AliasChange[]): Promise<void> {
 	const { createSourceFileFromText: createSf } = await import(
 		"../core/source-file.ts"
 	);
-	const { findSpecifierLocation: findLoc } = await import("../core/updater.ts");
+	const { specifierEditsToTextChanges: toTextChanges } = await import(
+		"../core/updater.ts"
+	);
 	const { applyTextChanges: applyEdits, deduplicateChanges: dedup } =
 		await import("../core/text-changes.ts");
-	type TC = import("../core/text-changes.ts").TextChange;
 
 	const rt = getRuntime();
 	await mapConcurrent(
@@ -536,28 +537,9 @@ export async function applyChanges(changes: AliasChange[]): Promise<void> {
 
 			// Parse the file to find precise specifier locations via AST
 			const sourceFile = createSf(filePath, content);
-			const textChanges: TC[] = [];
-
-			for (const change of fileChanges) {
-				// Build a minimal ModuleReference to locate the specifier
-				const ref: ModuleReference = {
-					sourceFile: filePath,
-					specifier: change.oldSpecifier,
-					resolvedPath: "",
-					type: "import",
-					line: change.line,
-					column: 0,
-					isTypeOnly: false,
-				};
-				const location = findLoc(sourceFile, ref);
-				if (location) {
-					textChanges.push({
-						start: location.start,
-						end: location.end,
-						newText: change.newSpecifier,
-					});
-				}
-			}
+			const textChanges = toTextChanges(sourceFile, fileChanges).map(
+				(pair) => pair.change
+			);
 
 			if (textChanges.length > 0) {
 				const unique = dedup(textChanges);
