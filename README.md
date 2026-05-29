@@ -6,7 +6,9 @@ Built on the TypeScript Compiler API for AST-level precision. Understands your b
 
 ## Why resect?
 
-Refactoring in monorepos is painful. Move a utility from your app to a shared package and you'll spend the next hour:
+**Stop wasting tokens.** resect was born from a simple idea: static analysis tools should be more capable than LLMs for structural changes, and vastly more efficient. The proper way forward for AI-assisted coding isn't to burn context window on read/write loops while a model tries to guess import paths. It's to have the model orchestrate a battle-tested static tool to do the heavy lifting deterministically.
+
+Refactoring in monorepos is painful for humans, too. Move a utility from your app to a shared package and you'll spend the next hour:
 - Hunting down every import that needs updating
 - Figuring out which barrel files need new exports
 - Rebuilding packages in the right order
