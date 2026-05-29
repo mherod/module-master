@@ -2,6 +2,7 @@ import path from "node:path";
 import { logger } from "../cli-logger.ts";
 import { getRuntime } from "../runtime/index.ts";
 import { EXPORT_STATEMENT_PATTERN, removeExtension } from "./constants.ts";
+import { readPackageJson } from "./package-json.ts";
 
 export interface WorkspacePackage {
 	/** Package name from package.json */
@@ -319,20 +320,6 @@ export function findBuildScript(pkg: WorkspacePackage): string | null {
 	}
 
 	return null;
-}
-
-/**
- * Read and parse a package.json file
- */
-async function readPackageJson(
-	filePath: string
-): Promise<Record<string, unknown> | null> {
-	try {
-		const content = await getRuntime().fs.readFile(filePath);
-		return JSON.parse(content);
-	} catch {
-		return null;
-	}
 }
 
 /**

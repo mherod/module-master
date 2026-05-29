@@ -9,6 +9,7 @@ import {
 	mergeDependencyGraphs,
 	withGraphSourceFile,
 } from "../core/graph.ts";
+import { readPackageJson } from "../core/package-json.ts";
 import { resolveTsConfig } from "../core/project.ts";
 import { normalizePath } from "../core/resolver.ts";
 import { scanExports } from "../core/scanner.ts";
@@ -344,7 +345,8 @@ async function collectPackageEntrypointFiles(
 
 	const entrypointFiles = new Set<string>();
 	for (const packageJsonPath of packageJsonPaths) {
-		const packageJson = await readPackageJson(packageJsonPath);
+		const packageJson =
+			await readPackageJson<PackageJsonEntrypoints>(packageJsonPath);
 		if (!packageJson) {
 			continue;
 		}
@@ -380,17 +382,6 @@ async function findNearestPackageJson(
 	}
 
 	return null;
-}
-
-async function readPackageJson(
-	filePath: string
-): Promise<PackageJsonEntrypoints | null> {
-	try {
-		const raw = await getRuntime().fs.readFile(filePath);
-		return JSON.parse(raw) as PackageJsonEntrypoints;
-	} catch {
-		return null;
-	}
 }
 
 async function detectSourceDir(
