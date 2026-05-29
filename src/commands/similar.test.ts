@@ -156,6 +156,24 @@ export function unique(x: number): number {
 		await cleanup(dir);
 	});
 
+	test("--format with an unsupported value exits with error", async () => {
+		const dir = await makeFixture("bad-format", {
+			"a.ts": DUPLICATE_A,
+			"b.ts": DUPLICATE_B,
+		});
+
+		const proc = Bun.spawn(
+			[...CLI, "similar", dir, "--format=bogus", "--threshold=0.7"],
+			{ stdout: "pipe", stderr: "pipe" }
+		);
+		const stderr = await new Response(proc.stderr).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(1);
+		expect(stderr).toContain("--format must be 'compact'");
+
+		await cleanup(dir);
+	});
+
 	test("--max-groups limits output", async () => {
 		const dir = await makeFixture("maxgroups", {
 			"a.ts": DUPLICATE_A,
