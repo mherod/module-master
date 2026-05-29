@@ -684,6 +684,91 @@ describe("countInternalReferences", () => {
 		});
 		expect(count).toBe(0);
 	});
+
+	test("name-based fallback counts a same-named shadowing local (biased to used)", () => {
+		// Without a checker the walk matches by text, so a local that shadows the
+		// export name is counted as usage — the intentional safe bias that the
+		// checker path (exercised end-to-end below) corrects. See #92.
+		const sf = parse(
+			[
+				"export function deadFn() {",
+				"  return 1;",
+				"}",
+				"export function user() {",
+				"  const deadFn = 2;",
+				"  return deadFn;",
+				"}",
+			].join("\n")
+		);
+		const count = countInternalReferences(sf, {
+			name: "deadFn",
+			type: "named",
+			isType: false,
+			line: 1,
+		});
+		expect(count).toBe(1);
+	});
+});
+
+describe("unused command — checker-based internal references (#92)", () => {
+	test("a same-named shadowing local does not count as internal usage", async () => {
+		// `deadFn` is exported, imported by no other file, and its only same-file
+		// mention is a LOCAL of the same name inside `shadowUser`. The name-based
+		// walk would count that local and report `deadFn` as a de-export candidate;
+		// the checker path resolves it to the local symbol and correctly classifies
+		// `deadFn` as dead (internalUsage: false). `liveHelper` is genuinely
+		// referenced same-file, proving the checker path still counts real usage.
+		const dir = await makeFixture("checker-shadow", {
+			"utils.ts": [
+				"export function deadFn() {",
+				"  return 42;",
+				"}",
+				"export function shadowUser() {",
+				"  const deadFn = 1;",
+				"  return deadFn;",
+				"}",
+				"export function liveHelper() {",
+				"  return 7;",
+				"}",
+				"export function realUser() {",
+				"  return liveHelper();",
+				"}",
+			].join("\n"),
+			"main.ts":
+				'import { shadowUser, realUser } from "./utils";\nconsole.log(shadowUser(), realUser());',
+		});
+
+		const proc = Bun.spawn([...CLI, "unused", dir, "--json"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+
+		interface Entry {
+			name: string;
+			internalUsage: boolean;
+			internalRefCount: number;
+		}
+		const find = (name: string): Entry | undefined =>
+			report.unused.find((u: Entry) => u.name === name);
+
+		// Only referenced via a shadowing local → genuinely dead, not de-export.
+		const dead = find("deadFn");
+		expect(dead).toBeDefined();
+		expect(dead?.internalUsage).toBe(false);
+		expect(dead?.internalRefCount).toBe(0);
+
+		// Genuinely referenced within its own file → de-export candidate retained.
+		const live = find("liveHelper");
+		expect(live).toBeDefined();
+		expect(live?.internalUsage).toBe(true);
+		expect(live?.internalRefCount).toBeGreaterThanOrEqual(1);
+
+		await cleanup(dir);
+	});
 });
 
 describe("unused command — cross-tsconfig and ignore scope (#59)", () => {

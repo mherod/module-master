@@ -117,15 +117,22 @@ export async function analyze(
 	// .vue files cannot be parsed via createProgram — use the Vue-aware parseSourceFile instead.
 	// For non-vue files, fall back to parseSourceFile if the program can't resolve the file
 	// (e.g., file is outside the tsconfig scope).
-	const sourceFile = filePath.endsWith(".vue")
-		? (parseSourceFile(filePath) ?? undefined)
-		: (createProgram(project, [filePath]).getSourceFile(filePath) ??
-			parseSourceFile(filePath) ??
-			undefined);
+	const program = filePath.endsWith(".vue")
+		? null
+		: createProgram(project, [filePath]);
+	const programSourceFile = program?.getSourceFile(filePath) ?? null;
+	const sourceFile =
+		programSourceFile ?? parseSourceFile(filePath) ?? undefined;
 
 	if (!sourceFile) {
 		throw new Error(`Could not parse file: ${filePath}`);
 	}
+
+	// Only resolve same-file references by symbol identity when the source file
+	// genuinely came from the program; the parseSourceFile fallback is unbound.
+	const internalRefChecker = programSourceFile
+		? program?.getTypeChecker()
+		: undefined;
 
 	const imports = scanModuleReferences(sourceFile, project);
 	const exports = scanExports(sourceFile);
@@ -168,7 +175,11 @@ export async function analyze(
 	const unusedExports = exports
 		.filter((exp) => !isExportUsed(exp, filePath, fileImporters, graph))
 		.map((exp) => {
-			const internalRefCount = countInternalReferences(sourceFile, exp);
+			const internalRefCount = countInternalReferences(
+				sourceFile,
+				exp,
+				internalRefChecker
+			);
 			return {
 				...exp,
 				internalUsage: internalRefCount > 0,

@@ -111,6 +111,18 @@ All notable user-facing changes to this project are documented here.
   tsconfig set rebuilds when a brand-new tsconfig is added mid-session
   (#88).
 
+### Improvements
+
+- **`unused`/`analyze` internal-usage accuracy**: same-file reference counting
+  (`internalUsage`/`internalRefCount`, the de-export-vs-delete signal) now
+  resolves references by **type-checker symbol identity** when a `ts.Program` is
+  available, instead of matching identifiers by name text. A local that shadows
+  an export's name no longer inflates the count, so a genuinely dead export is
+  reported as a delete candidate (`internalUsage: false`) rather than a
+  de-export candidate. The name-based walk is retained as a fallback for
+  checker-less callers (standalone source files, `.vue`, out-of-scope files),
+  and `unused`/`audit` stay within the test timeout (#92).
+
 ## [1.7.0] — 2026-05-28
 
 ### New Features

@@ -15,21 +15,26 @@ import { discoverProject, toProjectConfig } from "./tsconfig-discovery.ts";
  * graph's program(s). Tries `graph.program` first, then any program in
  * `graph.programs` (covers workspace-merged graphs), then returns
  * `fallback` if no program owns the file. Zero disk I/O.
+ *
+ * The callback also receives the `ts.Program` that owns the source file, so
+ * callers needing a type checker (e.g. symbol-identity reference counting in
+ * `unused`) resolve it from the correct program. Callbacks that only use the
+ * source file can ignore the second argument.
  */
 export function withGraphSourceFile<T>(
 	graph: Pick<DependencyGraph, "program" | "programs">,
 	filePath: string,
-	callback: (sourceFile: ts.SourceFile) => T,
+	callback: (sourceFile: ts.SourceFile, program: ts.Program) => T,
 	fallback: T
 ): T {
 	const primary = graph.program?.getSourceFile(filePath);
-	if (primary) {
-		return callback(primary);
+	if (primary && graph.program) {
+		return callback(primary, graph.program);
 	}
 	for (const p of graph.programs ?? []) {
 		const sf = p.getSourceFile(filePath);
 		if (sf) {
-			return callback(sf);
+			return callback(sf, p);
 		}
 	}
 	return fallback;

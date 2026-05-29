@@ -236,7 +236,10 @@ export async function findUnusedExportsFromGraphs(
 
 		// Scan exports and count internal references from the same parsed
 		// source file, so the cross-file and same-file checks share one parse.
-		const collect = (sourceFile: ts.SourceFile): void => {
+		const collect = (
+			sourceFile: ts.SourceFile,
+			checker?: ts.TypeChecker
+		): void => {
 			const exports = scanExports(sourceFile);
 			totalExports += exports.length;
 			exportedFiles.set(normalizePath(file), exports);
@@ -245,7 +248,11 @@ export async function findUnusedExportsFromGraphs(
 				if (isExportUsed(exp, file, fileImporters, graph)) {
 					continue;
 				}
-				const internalRefCount = countInternalReferences(sourceFile, exp);
+				const internalRefCount = countInternalReferences(
+					sourceFile,
+					exp,
+					checker
+				);
 				unused.push({
 					file,
 					name: exp.name,
@@ -258,11 +265,15 @@ export async function findUnusedExportsFromGraphs(
 			}
 		};
 
+		// Prefer the graph's already-parsed source file and resolve same-file
+		// references by symbol identity via its program's checker. Falls back to a
+		// fresh disk parse (no checker → name-based count) when the graph's
+		// program(s) do not own the file.
 		const didCollect = withGraphSourceFile(
 			graph,
 			file,
-			(sourceFile) => {
-				collect(sourceFile);
+			(sourceFile, program) => {
+				collect(sourceFile, program.getTypeChecker());
 				return true;
 			},
 			false
@@ -552,6 +563,135 @@ function addExtensionCandidates(
 	}
 }
 
+// Position guards shared by the name-based and checker-based reference
+// counters. Parent is tracked explicitly through the walk rather than read from
+// `node.parent`: source files obtained from a ts.Program are not bound until the
+// type checker runs, so their parent pointers may be undefined.
+
+// The declaration name introduces the symbol; it is not a reference to it.
+const isDeclarationName = (node: ts.Identifier, parent: ts.Node): boolean =>
+	(ts.isFunctionDeclaration(parent) && parent.name === node) ||
+	(ts.isClassDeclaration(parent) && parent.name === node) ||
+	(ts.isInterfaceDeclaration(parent) && parent.name === node) ||
+	(ts.isTypeAliasDeclaration(parent) && parent.name === node) ||
+	(ts.isEnumDeclaration(parent) && parent.name === node) ||
+	(ts.isVariableDeclaration(parent) && parent.name === node) ||
+	(ts.isParameter(parent) && parent.name === node) ||
+	(ts.isBindingElement(parent) && parent.name === node);
+
+// Property/member positions (`obj.name`, `{ name: ... }`, `Ns.name`) are not
+// references to the exported symbol.
+const isMemberName = (node: ts.Identifier, parent: ts.Node): boolean =>
+	(ts.isPropertyAccessExpression(parent) && parent.name === node) ||
+	(ts.isQualifiedName(parent) && parent.right === node) ||
+	(ts.isPropertyAssignment(parent) && parent.name === node) ||
+	(ts.isPropertySignature(parent) && parent.name === node) ||
+	(ts.isMethodDeclaration(parent) && parent.name === node) ||
+	(ts.isMethodSignature(parent) && parent.name === node);
+
+// The export statement itself (`export { name }`, `export default name`) is not
+// internal usage — it is the redundant re-export we are flagging.
+const isExportName = (node: ts.Identifier, parent: ts.Node): boolean =>
+	ts.isExportSpecifier(parent) ||
+	(ts.isExportAssignment(parent) && parent.expression === node);
+
+// An identifier in a position that could be a genuine reference to the export
+// (i.e. not a declaration name, member name, or export-statement name).
+const isCountablePosition = (node: ts.Identifier, parent: ts.Node): boolean =>
+	!(
+		isDeclarationName(node, parent) ||
+		isMemberName(node, parent) ||
+		isExportName(node, parent)
+	);
+
+/**
+ * Resolve the symbol declared by `exp` within `sourceFile` by locating its
+ * declaration-name identifier and asking the checker. A declaration name always
+ * resolves to the concrete local symbol (never an import/export alias), so the
+ * result compares directly by identity against same-file references. Returns
+ * `undefined` when no declaration name matches (e.g. `export default <expr>`),
+ * signalling the caller to fall back to the name-based walk.
+ */
+function resolveExportSymbol(
+	sourceFile: ts.SourceFile,
+	exp: ExportInfo,
+	checker: ts.TypeChecker
+): ts.Symbol | undefined {
+	let symbol: ts.Symbol | undefined;
+	const visit = (node: ts.Node, parent: ts.Node): void => {
+		if (symbol) {
+			return;
+		}
+		if (
+			ts.isIdentifier(node) &&
+			node.text === exp.name &&
+			isDeclarationName(node, parent)
+		) {
+			const resolved = checker.getSymbolAtLocation(node);
+			if (resolved) {
+				symbol = resolved;
+				return;
+			}
+		}
+		ts.forEachChild(node, (child) => visit(child, node));
+	};
+	ts.forEachChild(sourceFile, (child) => visit(child, sourceFile));
+	return symbol;
+}
+
+/**
+ * Checker-based reference walk: matches same-file identifiers by resolved symbol
+ * identity, so a same-named local that shadows the export is NOT counted.
+ * Returns `null` when the export's symbol cannot be resolved.
+ */
+function countReferencesBySymbol(
+	sourceFile: ts.SourceFile,
+	exp: ExportInfo,
+	checker: ts.TypeChecker
+): number | null {
+	const target = resolveExportSymbol(sourceFile, exp, checker);
+	if (!target) {
+		return null;
+	}
+
+	let count = 0;
+	const visit = (node: ts.Node, parent: ts.Node): void => {
+		if (
+			ts.isIdentifier(node) &&
+			node.text === exp.name &&
+			isCountablePosition(node, parent)
+		) {
+			const symbol = checker.getSymbolAtLocation(node);
+			if (symbol && symbol === target) {
+				count++;
+			}
+		}
+		ts.forEachChild(node, (child) => visit(child, node));
+	};
+	ts.forEachChild(sourceFile, (child) => visit(child, sourceFile));
+	return count;
+}
+
+/** Name-based reference walk: matches same-file identifiers by text only. */
+function countReferencesByName(
+	sourceFile: ts.SourceFile,
+	exp: ExportInfo
+): number {
+	let count = 0;
+	const visit = (node: ts.Node, parent: ts.Node): void => {
+		if (
+			ts.isIdentifier(node) &&
+			node.text === exp.name &&
+			isCountablePosition(node, parent)
+		) {
+			count++;
+		}
+		ts.forEachChild(node, (child) => visit(child, node));
+	};
+	ts.forEachChild(sourceFile, (child) => visit(child, sourceFile));
+	return count;
+}
+
 /**
  * Count references to an exported symbol within its own defining file,
  * excluding the declaration itself and the export statements that surface it.
@@ -560,61 +700,25 @@ function addExtensionCandidates(
  * `export` keyword is redundant (a de-export candidate). A zero count means the
  * symbol is referenced by no file at all and is safe to delete.
  *
- * Uses a name-based AST walk rather than the type checker so it stays
- * unit-testable against a standalone `ts.SourceFile`. Ambiguous matches (e.g. a
- * shadowing local of the same name) are counted as usage, which biases toward
- * the safe "verify before deleting" direction.
+ * When a `ts.TypeChecker` is supplied (the `unused`/`audit` graph builds one —
+ * see `graph.program`), references are resolved by **symbol identity**, so a
+ * same-named local that shadows the export is correctly NOT counted. Without a
+ * checker (standalone `ts.SourceFile` callers and unit tests), or when the
+ * symbol cannot be resolved, it falls back to a name-based AST walk that biases
+ * ambiguous matches toward "used" (the safe "verify before deleting" direction).
  */
 export function countInternalReferences(
 	sourceFile: ts.SourceFile,
-	exp: ExportInfo
+	exp: ExportInfo,
+	checker?: ts.TypeChecker
 ): number {
-	let count = 0;
-
-	// Parent is tracked explicitly through the walk rather than read from
-	// `node.parent`: source files obtained from a ts.Program are not bound until
-	// the type checker runs, so their parent pointers may be undefined.
-	const isDeclarationName = (node: ts.Identifier, parent: ts.Node): boolean =>
-		(ts.isFunctionDeclaration(parent) && parent.name === node) ||
-		(ts.isClassDeclaration(parent) && parent.name === node) ||
-		(ts.isInterfaceDeclaration(parent) && parent.name === node) ||
-		(ts.isTypeAliasDeclaration(parent) && parent.name === node) ||
-		(ts.isEnumDeclaration(parent) && parent.name === node) ||
-		(ts.isVariableDeclaration(parent) && parent.name === node) ||
-		(ts.isParameter(parent) && parent.name === node) ||
-		(ts.isBindingElement(parent) && parent.name === node);
-
-	// Property/member positions (`obj.name`, `{ name: ... }`, `Ns.name`) are not
-	// references to the exported symbol.
-	const isMemberName = (node: ts.Identifier, parent: ts.Node): boolean =>
-		(ts.isPropertyAccessExpression(parent) && parent.name === node) ||
-		(ts.isQualifiedName(parent) && parent.right === node) ||
-		(ts.isPropertyAssignment(parent) && parent.name === node) ||
-		(ts.isPropertySignature(parent) && parent.name === node) ||
-		(ts.isMethodDeclaration(parent) && parent.name === node) ||
-		(ts.isMethodSignature(parent) && parent.name === node);
-
-	// The export statement itself (`export { name }`, `export default name`) is
-	// not internal usage — it is the redundant re-export we are flagging.
-	const isExportName = (node: ts.Identifier, parent: ts.Node): boolean =>
-		ts.isExportSpecifier(parent) ||
-		(ts.isExportAssignment(parent) && parent.expression === node);
-
-	const visit = (node: ts.Node, parent: ts.Node): void => {
-		if (
-			ts.isIdentifier(node) &&
-			node.text === exp.name &&
-			!isDeclarationName(node, parent) &&
-			!isMemberName(node, parent) &&
-			!isExportName(node, parent)
-		) {
-			count++;
+	if (checker) {
+		const bySymbol = countReferencesBySymbol(sourceFile, exp, checker);
+		if (bySymbol !== null) {
+			return bySymbol;
 		}
-		ts.forEachChild(node, (child) => visit(child, node));
-	};
-
-	ts.forEachChild(sourceFile, (child) => visit(child, sourceFile));
-	return count;
+	}
+	return countReferencesByName(sourceFile, exp);
 }
 
 /**

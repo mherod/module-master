@@ -330,7 +330,7 @@ bun src/cli.ts unused src --json --ignore="*.test.ts"  # JSON, exclude tests
 
 A hit means "no OTHER file imports this" — a **de-export** signal, NOT a **delete** signal. `countInternalReferences(sourceFile, exp)` counts same-file references (excluding the declaration and export statement); each `UnusedExport` carries `internalUsage` + `internalRefCount`. `internalUsage: false` → referenced nowhere, safe to delete; `true` → only the `export` keyword is redundant. Report exposes aggregate `deadCount`/`internalOnlyCount`; MCP `unused` surfaces all of these.
 
-`countInternalReferences` tracks parent nodes through the walk rather than reading `node.parent` — program source files are unbound until the type checker runs, so `node.parent` is undefined and `parent.kind` throws. Name-based heuristic (no checker), biasing ambiguous matches toward "used".
+`countInternalReferences` resolves references by **symbol identity** with a checker (#92, so a shadowing local isn't counted); else name-based, biased "used". DON'T read `node.parent` while walking — unbound source files leave it undefined; track parent explicitly.
 
 ### Cross-tsconfig usage scope (issue #59)
 
