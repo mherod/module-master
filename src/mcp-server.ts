@@ -43,6 +43,7 @@ import {
 } from "./commands/alias.ts";
 import { analyze } from "./commands/analyze.ts";
 import { buildAuditReport } from "./commands/audit.ts";
+import { analyzeBarrels, barrelReportToJson } from "./commands/barrel.ts";
 import { runExtractCommon } from "./commands/extract-common.ts";
 import { search } from "./commands/find.ts";
 import {
@@ -285,6 +286,21 @@ async function auditTool(
 			file: path.relative(absoluteDir, m.file),
 		})),
 	});
+}
+
+async function barrelTool(
+	directory: string,
+	options: {
+		project?: string;
+		workspace?: boolean;
+	}
+): Promise<CallToolResult> {
+	const { report, baseDir } = await analyzeBarrels({
+		directory,
+		project: options.project,
+		workspace: options.workspace,
+	});
+	return jsonText(barrelReportToJson(report, baseDir));
 }
 
 async function unusedTool(
@@ -788,6 +804,40 @@ server.registerTool(
 				fanInThreshold,
 				exportThreshold,
 			});
+		} catch (error) {
+			return toError(error);
+		}
+	}
+);
+
+server.registerTool(
+	"barrel",
+	{
+		description:
+			'Analyze barrel files (index.ts re-export hubs) and surface problem cases for consumers. The headline finding is sub-path export shadowing (issue #93): files reachable through a barrel that ALSO have a dedicated package `exports` sub-path entry (e.g. `"./cn"`) — consumers should import via the sub-path specifier (`@scope/utils/cn`), NOT the package root barrel, and a cross-package `move` should target that sub-path. Also reports: wildcard re-exports (`export * from`) that obscure a package\'s public surface, barrel chains (barrels re-exporting other barrels), and unused barrels (no importers). Per barrel it returns entry counts by kind (wildcard/named/namespace), distinct source-module count, and consumer count. Workspace-aware (set `workspace:true` to span every package). Read-only.',
+		inputSchema: {
+			directory: z
+				.string()
+				.describe(
+					"Absolute or cwd-relative path to the project directory to scan"
+				),
+			project: z
+				.string()
+				.optional()
+				.describe(
+					"Optional path to the project root or tsconfig.json. Omit to auto-resolve the tsconfig for `directory`"
+				),
+			workspace: z
+				.boolean()
+				.optional()
+				.describe(
+					"Scan barrels across every workspace package, not just the resolved tsconfig"
+				),
+		},
+	},
+	async ({ directory, project, workspace }) => {
+		try {
+			return await barrelTool(directory, { project, workspace });
 		} catch (error) {
 			return toError(error);
 		}

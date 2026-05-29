@@ -3,6 +3,7 @@ import { logger } from "../cli-logger.ts";
 import { aliasCommand } from "./alias.ts";
 import { analyzeCommand } from "./analyze.ts";
 import { auditCommand } from "./audit.ts";
+import { barrelCommand } from "./barrel.ts";
 import { discoverCommand } from "./discover.ts";
 import { extractCommonCommand } from "./extract-common.ts";
 import { findCommand } from "./find.ts";
@@ -1060,6 +1061,55 @@ Examples:
 				ignore: values.ignore,
 				entrypointGlobs: values["entrypoint-globs"],
 			});
+		},
+	},
+
+	{
+		name: "barrel",
+		helpText: `
+Usage: ${name} barrel <directory> [options]
+
+Analyze barrel files (index.ts re-export hubs) and surface problem cases.
+
+Arguments:
+  directory    Path to the project directory to scan
+
+Options:
+  -p, --project   Path to project directory or tsconfig.json
+  --json          Output results as JSON
+  --workspace     Scan across all workspace packages
+
+Findings:
+  Sub-path export shadowing — files reachable through a barrel that ALSO have a
+    dedicated package "exports" sub-path entry; consumers should prefer the
+    sub-path specifier (e.g. @scope/utils/cn), not the package root barrel.
+  Wildcard re-exports — barrels using \`export * from\` that obscure the surface.
+  Barrel chains — barrels that re-export other barrels.
+  Unused barrels — barrel files no other file imports.
+
+Examples:
+  ${name} barrel src
+  ${name} barrel . --json
+  ${name} barrel . --workspace
+`,
+		run: async ([directory], values) => {
+			if (!directory) {
+				logger.error("Error: barrel requires a <directory> argument");
+				logger.error(`Run '${name} barrel --help' for usage`);
+				process.exit(1);
+			}
+			try {
+				await barrelCommand({
+					directory,
+					project: values.project,
+					json: values.json,
+					workspace: values.workspace,
+					verbose: values.verbose,
+				});
+			} catch (error) {
+				logger.error(error instanceof Error ? error.message : String(error));
+				process.exit(1);
+			}
 		},
 	},
 ];

@@ -420,6 +420,74 @@ function findExplicitSubpathExport(
 }
 
 /**
+ * Resolve the package that owns `targetPath` and the file's package-relative
+ * subpaths. `subpath` is the path within the package (extension stripped);
+ * `srcSubpath` additionally strips a leading "src/" so it lines up with how
+ * packages declare their dist-based `exports`. Returns null when no workspace
+ * package owns the file.
+ */
+function resolvePackageSubpath(
+	targetPath: string,
+	workspace: WorkspaceInfo
+): { pkg: WorkspacePackage; subpath: string; srcSubpath: string } | null {
+	const targetPackage = findPackageForPath(targetPath, workspace);
+	if (!targetPackage) {
+		return null;
+	}
+
+	const pkg = workspace.packages.find(
+		(p) => p.name === targetPackage.packageName
+	);
+	if (!pkg) {
+		return null;
+	}
+
+	const relativePath = path.relative(pkg.path, normalizePath(targetPath));
+	const subpath = removeExtension(relativePath);
+	const srcSubpath = subpath.replace(/^src\//, "");
+	return { pkg, subpath, srcSubpath };
+}
+
+export interface SubpathExportMatch {
+	/** Owning package name, e.g. "@scope/utils" */
+	packageName: string;
+	/** Normalized export key, e.g. "cn" */
+	exportKey: string;
+	/** Full import specifier, e.g. "@scope/utils/cn" */
+	specifier: string;
+}
+
+/**
+ * If `targetPath` is covered by a dedicated, non-wildcard `exports` sub-path
+ * entry of its owning package, return that match. This is the signal behind
+ * issue #93: consumers can (and by convention should) import the file via its
+ * dedicated sub-path rather than collapsing through the package root barrel.
+ * Returns null when no workspace package owns the file or it has no dedicated
+ * sub-path entry.
+ */
+export function findSubpathExportForFile(
+	targetPath: string,
+	workspace: WorkspaceInfo
+): SubpathExportMatch | null {
+	const resolved = resolvePackageSubpath(targetPath, workspace);
+	if (!resolved) {
+		return null;
+	}
+	const specifier = findExplicitSubpathExport(
+		resolved.pkg,
+		resolved.srcSubpath
+	);
+	if (!specifier) {
+		return null;
+	}
+	return {
+		packageName: resolved.pkg.name,
+		exportKey: specifier.slice(resolved.pkg.name.length + 1),
+		specifier,
+	};
+}
+
+/**
  * For cross-package moves, determine the best import specifier from the destination package.
  *
  * When addingToBarrel is true, assumes the file will be exported from the package's
@@ -433,25 +501,11 @@ export function findCrossPackageImport(
 	workspace: WorkspaceInfo,
 	addingToBarrel = true
 ): string | null {
-	const normalizedTarget = normalizePath(targetPath);
-	const targetPackage = findPackageForPath(targetPath, workspace);
-
-	if (!targetPackage) {
+	const resolved = resolvePackageSubpath(targetPath, workspace);
+	if (!resolved) {
 		return null;
 	}
-
-	const pkg = workspace.packages.find(
-		(p) => p.name === targetPackage.packageName
-	);
-	if (!pkg) {
-		return null;
-	}
-
-	// Compute the package-relative subpath once. `srcSubpath` strips the leading
-	// "src/" so it lines up with how packages declare their dist-based exports.
-	const relativePath = path.relative(pkg.path, normalizedTarget);
-	const subpath = removeExtension(relativePath);
-	const srcSubpath = subpath.replace(/^src\//, "");
+	const { pkg, subpath, srcSubpath } = resolved;
 
 	// A dedicated sub-path export wins over the root barrel: if the package
 	// explicitly exposes this file (e.g. "./cn"), consumers expect

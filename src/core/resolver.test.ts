@@ -6,6 +6,7 @@ import {
 	findAliasForPath,
 	findCrossPackageImport,
 	findPackageForPath,
+	findSubpathExportForFile,
 	isBareImport,
 	isCrossPackageMove,
 	isRelativeImport,
@@ -545,5 +546,57 @@ describe("findCrossPackageImport", () => {
 			true
 		);
 		expect(result).toBe("@scope/utils");
+	});
+});
+
+// ─── findSubpathExportForFile ───────────────────────────────────────────────
+
+describe("findSubpathExportForFile", () => {
+	test("returns the dedicated sub-path export match (#93)", () => {
+		const workspace = makeWorkspace("/repo", [
+			{
+				name: "@scope/utils",
+				subdir: "packages/utils",
+				srcDir: "src",
+				barrelFiles: ["/repo/packages/utils/src/index.ts"],
+				exports: {
+					".": { import: "./dist/index.mjs" },
+					"./cn": { import: "./dist/cn.mjs" },
+				},
+			},
+		]);
+		const result = findSubpathExportForFile(
+			"/repo/packages/utils/src/cn.ts",
+			workspace
+		);
+		expect(result).toEqual({
+			packageName: "@scope/utils",
+			exportKey: "cn",
+			specifier: "@scope/utils/cn",
+		});
+	});
+
+	test("returns null when the file has no dedicated sub-path export", () => {
+		const workspace = makeWorkspace("/repo", [
+			{
+				name: "@scope/utils",
+				subdir: "packages/utils",
+				srcDir: "src",
+				exports: { ".": { import: "./dist/index.mjs" } },
+			},
+		]);
+		const result = findSubpathExportForFile(
+			"/repo/packages/utils/src/cn.ts",
+			workspace
+		);
+		expect(result).toBeNull();
+	});
+
+	test("returns null when no workspace package owns the file", () => {
+		const workspace = makeWorkspace("/repo", [
+			{ name: "@scope/utils", subdir: "packages/utils" },
+		]);
+		const result = findSubpathExportForFile("/other/cn.ts", workspace);
+		expect(result).toBeNull();
 	});
 });

@@ -289,10 +289,9 @@ DON'T: Add a new mutating command without conflict detection. All commands that 
 `src/commands/audit.ts` analyzes module health metrics:
 
 ```bash
-bun src/cli.ts audit <directory>                        # Scan project for health metrics
-bun src/cli.ts audit . --json                           # JSON output for tooling
-bun src/cli.ts audit . --workspace                      # Scan across workspace packages
-bun src/cli.ts audit src --fan-out-threshold=8           # Custom thresholds
+bun src/cli.ts audit <directory>
+bun src/cli.ts audit . --json --workspace
+bun src/cli.ts audit src --fan-out-threshold=8
 ```
 
 ## Tidy Command
@@ -301,19 +300,19 @@ bun src/cli.ts audit src --fan-out-threshold=8           # Custom thresholds
 
 ### Metrics
 
-- **Fan-out**: distinct modules imported; high values suggest too many concerns.
-- **Fan-in**: distinct importers; high non-utility fan-in suggests a God module.
+- **Fan-out**: distinct modules imported; high = too many concerns.
+- **Fan-in**: distinct importers; high non-utility fan-in = God module.
 - **Instability**: `fanOut / (fanIn + fanOut)`. 0 = stable, 1 = unstable.
-- **Export surface**: exports per file; high counts suggest too much module scope.
-- **Circular dependencies**: DFS cycles over the import graph; cycles indicate missing abstractions or inverted dependencies.
+- **Export surface**: exports per file; high = too much module scope.
+- **Circular dependencies**: DFS cycles over the import graph.
 
 ### Core Functions
 
-- `computeMetrics(graph)` — Computes fan-out, fan-in, instability, and export count for every file in the `DependencyGraph`.
-- `detectCycles(graph)` — Iterative DFS cycle detection with deduplication. Returns minimal cycles.
-- `buildAuditReport(graph, options)` — Combines metrics and cycle detection, filters by configurable thresholds.
+- `computeMetrics(graph)` — fan-out, fan-in, instability, export count per file.
+- `detectCycles(graph)` — iterative DFS cycle detection, deduped, minimal cycles.
+- `buildAuditReport(graph, options)` — combines metrics + cycles, filters by thresholds.
 
-The command is read-only and composes existing `DependencyGraph` infrastructure from `src/core/graph.ts`.
+Read-only; composes `DependencyGraph` from `src/core/graph.ts`.
 
 ## Unused Exports Command
 
@@ -341,6 +340,12 @@ The `ignore` glob suppresses reported CANDIDATES only — ignored files still fe
 DON'T: Add a new import type to the scanner without updating `buildImportedBindingsMap()` in `unused.ts`.
 DON'T: Read `node.parent` when walking a program source file in `unused.ts` — pass the parent down through `ts.forEachChild` instead.
 DON'T: Build the `unused` usage graph from one tsconfig — use `buildProjectGraphs()`.
+
+## Barrel Command
+
+`barrel` (`src/commands/barrel.ts`, read-only) analyzes barrels via `buildProjectGraphs()` + `mergeDependencyGraphs()`. `analyzeBarrels()` is the shared CLI/MCP seam; `buildBarrelReport(scans, context)` is pure (context injects `consumersOf`/`subpathExportOf`). Findings: sub-path export shadowing (#93), wildcard re-exports, barrel chains, unused barrels.
+
+DON'T: Re-implement sub-path-export matching; call `findSubpathExportForFile()` (`resolver.ts`), which shares `resolvePackageSubpath()`/`findExplicitSubpathExport()` with `move`.
 
 ## Workspace Discovery
 

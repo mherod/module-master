@@ -84,6 +84,7 @@ Commands:
   similar <directory>                 Find similar or duplicate functions for consolidation
   extract-common <directory>           Extract duplicate functions into shared modules
   audit <directory>                    Analyze module health: fan-out, fan-in, cycles
+  barrel <directory>                   Analyze barrel files: shadowing, wildcards, chains
   unused <directory>                   Find exports never imported by other files
   mock-cleanup <directory>             Find orphan keys in mock factories
   test-relocation <directory>          Find stranded or misnamed test files

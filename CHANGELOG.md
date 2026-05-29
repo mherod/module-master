@@ -6,6 +6,18 @@ All notable user-facing changes to this project are documented here.
 
 ### New Features
 
+- **`barrel` command**: `resect barrel <dir>` (and the `barrel` MCP tool)
+  analyzes barrel files (index.ts re-export hubs) and surfaces consumer-facing
+  problem cases. Headline finding is **sub-path export shadowing** (issue #93):
+  files reachable through a barrel that ALSO have a dedicated package `exports`
+  sub-path entry (e.g. `"./cn"`) — consumers should import via the sub-path
+  specifier (`@scope/utils/cn`), not the package root barrel, and a
+  cross-package `move` should target that sub-path. Also reports wildcard
+  re-exports (`export * from`) that obscure a package's surface, barrel chains
+  (barrels re-exporting other barrels), and unused barrels (no importers).
+  Workspace-aware via `--workspace`; `--json` for tooling. The #93 detection
+  reuses the same resolver logic as `move` through the new
+  `findSubpathExportForFile()` seam. Read-only.
 - **`tidy --fix=mock-cleanup`**: the first aggressive `tidy --fix` category is
   now wired in. `resect tidy <dir> --experimental --fix=mock-cleanup` removes
   orphan keys from `jest.mock`/`vi.mock`/`vitest.mock`/`mock.module` factories

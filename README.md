@@ -278,6 +278,43 @@ The report groups files by directory, finds the local majority casing (`camelCas
 
 `--fix` renames the flagged files to their suggested names through the move pipeline — case-only renames use the two-step rename, and relative and alias importers are rewritten. It refuses a dirty worktree unless `--force`, runs a single closing `tsc --noEmit` gate, and rolls back every rename on new type errors or incomplete verification. Preview with `--fix --dry-run`. The MCP `naming` tool exposes `fix`/`dryRun`/`force` and defaults `dryRun` to `true`.
 
+### `organise <directory>`
+
+Audit folder organisation and basename collisions (read-only).
+
+```bash
+resect organise src
+resect organise src --json
+resect organise src --ignore="*.generated.ts"
+```
+
+Reports **misplaced files** (a non-test file whose only importers live in a single subdirectory it sits outside of) and **basename collisions** (files sharing a basename that export same-named symbols with structurally different signatures).
+
+### `audit <directory>`
+
+Analyze module health metrics: fan-out, fan-in, instability, large export surfaces, and circular dependencies (read-only).
+
+```bash
+resect audit src
+resect audit . --json
+resect audit . --workspace
+resect audit src --fan-out-threshold=8 --export-threshold=5
+```
+
+Fan-out is the number of distinct modules a file imports; fan-in is the number of distinct files importing it; instability is `fanOut / (fanIn + fanOut)` (0 = stable, 1 = unstable). Tune `--fan-out-threshold`, `--fan-in-threshold`, and `--export-threshold` to widen or narrow what gets flagged.
+
+### `barrel <directory>`
+
+Analyze barrel files (index.ts re-export hubs) and surface consumer-facing problem cases (read-only).
+
+```bash
+resect barrel src
+resect barrel . --json
+resect barrel . --workspace
+```
+
+The headline finding is **sub-path export shadowing**: a file reachable through a barrel that ALSO has a dedicated package `exports` sub-path entry (e.g. `"./cn"`). Consumers should import via the sub-path specifier (`@scope/utils/cn`), not the package root barrel, and a cross-package `move` should target that sub-path rather than collapsing to the root (see [#93](https://github.com/mherod/resect/issues/93)). It also reports **wildcard re-exports** (`export * from`) that obscure a package's public surface, **barrel chains** (barrels re-exporting other barrels), and **unused barrels** (no importers). Per barrel it returns entry counts by kind, distinct source-module count, and consumer count.
+
 ### `tidy <directory>`
 
 Compose structural findings into one tidyup report, with guarded fix mode.
@@ -307,10 +344,12 @@ resect ships a stdio [Model Context Protocol](https://modelcontextprotocol.io) s
 | `discover` | tsconfig files, extends chains, project references, path aliases, file ownership |
 | `workspace` | Monorepo packages, entrypoints, exports maps, barrel files |
 | `audit` | Module health: fan-out, fan-in, instability, large export surfaces, cycles |
+| `barrel` | Barrel-file health: sub-path export shadowing (#93), wildcard re-exports, chains, unused barrels |
 | `unused` | Exports and files no other file imports, flagged as de-export vs delete plus `orphanFiles` |
 | `similar` | Similar/duplicate functions, type aliases, and interfaces |
 | `test-relocation` | Stranded or misnamed tests with suggested colocated moves; dry-run by default |
 | `naming` | Per-directory filename casing outliers with suggested filenames |
+| `organise` | Misplaced files and basename collisions across a source tree |
 
 **Mutating tools** (default to `dryRun: true` — callers preview before applying):
 
