@@ -82,29 +82,11 @@ async function checkWorktree(
 	return { dirty, blocked: dirty && !force };
 }
 
-interface TypecheckDelta {
-	errorsBefore: number;
-	errorsAfter: number;
-	newErrors: string[];
-	fixedCount: number;
-	/**
-	 * True when either the before- or after-change tsc run failed to complete
-	 * (e.g. fatal TS2688 with no per-file diagnostics). When true, the delta
-	 * is not trustworthy — `errorsAfter: 0` does NOT mean the project is clean.
-	 */
-	verificationIncomplete: boolean;
-	/**
-	 * Up to 5 lines of fatal/global tsc output, present only when
-	 * verificationIncomplete is true, so callers see the root cause inline.
-	 */
-	incompleteReason?: string[];
-}
-
 /** Run tsc before/after the mutating op and return the diagnostic delta. */
 async function withTypecheckGuard<T>(
 	project: ProjectConfig,
 	apply: () => Promise<T>
-): Promise<{ result: T; delta: TypecheckDelta }> {
+): Promise<{ result: T; delta: VerificationResult }> {
 	const errorsBefore = await runTypeCheck(project);
 	const result = await apply();
 	const errorsAfter = await runTypeCheck(project);
@@ -115,14 +97,12 @@ async function withTypecheckGuard<T>(
 	return {
 		result,
 		delta: {
-			errorsBefore: errorsBefore.length,
-			errorsAfter: errorsAfter.length,
+			success: !verificationIncomplete && newErrors.length === 0,
+			errorsBefore,
+			errorsAfter,
 			newErrors,
-			fixedCount: fixedErrors.length,
+			fixedErrors,
 			verificationIncomplete,
-			incompleteReason: verificationIncomplete
-				? errorsAfter.slice(0, 5)
-				: undefined,
 		},
 	};
 }
@@ -1343,19 +1323,6 @@ async function renameTool(args: {
 	});
 }
 
-function verificationToDelta(result: VerificationResult): TypecheckDelta {
-	return {
-		errorsBefore: result.errorsBefore.length,
-		errorsAfter: result.errorsAfter.length,
-		newErrors: result.newErrors,
-		fixedCount: result.fixedErrors.length,
-		verificationIncomplete: result.verificationIncomplete,
-		incompleteReason: result.verificationIncomplete
-			? result.errorsAfter.slice(0, 5)
-			: undefined,
-	};
-}
-
 async function aliasTool(args: {
 	target: string;
 	prefer?: "alias" | "relative" | "shortest";
@@ -1388,7 +1355,7 @@ async function aliasTool(args: {
 			? renameImportSpecifiers(absoluteTarget, renames, project)
 			: normalizeImports(absoluteTarget, args.prefer ?? "alias", project);
 
-	let delta: TypecheckDelta | undefined;
+	let delta: VerificationResult | undefined;
 	let rolledBack = false;
 	if (
 		!args.dryRun &&
@@ -1400,7 +1367,7 @@ async function aliasTool(args: {
 				result.changes,
 				project
 			);
-			delta = verificationToDelta(verification);
+			delta = verification;
 			rolledBack = !verification.success;
 		} else {
 			const guarded = args.verify
@@ -1704,7 +1671,7 @@ async function extractCommonTool(args: {
 
 	const shouldVerify = args.verify && !args.dryRun;
 	type Result = Awaited<ReturnType<typeof runExtractCommon>>;
-	const guarded: { result: Result; delta: TypecheckDelta | undefined } =
+	const guarded: { result: Result; delta: VerificationResult | undefined } =
 		shouldVerify
 			? await withTypecheckGuard(project, runExtract)
 			: { result: await runExtract(), delta: undefined };
