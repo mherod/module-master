@@ -387,8 +387,6 @@ async function fileExists(filePath: string): Promise<boolean> {
 
 ## Cross-Package Refactoring
 
-The move command supports cross-package refactoring in monorepos:
-
 ```bash
 bun src/cli.ts move apps/web/src/utils/foo.ts packages/shared/src/foo.ts --dry-run
 ```
@@ -399,12 +397,14 @@ bun src/cli.ts move apps/web/src/utils/foo.ts packages/shared/src/foo.ts --dry-r
 
 ### Import Path Resolution
 
-For cross-package moves, `findCrossPackageImport()` resolves the optimal import path:
-- If file is in package's `src/` directory and being added to barrel → use package name only (e.g., `@scope/pkg`)
-- If package.json exports field matches the subpath → use that export path
-- Fallback: package name + relative subpath
+`findCrossPackageImport()` resolves the import path in priority order:
+1. Dedicated non-wildcard `exports` entry for the file (e.g. `"./cn"`) → `@scope/pkg/cn` (via `findExplicitSubpathExport()`); wins over the root barrel (#93).
+2. File in `src/` added to an existing barrel → package name (`@scope/pkg`).
+3. Wildcard `exports` (`"./*"`) → `@scope/pkg/<subpath>`.
+4. Fallback: package name + relative subpath.
 
-DON'T: Use relative paths like `../../../packages/foo/src/bar` for cross-package imports. Always prefer package imports.
+DON'T: Run the barrel short-circuit before the explicit-`exports` check — reintroduces #93.
+DON'T: Use relative cross-package paths; prefer package imports.
 
 ### Barrel Re-export Handling for Cross-Package Moves
 

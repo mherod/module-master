@@ -40,6 +40,7 @@ function makeWorkspace(
 		subdir: string;
 		srcDir?: string;
 		barrelFiles?: string[];
+		exports?: WorkspacePackage["exports"];
 	}>
 ): WorkspaceInfo {
 	return {
@@ -47,12 +48,13 @@ function makeWorkspace(
 		type: "pnpm",
 		patterns: ["packages/*"],
 		packages: packages.map(
-			({ name, subdir, srcDir, barrelFiles }): WorkspacePackage => ({
+			({ name, subdir, srcDir, barrelFiles, exports }): WorkspacePackage => ({
 				name,
 				path: `${root}/${subdir}`,
 				packageJsonPath: `${root}/${subdir}/package.json`,
 				srcDir,
 				barrelFiles,
+				exports,
 			})
 		),
 	};
@@ -475,5 +477,73 @@ describe("findCrossPackageImport", () => {
 			workspace
 		);
 		expect(result).toBe("@scope/pkg/src/utils");
+	});
+
+	test("prefers a dedicated sub-path export over the root barrel (#93)", () => {
+		const workspace = makeWorkspace("/repo", [
+			{
+				name: "@scope/utils",
+				subdir: "packages/utils",
+				srcDir: "src",
+				barrelFiles: ["/repo/packages/utils/src/index.ts"],
+				exports: {
+					".": {
+						types: "./dist/index.d.ts",
+						import: "./dist/index.mjs",
+						require: "./dist/index.js",
+					},
+					"./cn": {
+						types: "./dist/cn.d.ts",
+						import: "./dist/cn.mjs",
+						require: "./dist/cn.js",
+					},
+				},
+			},
+		]);
+		const result = findCrossPackageImport(
+			"/repo/packages/utils/src/cn.ts",
+			workspace,
+			true
+		);
+		expect(result).toBe("@scope/utils/cn");
+	});
+
+	test("falls back to the root barrel when no dedicated export matches", () => {
+		const workspace = makeWorkspace("/repo", [
+			{
+				name: "@scope/utils",
+				subdir: "packages/utils",
+				srcDir: "src",
+				barrelFiles: ["/repo/packages/utils/src/index.ts"],
+				exports: {
+					".": { import: "./dist/index.mjs" },
+					"./cn": { import: "./dist/cn.mjs" },
+				},
+			},
+		]);
+		const result = findCrossPackageImport(
+			"/repo/packages/utils/src/other.ts",
+			workspace,
+			true
+		);
+		expect(result).toBe("@scope/utils");
+	});
+
+	test("does not let the root '.' export pre-empt the barrel for nested files", () => {
+		const workspace = makeWorkspace("/repo", [
+			{
+				name: "@scope/utils",
+				subdir: "packages/utils",
+				srcDir: "src",
+				barrelFiles: ["/repo/packages/utils/src/index.ts"],
+				exports: { ".": { import: "./dist/index.mjs" } },
+			},
+		]);
+		const result = findCrossPackageImport(
+			"/repo/packages/utils/src/nested/foo.ts",
+			workspace,
+			true
+		);
+		expect(result).toBe("@scope/utils");
 	});
 });

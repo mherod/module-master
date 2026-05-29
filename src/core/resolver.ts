@@ -6,7 +6,7 @@ import {
 	TS_JS_VUE_EXTENSIONS,
 	VUE_EXTENSION,
 } from "./constants.ts";
-import type { WorkspaceInfo } from "./workspace.ts";
+import type { WorkspaceInfo, WorkspacePackage } from "./workspace.ts";
 
 export type ResolveResult =
 	| { kind: "resolved"; path: string }
@@ -385,10 +385,48 @@ export function isCrossPackageMove(
 }
 
 /**
+ * Find an explicit, dedicated `exports` entry (non-root, non-wildcard) whose key
+ * maps to the given src-relative subpath. Returns the sub-path import specifier
+ * (e.g. "@scope/utils/cn") or null when no dedicated entry matches.
+ *
+ * This is what lets a package's explicit sub-path export win over a root-barrel
+ * re-export when both could resolve the moved file (issue #93).
+ */
+function findExplicitSubpathExport(
+	pkg: WorkspacePackage,
+	srcSubpath: string
+): string | null {
+	if (!(pkg.exports && typeof pkg.exports === "object")) {
+		return null;
+	}
+
+	for (const exportKey of Object.keys(pkg.exports)) {
+		// The root entry maps to the barrel; wildcards are handled separately as
+		// a lower-priority fallback. Only dedicated named sub-paths win here.
+		if (exportKey === "." || exportKey.includes("*")) {
+			continue;
+		}
+
+		const normalizedKey = exportKey.replace(/^\.\//, "");
+		if (
+			normalizedKey === srcSubpath ||
+			normalizedKey === `${srcSubpath}/index`
+		) {
+			return `${pkg.name}/${normalizedKey}`;
+		}
+	}
+
+	return null;
+}
+
+/**
  * For cross-package moves, determine the best import specifier from the destination package.
  *
  * When addingToBarrel is true, assumes the file will be exported from the package's
  * main barrel (index.ts), so imports should use just the package name.
+ *
+ * A dedicated sub-path `exports` entry that maps to the moved file takes
+ * precedence over the root barrel, so consumers keep their sub-path convention.
  */
 export function findCrossPackageImport(
 	targetPath: string,
@@ -409,50 +447,51 @@ export function findCrossPackageImport(
 		return null;
 	}
 
+	// Compute the package-relative subpath once. `srcSubpath` strips the leading
+	// "src/" so it lines up with how packages declare their dist-based exports.
+	const relativePath = path.relative(pkg.path, normalizedTarget);
+	const subpath = removeExtension(relativePath);
+	const srcSubpath = subpath.replace(/^src\//, "");
+
+	// A dedicated sub-path export wins over the root barrel: if the package
+	// explicitly exposes this file (e.g. "./cn"), consumers expect
+	// "@scope/utils/cn" rather than collapsing to the package root just because
+	// index.ts re-exports it (issue #93).
+	const explicitExport = findExplicitSubpathExport(pkg, srcSubpath);
+	if (explicitExport) {
+		return explicitExport;
+	}
+
 	// If we're adding to the barrel AND the barrel exists, use the package name.
 	// The export will be added to the barrel, so consumers can import from the package.
 	// Without a barrel file, we must fall through to subpath imports to avoid broken imports.
+	// If it's in the src directory, it will be exported from the barrel.
 	const hasBarrel = pkg.barrelFiles && pkg.barrelFiles.length > 0;
-	if (addingToBarrel && hasBarrel && pkg.srcDir) {
-		const relativePath = path.relative(pkg.path, normalizedTarget);
-		const subpath = removeExtension(relativePath);
-
-		// If it's in the src directory, it will be exported from the barrel
-		if (subpath.startsWith(`${pkg.srcDir}/`)) {
-			return pkg.name;
-		}
+	if (
+		addingToBarrel &&
+		hasBarrel &&
+		pkg.srcDir &&
+		subpath.startsWith(`${pkg.srcDir}/`)
+	) {
+		return pkg.name;
 	}
 
-	// Get relative path within the package
-	const relativePath = path.relative(pkg.path, normalizedTarget);
-	const subpath = removeExtension(relativePath);
-
-	// Check if this file matches a package.json export
+	// Handle wildcard exports (lowest-priority "exports" match): a "./*" entry
+	// maps any sub-path, but only after the explicit and barrel preferences above.
 	if (pkg.exports && typeof pkg.exports === "object") {
 		for (const [exportKey, exportValue] of Object.entries(pkg.exports)) {
-			// Normalize export key
-			const normalizedKey = exportKey.replace(/^\.\//, "").replace(/^\.$/, "");
-
-			// Check if subpath matches an export (accounting for src/ -> dist/ mapping)
-			const srcSubpath = subpath.replace(/^src\//, "");
-			if (
-				normalizedKey === srcSubpath ||
-				normalizedKey === `${srcSubpath}/index`
-			) {
-				return exportKey === "." ? pkg.name : `${pkg.name}/${normalizedKey}`;
+			if (!exportKey.includes("*")) {
+				continue;
 			}
 
-			// Handle wildcard exports
-			if (exportKey.includes("*")) {
-				// Check if the export value maps src to dist
-				const valueStr = typeof exportValue === "string" ? exportValue : null;
-				if (valueStr) {
-					// e.g., "./*": "./dist/*.js" and we have "src/foo" -> try "foo"
-					const srcSubpathNoExt = srcSubpath.replace(/\/index$/, "");
-					const pattern = exportKey.replace("*", "(.+)").replace(/^\.\//, "");
-					if (srcSubpathNoExt.match(new RegExp(`^${pattern}$`))) {
-						return `${pkg.name}/${srcSubpathNoExt}`;
-					}
+			// Check if the export value maps src to dist
+			const valueStr = typeof exportValue === "string" ? exportValue : null;
+			if (valueStr) {
+				// e.g., "./*": "./dist/*.js" and we have "src/foo" -> try "foo"
+				const srcSubpathNoExt = srcSubpath.replace(/\/index$/, "");
+				const pattern = exportKey.replace("*", "(.+)").replace(/^\.\//, "");
+				if (srcSubpathNoExt.match(new RegExp(`^${pattern}$`))) {
+					return `${pkg.name}/${srcSubpathNoExt}`;
 				}
 			}
 		}

@@ -92,6 +92,14 @@ All notable user-facing changes to this project are documented here.
 
 ### Bug Fixes
 
+- **Cross-package `move` prefers a dedicated sub-path export over the root
+  barrel**: when the destination package declared an explicit `exports` entry
+  for the moved file (e.g. `"./cn"`), `move` still collapsed every rewritten
+  importer to the package root (`@scope/utils`) because the barrel
+  short-circuit ran before the `exports` check. `findCrossPackageImport` now
+  matches a dedicated, non-wildcard sub-path `exports` entry first, so
+  consumers keep their `@scope/utils/cn` convention; the root barrel and
+  wildcard (`./*`) entries remain lower-priority fallbacks (#93).
 - **`audit` no longer reports deleted files**: Long-lived MCP `audit`
   runs cached dependency graphs across invocations, so files removed
   between calls kept appearing as ghost entries. The cache is now
