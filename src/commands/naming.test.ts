@@ -108,7 +108,7 @@ describe("naming command", () => {
 			...withFiles(PASCAL_FUNCTION_NAMES, functionFile),
 		});
 
-		const result = await captureOutput(() =>
+		const result = await captureOutput(async () =>
 			namingCommand({ directory: path.join(dir, "src"), json: true })
 		);
 		const report = JSON.parse(result.stdout);
@@ -138,7 +138,7 @@ describe("naming command", () => {
 			"src/group/AccountService.ts": classFile("AccountService"),
 		});
 
-		const result = await captureOutput(() =>
+		const result = await captureOutput(async () =>
 			namingCommand({ directory: path.join(dir, "src"), json: true })
 		);
 		const report = JSON.parse(result.stdout);
@@ -162,7 +162,7 @@ describe("naming command", () => {
 			),
 		});
 
-		const result = await captureOutput(() =>
+		const result = await captureOutput(async () =>
 			namingCommand({ directory: path.join(dir, "src"), json: true })
 		);
 		const report = JSON.parse(result.stdout);
@@ -177,7 +177,7 @@ describe("naming command", () => {
 			...withFiles(PASCAL_FUNCTION_NAMES, functionFile),
 		});
 
-		const result = await captureOutput(() =>
+		const result = await captureOutput(async () =>
 			namingCommand({
 				directory: path.join(dir, "src"),
 				json: true,
@@ -196,7 +196,7 @@ describe("naming command", () => {
 			...withFiles(PASCAL_FUNCTION_NAMES, functionFile),
 		});
 
-		const result = await captureOutput(() =>
+		const result = await captureOutput(async () =>
 			namingCommand({ directory: path.join(dir, "src") })
 		);
 		expect(result.stdout).toContain("Naming Report");
@@ -215,7 +215,7 @@ describe("naming command", () => {
 			...withFiles(CAMEL_NAMES, functionFile),
 		});
 
-		const result = await captureOutput(() =>
+		const result = await captureOutput(async () =>
 			namingCommand({
 				directory: path.join(dir, "src"),
 				fix: true,
@@ -247,7 +247,7 @@ describe("naming command", () => {
 			...withFiles(CAMEL_NAMES, functionFile),
 		});
 
-		const result = await captureOutput(() =>
+		const result = await captureOutput(async () =>
 			namingCommand({ directory: path.join(dir, "src"), fix: true, json: true })
 		);
 		const out = JSON.parse(result.stdout) as {
@@ -273,7 +273,7 @@ describe("naming command", () => {
 			...withFiles(CAMEL_NAMES, functionFile),
 		});
 
-		const result = await captureOutput(() =>
+		const result = await captureOutput(async () =>
 			namingCommand({ directory: path.join(dir, "src"), fix: true, json: true })
 		);
 		const out = JSON.parse(result.stdout) as {

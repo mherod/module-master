@@ -74,7 +74,9 @@ describe("moveModule", () => {
 
 		const source = path.join(srcDir, "Foo.ts");
 		const target = path.join(srcDir, "foo.ts");
-		await captureOutput(() => moveCommand({ source, target, verify: false }));
+		await captureOutput(async () =>
+			moveCommand({ source, target, verify: false })
+		);
 
 		expect(await Bun.file(target).exists()).toBe(true);
 		const renamedEntries = await readdir(srcDir);

@@ -41,20 +41,20 @@ describe("mock-cleanup command", () => {
 		});
 
 		try {
-			const audit = await captureOutput(() =>
+			const audit = await captureOutput(async () =>
 				mockCleanupCommand({ directory: dir, json: true })
 			);
 			const report = JSON.parse(audit.stdout);
 			expect(report.orphans).toHaveLength(1);
 			expect(report.orphans[0].orphanKey).toBe("baz");
 
-			const human = await captureOutput(() =>
+			const human = await captureOutput(async () =>
 				mockCleanupCommand({ directory: dir })
 			);
 			expect(human.stdout).toContain("mod.test.ts:");
 			expect(human.stdout).toContain("baz -> ./mod");
 
-			const fix = await captureOutput(() =>
+			const fix = await captureOutput(async () =>
 				mockCleanupCommand({
 					directory: dir,
 					fix: true,
@@ -88,7 +88,7 @@ describe("mock-cleanup command", () => {
 		});
 
 		try {
-			const audit = await captureOutput(() =>
+			const audit = await captureOutput(async () =>
 				mockCleanupCommand({ directory: dir, json: true })
 			);
 			const report = JSON.parse(audit.stdout);
@@ -97,7 +97,7 @@ describe("mock-cleanup command", () => {
 			expect(report.skipped[0].reason).toBe("spread");
 
 			const before = await Bun.file(path.join(dir, "mod.test.ts")).text();
-			await captureOutput(() =>
+			await captureOutput(async () =>
 				mockCleanupCommand({
 					directory: dir,
 					fix: true,
@@ -125,7 +125,7 @@ describe("mock-cleanup command", () => {
 		});
 
 		try {
-			await captureOutput(() =>
+			await captureOutput(async () =>
 				mockCleanupCommand({
 					directory: dir,
 					fix: true,

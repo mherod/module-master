@@ -116,7 +116,7 @@ const nodeGlob: GlobRunner = {
 };
 
 const nodeProcess: ProcessRunner = {
-	exec(command, options) {
+	async exec(command, options) {
 		return new Promise((resolve) => {
 			const [cmd, ...args] = command;
 			if (!cmd) {

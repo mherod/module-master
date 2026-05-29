@@ -165,7 +165,7 @@ describe("organise: CLI integration", () => {
 			"src/a.ts": "export function a() { return 1; }",
 			"src/b.ts": `import { a } from "./a.ts"; a();`,
 		});
-		const { stdout } = await captureOutput(() =>
+		const { stdout } = await captureOutput(async () =>
 			organiseCommand({ directory: dir })
 		);
 		expect(`${stdout}`).toMatch(/No organisation issues|Scanned|misplaced/i);
@@ -175,7 +175,7 @@ describe("organise: CLI integration", () => {
 		const dir = await makeProject({
 			"src/a.ts": "export function a() { return 1; }",
 		});
-		const { stdout } = await captureOutput(() =>
+		const { stdout } = await captureOutput(async () =>
 			organiseCommand({ directory: dir, json: true })
 		);
 		const parsed = JSON.parse(stdout);

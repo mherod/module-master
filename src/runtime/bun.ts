@@ -59,7 +59,7 @@ const bunProcess: ProcessRunner = {
 			stderr: "pipe",
 		});
 		if (options?.stdin !== undefined && proc.stdin) {
-			proc.stdin.write(options.stdin);
+			await proc.stdin.write(options.stdin);
 			await proc.stdin.end();
 		}
 		const [stdout, stderr] = await Promise.all([

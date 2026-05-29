@@ -32,7 +32,7 @@ describe("test-relocation command", () => {
 				'import { foo } from "../core/cookies/foo";\nexport const result = foo;\n',
 		});
 
-		const result = await captureOutput(() =>
+		const result = await captureOutput(async () =>
 			testRelocationCommand({ directory: path.join(dir, "src"), json: true })
 		);
 		const report = JSON.parse(result.stdout);
@@ -54,7 +54,7 @@ describe("test-relocation command", () => {
 				'import { isJWT } from "../jwt";\nexport const result = isJWT("token");\n',
 		});
 
-		const result = await captureOutput(() =>
+		const result = await captureOutput(async () =>
 			testRelocationCommand({ directory: path.join(dir, "src"), json: true })
 		);
 		const report = JSON.parse(result.stdout);
@@ -75,7 +75,7 @@ describe("test-relocation command", () => {
 				'import { foo } from "../core/cookies/foo";\nimport { isJWT } from "../utils/jwt";\nexport const result = foo + Number(isJWT());\n',
 		});
 
-		const result = await captureOutput(() =>
+		const result = await captureOutput(async () =>
 			testRelocationCommand({ directory: path.join(dir, "src"), json: true })
 		);
 		const report = JSON.parse(result.stdout);
@@ -94,7 +94,7 @@ describe("test-relocation command", () => {
 				'import { foo } from "../core/cookies/foo";\nexport const result = foo;\n',
 		});
 
-		const result = await captureOutput(() =>
+		const result = await captureOutput(async () =>
 			testRelocationCommand({
 				directory: path.join(dir, "src"),
 				json: true,
@@ -117,7 +117,7 @@ describe("test-relocation command", () => {
 				'import { foo } from "../core/cookies/foo";\nexport const result = foo;\n',
 		});
 
-		const result = await captureOutput(() =>
+		const result = await captureOutput(async () =>
 			testRelocationCommand({
 				directory: path.join(dir, "src"),
 				fix: true,
