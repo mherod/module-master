@@ -19,6 +19,7 @@ import { workspaceCommand } from "./workspace.ts";
 export interface CliValues {
 	help?: boolean;
 	ignore?: string;
+	"entrypoint-globs"?: string | string[];
 	version?: boolean;
 	verbose?: boolean;
 	"dry-run"?: boolean;
@@ -1032,12 +1033,17 @@ Options:
   -p, --project    Path to project directory or tsconfig.json
   --json           Output results as JSON
   --verbose        Show detailed output
-  --ignore         Glob pattern to exclude files (e.g. "*.test.ts")
+  --ignore              Glob pattern to exclude files (e.g. "*.test.ts")
+  --entrypoint-globs    Glob pattern(s) for convention entrypoints to exclude from
+                        orphan/dead reporting (e.g. "hooks/**", "scripts/*.ts").
+                        Repeat the flag for multiple patterns.
 
 Examples:
   ${name} unused src
   ${name} unused . --json
   ${name} unused src --ignore="*.test.ts"
+  ${name} unused src --entrypoint-globs="hooks/**"
+  ${name} unused src --entrypoint-globs="hooks/**" --entrypoint-globs="scripts/*.ts"
 `,
 		run: async ([directory], values) => {
 			if (!directory) {
@@ -1052,6 +1058,7 @@ Examples:
 				json: values.json,
 				verbose: values.verbose,
 				ignore: values.ignore,
+				entrypointGlobs: values["entrypoint-globs"],
 			});
 		},
 	},

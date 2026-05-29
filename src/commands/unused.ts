@@ -32,6 +32,35 @@ export interface UnusedOptions extends ReadOnlyCommandOptions {
 	directory: string;
 	json?: boolean;
 	ignore?: string;
+	entrypointGlobs?: string | string[];
+}
+
+function normalizeGlobs(
+	globs: string | string[] | undefined
+): readonly string[] {
+	if (!globs) {
+		return [];
+	}
+	return Array.isArray(globs) ? globs : [globs];
+}
+
+function matchesAnyGlob(file: string, patterns: readonly string[]): boolean {
+	const basename = path.basename(file);
+	// Also build relative-path suffixes so a pattern like "hooks/**" matches
+	// absolute paths like "/project/hooks/dispatch.ts".
+	const segments = file.split(path.sep).filter(Boolean);
+	for (const pattern of patterns) {
+		const glob = new Bun.Glob(pattern);
+		if (glob.match(file) || glob.match(basename)) {
+			return true;
+		}
+		for (let i = 0; i < segments.length - 1; i++) {
+			if (glob.match(segments.slice(i).join(path.sep))) {
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
 export interface UnusedExport {
@@ -88,7 +117,12 @@ export interface ProjectGraphResult {
  */
 export async function findUnusedExports(
 	directory: string,
-	options?: { project?: string; ignore?: string; workspace?: boolean }
+	options?: {
+		project?: string;
+		ignore?: string;
+		workspace?: boolean;
+		entrypointGlobs?: string | string[];
+	}
 ): Promise<UnusedReport> {
 	const absoluteDir = path.resolve(directory);
 
@@ -115,6 +149,7 @@ export async function findUnusedExports(
 
 	return await findUnusedExportsFromGraphs(directory, graphs, {
 		ignore: options?.ignore,
+		entrypointGlobs: options?.entrypointGlobs,
 	});
 }
 
@@ -127,7 +162,7 @@ export async function findUnusedExports(
 export async function findUnusedExportsFromGraphs(
 	directory: string,
 	graphs: ProjectGraphResult[],
-	options?: { ignore?: string }
+	options?: { ignore?: string; entrypointGlobs?: string | string[] }
 ): Promise<UnusedReport> {
 	const absoluteDir = path.resolve(directory);
 
@@ -170,6 +205,7 @@ export async function findUnusedExportsFromGraphs(
 	// CANDIDATES only — ignored files (e.g. tests) still contribute to the usage
 	// graph above, so a test-only export is not falsely reported dead.
 	const ignorePattern = options?.ignore ? new Bun.Glob(options.ignore) : null;
+	const entrypointGlobPatterns = normalizeGlobs(options?.entrypointGlobs);
 
 	const unused: UnusedExport[] = [];
 	const exportedFiles = new Map<string, ExportInfo[]>();
@@ -180,6 +216,12 @@ export async function findUnusedExportsFromGraphs(
 		if (
 			ignorePattern?.match(file) ||
 			ignorePattern?.match(path.basename(file))
+		) {
+			continue;
+		}
+		if (
+			entrypointGlobPatterns.length > 0 &&
+			matchesAnyGlob(file, entrypointGlobPatterns)
 		) {
 			continue;
 		}
@@ -227,6 +269,7 @@ export async function findUnusedExportsFromGraphs(
 	const internalOnlyCount = unused.filter((u) => u.internalUsage).length;
 	const orphanFiles = computeOrphanFiles(graph, exportedFiles, {
 		entrypointFiles,
+		entrypointGlobs: entrypointGlobPatterns,
 	});
 
 	return {
@@ -266,13 +309,20 @@ function mergeImportedBindings(
 export function computeOrphanFiles(
 	graph: DependencyGraph,
 	exportedFiles: ReadonlyMap<string, readonly ExportInfo[]>,
-	options?: { entrypointFiles?: ReadonlySet<string> }
+	options?: {
+		entrypointFiles?: ReadonlySet<string>;
+		entrypointGlobs?: readonly string[];
+	}
 ): OrphanFile[] {
 	const entrypointFiles = options?.entrypointFiles ?? new Set<string>();
+	const entrypointGlobs = options?.entrypointGlobs ?? [];
 	const orphanFiles: OrphanFile[] = [];
 
 	for (const [file, exports] of exportedFiles) {
 		if (exports.length === 0 || entrypointFiles.has(normalizePath(file))) {
+			continue;
+		}
+		if (entrypointGlobs.length > 0 && matchesAnyGlob(file, entrypointGlobs)) {
 			continue;
 		}
 
@@ -625,7 +675,7 @@ export function isExportUsed(
 }
 
 export async function unusedCommand(options: UnusedOptions): Promise<void> {
-	const { directory, json, verbose, ignore } = options;
+	const { directory, json, verbose, ignore, entrypointGlobs } = options;
 	const absoluteDir = path.resolve(directory);
 
 	if (!json) {
@@ -636,6 +686,7 @@ export async function unusedCommand(options: UnusedOptions): Promise<void> {
 		project: options.project,
 		ignore,
 		workspace: options.workspace,
+		entrypointGlobs,
 	});
 
 	if (json) {

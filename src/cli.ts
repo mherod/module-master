@@ -59,6 +59,7 @@ const { values, positionals } = parseArgs({
 		"include-tests": { type: "boolean" },
 		"convention-threshold": { type: "string" },
 		ignore: { type: "string" },
+		"entrypoint-globs": { type: "string", multiple: true },
 	},
 	allowPositionals: true,
 });

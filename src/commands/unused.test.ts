@@ -474,6 +474,31 @@ describe("unused command", () => {
 		await cleanup(dir);
 	});
 
+	test("--entrypoint-globs excludes convention entrypoints from orphan files", async () => {
+		const dir = await makeFixture("entrypoint-globs", {
+			"hooks/dispatch.ts": "export function runHook() { return 1; }",
+			"dead.ts": "export function deadCode() { return 2; }",
+		});
+
+		const proc = Bun.spawn(
+			[...CLI, "unused", dir, "--json", "--entrypoint-globs=hooks/**"],
+			{ stdout: "pipe", stderr: "pipe" }
+		);
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+		const orphanBases = report.orphanFiles.map((file: { file: string }) =>
+			path.relative(dir, file.file)
+		);
+		// Convention entrypoint matched by glob: excluded
+		expect(orphanBases).not.toContain(path.join("hooks", "dispatch.ts"));
+		// Genuinely dead file: still reported
+		expect(orphanBases).toContain("dead.ts");
+
+		await cleanup(dir);
+	});
+
 	test("export-all-as marks all exports as used", async () => {
 		const dir = await makeFixture("export-all-as", {
 			"math.ts":
