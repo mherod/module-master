@@ -152,6 +152,16 @@ function extractPathAliases(
 }
 
 /**
+ * Cache of parsed default-lib source files (`lib.*.d.ts`), shared across every
+ * `createProgram` call. These files are large, immutable, and identical between
+ * programs, so re-parsing them per program dominates analysis time when many
+ * small programs are built (e.g. the test suite's per-fixture programs). Keyed
+ * by `fileName\0languageVersion` so differing targets never share a parse.
+ */
+const libSourceFileCache = new Map<string, ts.SourceFile | undefined>();
+const LIB_DTS_PATTERN = /(?:^|\/)lib\.[^/]*\.d\.ts$/;
+
+/**
  * Create a TypeScript program for analysis
  */
 export function createProgram(
@@ -159,6 +169,39 @@ export function createProgram(
 	files?: string[]
 ): ts.Program {
 	const host = ts.createCompilerHost(project.compilerOptions);
+	const originalGetSourceFile = host.getSourceFile.bind(host);
+	host.getSourceFile = (
+		fileName,
+		languageVersionOrOptions,
+		onError,
+		shouldCreate
+	) => {
+		if (!LIB_DTS_PATTERN.test(fileName)) {
+			return originalGetSourceFile(
+				fileName,
+				languageVersionOrOptions,
+				onError,
+				shouldCreate
+			);
+		}
+		const version =
+			typeof languageVersionOrOptions === "object"
+				? languageVersionOrOptions.languageVersion
+				: languageVersionOrOptions;
+		const key = `${fileName}\0${version}`;
+		const cached = libSourceFileCache.get(key);
+		if (cached !== undefined) {
+			return cached;
+		}
+		const sourceFile = originalGetSourceFile(
+			fileName,
+			languageVersionOrOptions,
+			onError,
+			shouldCreate
+		);
+		libSourceFileCache.set(key, sourceFile);
+		return sourceFile;
+	};
 	const filesToCompile = files ?? project.files;
 	return ts.createProgram(filesToCompile, project.compilerOptions, host);
 }
