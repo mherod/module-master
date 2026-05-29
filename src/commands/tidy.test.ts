@@ -1,7 +1,14 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { CLI, cleanup, makeFixture as makeFixtureBase } from "./__test-helpers";
+
+// These tests spawn the CLI subprocess and run tsc --noEmit before+after a fix,
+// which can exceed bun's 5s default under full-suite CPU contention. Match the
+// canonical suite timeout (package.json `test` uses --timeout=20000) so the
+// rollback tests don't flake when the suite is invoked without that flag (e.g.
+// the bare `bun test` in .husky/pre-commit).
+setDefaultTimeout(20_000);
 
 async function makeFixture(name: string, files: Record<string, string>) {
 	return makeFixtureBase(`tidy-${name}`, files, { tsconfig: true });
