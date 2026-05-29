@@ -34,3 +34,6 @@ jobs:
 
       - name: Test
         run: bun test --timeout=20000
+
+      - name: Package size guard
+        run: pnpm run build:lib && pnpm run verify:size
