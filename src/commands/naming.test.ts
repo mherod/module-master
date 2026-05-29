@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
+	captureOutput,
 	cleanup,
 	makeFixture as makeFixtureBase,
 	runCli,
 } from "./__test-helpers";
+import { namingCommand } from "./naming.ts";
 
 async function makeGitFixture(name: string, files: Record<string, string>) {
 	const dir = await makeFixtureBase(`naming-${name}`, files, {
@@ -106,8 +108,9 @@ describe("naming command", () => {
 			...withFiles(PASCAL_FUNCTION_NAMES, functionFile),
 		});
 
-		const result = await runCli(["naming", path.join(dir, "src"), "--json"]);
-		expect(result.exitCode).toBe(0);
+		const result = await captureOutput(() =>
+			namingCommand({ directory: path.join(dir, "src"), json: true })
+		);
 		const report = JSON.parse(result.stdout);
 		expect(report.schemaVersion).toBe("1");
 		expect(report.findings).toHaveLength(4);
@@ -135,8 +138,9 @@ describe("naming command", () => {
 			"src/group/AccountService.ts": classFile("AccountService"),
 		});
 
-		const result = await runCli(["naming", path.join(dir, "src"), "--json"]);
-		expect(result.exitCode).toBe(0);
+		const result = await captureOutput(() =>
+			namingCommand({ directory: path.join(dir, "src"), json: true })
+		);
 		const report = JSON.parse(result.stdout);
 		expect(report.findings).toHaveLength(0);
 
@@ -158,8 +162,9 @@ describe("naming command", () => {
 			),
 		});
 
-		const result = await runCli(["naming", path.join(dir, "src"), "--json"]);
-		expect(result.exitCode).toBe(0);
+		const result = await captureOutput(() =>
+			namingCommand({ directory: path.join(dir, "src"), json: true })
+		);
 		const report = JSON.parse(result.stdout);
 		expect(report.findings).toHaveLength(0);
 
@@ -172,14 +177,13 @@ describe("naming command", () => {
 			...withFiles(PASCAL_FUNCTION_NAMES, functionFile),
 		});
 
-		const result = await runCli([
-			"naming",
-			path.join(dir, "src"),
-			"--json",
-			"--majority-threshold",
-			"0.8",
-		]);
-		expect(result.exitCode).toBe(0);
+		const result = await captureOutput(() =>
+			namingCommand({
+				directory: path.join(dir, "src"),
+				json: true,
+				majorityThreshold: 0.8,
+			})
+		);
 		const report = JSON.parse(result.stdout);
 		expect(report.findings).toHaveLength(0);
 
@@ -192,8 +196,9 @@ describe("naming command", () => {
 			...withFiles(PASCAL_FUNCTION_NAMES, functionFile),
 		});
 
-		const result = await runCli(["naming", path.join(dir, "src")]);
-		expect(result.exitCode).toBe(0);
+		const result = await captureOutput(() =>
+			namingCommand({ directory: path.join(dir, "src") })
+		);
 		expect(result.stdout).toContain("Naming Report");
 		expect(result.stdout).toContain("group");
 		expect(result.stdout).toContain("BuildReport.ts -> buildReport.ts");
@@ -210,14 +215,14 @@ describe("naming command", () => {
 			...withFiles(CAMEL_NAMES, functionFile),
 		});
 
-		const result = await runCli([
-			"naming",
-			path.join(dir, "src"),
-			"--fix",
-			"--dry-run",
-			"--json",
-		]);
-		expect(result.exitCode).toBe(0);
+		const result = await captureOutput(() =>
+			namingCommand({
+				directory: path.join(dir, "src"),
+				fix: true,
+				dryRun: true,
+				json: true,
+			})
+		);
 		const out = JSON.parse(result.stdout) as {
 			renames: Array<{ from: string; to: string }>;
 			dryRun: boolean;
@@ -242,13 +247,9 @@ describe("naming command", () => {
 			...withFiles(CAMEL_NAMES, functionFile),
 		});
 
-		const result = await runCli([
-			"naming",
-			path.join(dir, "src"),
-			"--fix",
-			"--json",
-		]);
-		expect(result.exitCode).toBe(0);
+		const result = await captureOutput(() =>
+			namingCommand({ directory: path.join(dir, "src"), fix: true, json: true })
+		);
 		const out = JSON.parse(result.stdout) as {
 			success: boolean;
 			renames: Array<{ from: string; to: string }>;
@@ -272,13 +273,9 @@ describe("naming command", () => {
 			...withFiles(CAMEL_NAMES, functionFile),
 		});
 
-		const result = await runCli([
-			"naming",
-			path.join(dir, "src"),
-			"--fix",
-			"--json",
-		]);
-		expect(result.exitCode).toBe(0);
+		const result = await captureOutput(() =>
+			namingCommand({ directory: path.join(dir, "src"), fix: true, json: true })
+		);
 		const out = JSON.parse(result.stdout) as {
 			success: boolean;
 			renames: Array<{ from: string; to: string }>;
