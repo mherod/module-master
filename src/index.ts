@@ -60,6 +60,11 @@ export {
 	formatNamingReport,
 	namingCommand,
 } from "./commands/naming.ts";
+// ── Commands: organise ─────────────────────────────────────────────
+export {
+	buildOrganiseReport,
+	organiseCommand,
+} from "./commands/organise.ts";
 // ── Commands: rename ────────────────────────────────────────────────
 export type { RenameOptions, RenameResult } from "./commands/rename.ts";
 export {
@@ -193,6 +198,15 @@ export type {
 	NamingViolation,
 	PrimaryExportKind,
 } from "./types/naming.ts";
+// ── Types: organise ────────────────────────────────────────────────
+export type {
+	BasenameCollision,
+	ExportConflict,
+	MisplacedFile,
+	OrganiseOptions,
+	OrganiseReport,
+	SignatureInfo,
+} from "./types/organise.ts";
 export type {
 	DeclarationKind,
 	FunctionInfo,

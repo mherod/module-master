@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -7,14 +7,29 @@ import type { ProjectConfig } from "../types";
 import { scanExports, scanModuleReferences } from "./scanner";
 import { withSourceFile } from "./source-file";
 
-// Mock resolver to avoid file system lookups
-await mock.module("./resolver", () => {
-	return {
+// Snapshot the real resolver exports BEFORE any mock is installed so the
+// afterAll restore cannot accidentally capture the mocked implementation.
+// A dynamic import() is used instead of `import * as` to satisfy the
+// ultracite noNamespaceImport lint rule.
+const realResolverExports = { ...(await import("./resolver")) };
+
+// Stub the resolver during THIS file's tests only — installed in beforeAll
+// and restored in afterAll. bun's mock.module is process-global and
+// persistent, so a top-level mock here would poison module resolution for
+// every other test file that builds a fresh dependency graph afterwards
+// (e.g. organise.test.ts saw empty importedBy maps → false-negative results).
+beforeAll(async () => {
+	await mock.module("./resolver", () => ({
+		...realResolverExports,
 		resolveModuleSpecifier: (specifier: string) => ({
 			kind: "resolved",
 			path: `/resolved/${specifier}`,
 		}),
-	};
+	}));
+});
+
+afterAll(async () => {
+	await mock.module("./resolver", () => realResolverExports);
 });
 
 describe("scanModuleReferences", () => {

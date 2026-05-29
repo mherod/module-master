@@ -86,6 +86,7 @@ Commands:
   mock-cleanup <directory>             Find orphan keys in mock factories
   test-relocation <directory>          Find stranded or misnamed test files
   naming <directory>                   Audit per-directory filename casing
+  organise <directory>                 Audit folder organisation and basename collisions
   tidy <directory>                     Compose unused, similar, and audit reports
 
 Options:

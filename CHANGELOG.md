@@ -31,6 +31,14 @@ All notable user-facing changes to this project are documented here.
   package entrypoints declared through `package.json` `main`, `module`, or
   `exports`. `analyze` also prints a `noExternalUsage` hint for a single
   orphaned file.
+- **`organise` command**: `resect organise <dir>` audits folder organisation
+  and reports two classes of finding: (1) **misplaced files** — non-test
+  source files whose entire in-project importer set lives within a single
+  subdirectory but the file itself lives outside that cluster (suggested move
+  included); (2) **basename collisions** — files sharing a basename that
+  export same-named symbols with structurally different type signatures.
+  `--json` emits a structured report. `--ignore` excludes files from the
+  candidate set. The MCP `organise` tool is read-only. Closes #80.
 - **`naming` command**: `resect naming <dir>` audits per-directory
   filename casing conventions and reports outliers with suggested
   names, primary export kind, sibling majority, and confidence. `--fix`

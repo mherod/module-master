@@ -9,6 +9,7 @@ import { findCommand } from "./find.ts";
 import { mockCleanupCommand } from "./mock-cleanup.ts";
 import { moveCommand } from "./move.ts";
 import { namingCommand } from "./naming.ts";
+import { organiseCommand } from "./organise.ts";
 import { renameCommand } from "./rename.ts";
 import { similarCommand } from "./similar.ts";
 import { testRelocationCommand } from "./test-relocation.ts";
@@ -807,6 +808,55 @@ Examples:
 					minSiblings,
 					majorityThreshold,
 					includeTests: values["include-tests"],
+				});
+			} catch (error) {
+				logger.error(error instanceof Error ? error.message : String(error));
+				process.exit(1);
+			}
+		},
+	},
+
+	{
+		name: "organise",
+		helpText: `
+Usage: ${name} organise <directory> [options]
+
+Audit folder organisation: detect non-test files that live outside their
+primary importer cluster and identify basename collisions between files that
+export same-named symbols with divergent signatures.
+
+Arguments:
+  directory    Path to the project directory to scan
+
+Options:
+  --json        Output results as JSON
+  --ignore      Glob pattern to exclude files (e.g. "*.generated.ts")
+  --verbose     Show detailed output
+
+Findings:
+  Misplaced files — files whose only importers are in a single subdirectory
+    but the file itself lives outside that cluster.
+  Basename collisions — files sharing a basename that export same-named
+    symbols with structurally different signatures.
+
+Examples:
+  ${name} organise src
+  ${name} organise src --json
+  ${name} organise src --ignore="*.generated.ts"
+`,
+		run: async ([directory], values) => {
+			if (!directory) {
+				logger.error("Error: organise requires a <directory> argument");
+				logger.error(`Run '${name} organise --help' for usage`);
+				process.exit(1);
+			}
+			try {
+				await organiseCommand({
+					directory,
+					project: values.project,
+					json: values.json,
+					verbose: values.verbose,
+					ignore: values.ignore,
 				});
 			} catch (error) {
 				logger.error(error instanceof Error ? error.message : String(error));

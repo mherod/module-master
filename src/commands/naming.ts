@@ -1,6 +1,7 @@
 import path from "node:path";
 import ts from "typescript";
 import { logger } from "../cli-logger.ts";
+import { hasDefaultModifier, hasExportModifier } from "../core/ast-utils.ts";
 import { mapConcurrent } from "../core/concurrency.ts";
 import { TS_JS_VUE_EXTENSIONS } from "../core/constants.ts";
 import { ensureCleanWorktree } from "../core/git.ts";
@@ -162,23 +163,6 @@ function lineOf(sourceFile: ts.SourceFile, node: ts.Node): number {
 		node.getStart(sourceFile)
 	);
 	return line + 1;
-}
-
-function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
-	if (!ts.canHaveModifiers(node)) {
-		return false;
-	}
-	return (
-		ts.getModifiers(node)?.some((modifier) => modifier.kind === kind) ?? false
-	);
-}
-
-function hasExportModifier(node: ts.Node): boolean {
-	return hasModifier(node, ts.SyntaxKind.ExportKeyword);
-}
-
-function hasDefaultModifier(node: ts.Node): boolean {
-	return hasModifier(node, ts.SyntaxKind.DefaultKeyword);
 }
 
 function collectDeclarationKinds(

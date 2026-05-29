@@ -51,6 +51,7 @@ import {
 } from "./commands/mock-cleanup.ts";
 import { moveModule } from "./commands/move.ts";
 import { buildNamingReport } from "./commands/naming.ts";
+import { buildOrganiseReport } from "./commands/organise.ts";
 import { renameSymbol } from "./commands/rename.ts";
 import {
 	applyRelocations,
@@ -500,6 +501,22 @@ async function namingTool(
 		minSiblings: options.minSiblings,
 		majorityThreshold: options.majorityThreshold,
 		includeTests: options.includeTests,
+	});
+	return jsonText(report);
+}
+
+async function organiseTool(
+	directory: string,
+	options: {
+		project?: string;
+		ignore?: string;
+	}
+): Promise<CallToolResult> {
+	const absoluteDir = path.resolve(directory);
+	const report = await buildOrganiseReport({
+		directory: absoluteDir,
+		project: options.project,
+		ignore: options.ignore,
 	});
 	return jsonText(report);
 }
@@ -1069,6 +1086,40 @@ server.registerTool(
 				dryRun: fix ? (dryRun ?? true) : undefined,
 				force,
 			});
+		} catch (error) {
+			return toError(error);
+		}
+	}
+);
+
+server.registerTool(
+	"organise",
+	{
+		description:
+			"Audit folder organisation: detect non-test source files whose entire importer set lives within a single subdirectory elsewhere (misplaced files) and identify basename collisions between files that export same-named symbols with divergent type signatures. Read-only.",
+		inputSchema: {
+			directory: z
+				.string()
+				.describe(
+					"Absolute or cwd-relative path to the project directory to scan"
+				),
+			project: z
+				.string()
+				.optional()
+				.describe(
+					"Optional path to the project root or tsconfig.json. Omit to auto-resolve."
+				),
+			ignore: z
+				.string()
+				.optional()
+				.describe(
+					"Glob pattern to exclude files from candidate set (e.g. '*.generated.ts')"
+				),
+		},
+	},
+	async ({ directory, project, ignore }) => {
+		try {
+			return await organiseTool(directory, { project, ignore });
 		} catch (error) {
 			return toError(error);
 		}
