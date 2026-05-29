@@ -53,9 +53,23 @@ const discoveryCache = new Map<string, ProjectDiscovery>();
  * Per-directory snapshot of each discovered tsconfig's mtime at discovery time.
  * Lets the cache invalidate when a tsconfig is edited in place or removed —
  * matters for the long-lived MCP server, where tsconfigs change between calls.
- * Adding a brand-new tsconfig is not detected here (would need a re-glob).
+ * A brand-new tsconfig is caught separately by the throttled re-glob below.
  */
 const discoveryCacheMtimes = new Map<string, Map<string, number>>();
+/** Last re-glob timestamp per directory, to throttle add detection. */
+const discoveryCacheReglobAt = new Map<string, number>();
+/**
+ * Throttle window (ms) for the cache-hit re-glob that detects newly-added
+ * tsconfigs. Bounds the hot-path cost: within the window a cache-hit skips the
+ * directory-tree glob, so tight discoverProject loops (unused/audit across many
+ * sibling configs) never pay a tree walk per call.
+ */
+let reglobThrottleMs = 2000;
+
+/** Test-only: override the re-glob throttle window in milliseconds. */
+export function setDiscoveryReglobThrottleMs(ms: number): void {
+	reglobThrottleMs = ms;
+}
 
 /**
  * Discover all tsconfig files in a directory and build ownership maps.
@@ -66,7 +80,18 @@ export function discoverProject(projectDir: string): ProjectDiscovery {
 	const cached = discoveryCache.get(absoluteDir);
 	const cachedMtimes = discoveryCacheMtimes.get(absoluteDir);
 	if (cached && cachedMtimes && mtimesUnchanged(cachedMtimes)) {
-		return cached;
+		// Content edits + removals are caught by mtimesUnchanged above. A
+		// brand-new tsconfig needs a directory re-glob; throttle it so tight
+		// discoverProject loops (unused/audit) don't pay a tree walk per call.
+		const lastReglob = discoveryCacheReglobAt.get(absoluteDir) ?? 0;
+		if (Date.now() - lastReglob < reglobThrottleMs) {
+			return cached;
+		}
+		discoveryCacheReglobAt.set(absoluteDir, Date.now());
+		if (sameTsconfigSet(findAllTsConfigs(absoluteDir), cachedMtimes)) {
+			return cached;
+		}
+		// tsconfig set changed (addition) — fall through to rebuild.
 	}
 	const configs: TsConfigInfo[] = [];
 	const fileOwnership = new Map<string, TsConfigInfo>();
@@ -109,6 +134,7 @@ export function discoverProject(projectDir: string): ProjectDiscovery {
 	const result: ProjectDiscovery = { configs, fileOwnership, rootConfig };
 	discoveryCache.set(absoluteDir, result);
 	discoveryCacheMtimes.set(absoluteDir, mtimes);
+	discoveryCacheReglobAt.set(absoluteDir, Date.now());
 	return result;
 }
 
@@ -166,6 +192,25 @@ function findAllTsConfigs(dir: string): string[] {
 	}
 
 	return results;
+}
+
+/**
+ * True when a freshly-globbed tsconfig set matches the cached set (by path).
+ * Used to detect newly-added tsconfigs on a cache-hit re-glob.
+ */
+function sameTsconfigSet(
+	current: string[],
+	cachedMtimes: Map<string, number>
+): boolean {
+	if (current.length !== cachedMtimes.size) {
+		return false;
+	}
+	for (const tsconfigPath of current) {
+		if (!cachedMtimes.has(tsconfigPath)) {
+			return false;
+		}
+	}
+	return true;
 }
 
 function shouldSkipDirectory(name: string): boolean {

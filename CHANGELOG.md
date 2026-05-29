@@ -83,8 +83,9 @@ All notable user-facing changes to this project are documented here.
   `tsconfig.json` (e.g. changing `include`) or deleting one between
   long-lived MCP calls returned stale config and ownership data. Discovery
   now snapshots each discovered tsconfig's mtime and rebuilds when one is
-  edited or removed. Detecting a brand-new tsconfig added mid-session is
-  tracked separately (#88).
+  edited or removed, and a throttled (~2s) re-glob of the discovered
+  tsconfig set rebuilds when a brand-new tsconfig is added mid-session
+  (#88).
 
 ## [1.7.0] — 2026-05-28
 
