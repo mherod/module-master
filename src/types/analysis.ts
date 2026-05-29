@@ -27,7 +27,7 @@ export interface ExportInfo {
  * callers can tell a de-export candidate (keep symbol, drop `export`) from a
  * delete candidate (remove the whole symbol).
  */
-export interface UnusedExportInfo extends ExportInfo {
+interface UnusedExportInfo extends ExportInfo {
 	/** True when the symbol is still referenced within its own file. */
 	internalUsage: boolean;
 	/** Number of same-file references (excluding the declaration). */

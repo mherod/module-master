@@ -1,6 +1,6 @@
 import type { DeclarationKind, SimilarityBucket } from "./similar.ts";
 
-export type TidySchemaVersion = "1-experimental";
+type TidySchemaVersion = "1-experimental";
 
 export interface TidyOptions {
 	directory: string;
@@ -72,13 +72,13 @@ export interface TidySimilarFinding {
 	members: TidySimilarMember[];
 }
 
-export interface TidyAuditCycleFinding {
+interface TidyAuditCycleFinding {
 	kind: "audit-cycle";
 	sourceFile: string;
 	files: string[];
 }
 
-export interface TidyAuditMetricFinding {
+interface TidyAuditMetricFinding {
 	kind: "audit-fan-out" | "audit-fan-in" | "audit-export-surface";
 	sourceFile: string;
 	value: number;

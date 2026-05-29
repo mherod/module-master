@@ -1,7 +1,7 @@
 import ts from "typescript";
 import { scanExports } from "./scanner.ts";
 
-export interface ConflictResult {
+interface ConflictResult {
 	hasConflict: boolean;
 	conflicts: Array<{
 		file: string;
@@ -16,7 +16,7 @@ export interface ConflictResult {
  * Used by move and rename to detect when an operation would overwrite
  * an existing export symbol in the target.
  */
-export function checkExportConflict(
+function checkExportConflict(
 	targetSourceFile: ts.SourceFile,
 	exportNames: string[]
 ): ConflictResult {
@@ -189,7 +189,7 @@ export function checkBindingConflicts(
 	return { hasConflict: conflicts.length > 0, conflicts };
 }
 
-export interface AllConflictCheckOptions {
+interface AllConflictCheckOptions {
 	exportNames: string[];
 	targetSourceFile?: ts.SourceFile;
 	importingFiles: Array<{

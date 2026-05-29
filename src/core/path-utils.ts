@@ -1,6 +1,6 @@
 import path from "node:path";
 
-export interface TsconfigPathResult {
+interface TsconfigPathResult {
 	tsconfigPath: string;
 }
 

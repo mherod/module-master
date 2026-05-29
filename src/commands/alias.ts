@@ -47,11 +47,11 @@ export interface AliasChange extends UpdatedReference {
 	strategy: string;
 }
 
-export interface AliasConflict extends AliasChange {
+interface AliasConflict extends AliasChange {
 	reason: string;
 }
 
-export interface SpecifierRename {
+interface SpecifierRename {
 	from: string;
 	to: string;
 }

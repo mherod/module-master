@@ -59,7 +59,7 @@ export interface CliValues {
 	format?: string;
 }
 
-export interface CommandDef {
+interface CommandDef {
 	name: string;
 	helpText: string;
 	run: (args: string[], values: CliValues) => Promise<void> | void;

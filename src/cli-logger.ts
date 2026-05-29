@@ -108,7 +108,7 @@ export class CLILogger {
 // Global logger instance
 export const logger = new CLILogger();
 
-export interface CommandResultInput {
+interface CommandResultInput {
 	success: boolean;
 	updatedReferences: {
 		file: string;

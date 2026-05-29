@@ -5,7 +5,7 @@
  * <script setup> blocks without requiring the Vue template compiler.
  */
 
-export interface VueSfcScript {
+interface VueSfcScript {
 	/** The raw script block content (TypeScript or JavaScript) */
 	content: string;
 	/** Language declared in the lang attribute (defaults to "ts") */

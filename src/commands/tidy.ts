@@ -61,12 +61,12 @@ const DEFAULT_SIMILARITY_THRESHOLD = 0.8;
 const DEFAULT_MAX_CHANGES = 50;
 const FIX_WRITE_CONCURRENCY = 4;
 
-export const SAFE_TIDY_FIX_CATEGORIES = [
+const SAFE_TIDY_FIX_CATEGORIES = [
 	"dead-exports",
 	"alias-normalisation",
 ] as const satisfies readonly TidyFixCategory[];
 
-export const ALL_TIDY_FIX_CATEGORIES = [
+const ALL_TIDY_FIX_CATEGORIES = [
 	...SAFE_TIDY_FIX_CATEGORIES,
 	"file-moves",
 	"mock-cleanup",

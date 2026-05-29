@@ -73,7 +73,7 @@ interface ExtractCommonJsonOutput {
  * and MCP surfaces. Mirrors the existing JSON output and adds the fields
  * mutating MCP tools need: `worktreeDirty`, `errors`, and `modifiedFiles`.
  */
-export interface ExtractCommonResult {
+interface ExtractCommonResult {
 	success: boolean;
 	totalGroups: number;
 	groups: ExtractCommonJsonGroup[];

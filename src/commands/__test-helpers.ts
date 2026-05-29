@@ -4,13 +4,13 @@ import path from "node:path";
 
 export const CLI = ["bun", path.resolve(import.meta.dir, "../cli.ts")];
 
-export interface CliResult {
+interface CliResult {
 	stdout: string;
 	stderr: string;
 	exitCode: number | null;
 }
 
-export interface FixtureOptions {
+interface FixtureOptions {
 	/** When true, writes a default tsconfig.json unless one is provided in files */
 	tsconfig?: boolean;
 	/** Put generated fixtures outside the repo when files use *.test.* names */

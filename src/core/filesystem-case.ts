@@ -5,7 +5,7 @@ import type { Runtime } from "../runtime/types.ts";
 
 const caseSensitivityCache = new Map<string, boolean>();
 
-export interface SafeCaseRenameOptions {
+interface SafeCaseRenameOptions {
 	forceCaseInsensitive?: boolean;
 	gitMove?: (from: string, to: string) => Promise<void>;
 }
