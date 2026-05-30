@@ -133,3 +133,79 @@ export async function rollbackFiles(
 		);
 	}
 }
+
+/** A file rename/move expressed as absolute source/target paths. */
+export interface MoveRename {
+	from: string;
+	to: string;
+}
+
+async function isSameInode(a: string, b: string): Promise<boolean> {
+	try {
+		const { stat } = await import("node:fs/promises");
+		const [statA, statB] = await Promise.all([stat(a), stat(b)]);
+		return statA.ino === statB.ino && statA.dev === statB.dev;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Move-aware rollback for failed file relocations.
+ *
+ * Unlike {@link rollbackFiles} (which only restores a static path list), this
+ * reverses moves: it restores the original source paths and rewritten importer
+ * files, then removes the created target paths. Used after a failed closing
+ * `tsc --noEmit` to return moved/renamed files and their importers to the
+ * pre-fix state. Safe to call only when the worktree was clean before the move
+ * (every post-move change is then the tool's own).
+ *
+ * Handles the case-insensitive-filesystem hazard: a case-only rename
+ * (`Foo.ts` → `foo.ts`) aliases the same inode, so the new path is only
+ * unstaged from the index — never `unlink`ed — to avoid deleting the original
+ * that `git restore` just recreated.
+ *
+ * @param projectRoot - git working directory the restore runs in
+ * @param renames - source/target pairs that were moved
+ * @param importerFiles - files whose import specifiers were rewritten by the move
+ */
+export async function rollbackMoves(
+	projectRoot: string,
+	renames: readonly MoveRename[],
+	importerFiles: Iterable<string>
+): Promise<void> {
+	const { unlink } = await import("node:fs/promises");
+	const rt = getRuntime();
+
+	const runGit = async (args: string[]): Promise<void> => {
+		const { stderr, exitCode } = await rt.process.exec(["git", ...args], {
+			cwd: projectRoot,
+		});
+		if (exitCode !== 0 && stderr.trim()) {
+			logger.error(`Rollback step failed (git ${args[0]}): ${stderr.trim()}`);
+		}
+	};
+
+	// Restore the original files in both the index and worktree. For a case-only
+	// rename this also rewrites the on-disk basename back to the original casing.
+	const restorePaths = [
+		...renames.map((r) => path.relative(projectRoot, r.from)),
+		...Array.from(importerFiles).map((f) => path.relative(projectRoot, f)),
+	];
+	if (restorePaths.length > 0) {
+		await runGit(["restore", "--staged", "--worktree", "--", ...restorePaths]);
+	}
+
+	// Clean up the new-name entries. Unstage them from the index ONLY — running
+	// `git restore --worktree` on the new path would, on a case-insensitive
+	// filesystem, delete the original we just restored (same inode). Physically
+	// remove the new file only when it is a genuinely distinct inode (e.g. a
+	// kebab/snake rename, or a case-only rename on a case-sensitive filesystem).
+	for (const { from, to } of renames) {
+		const toRel = path.relative(projectRoot, to);
+		await runGit(["restore", "--staged", "--", toRel]);
+		if ((await rt.fs.exists(to)) && !(await isSameInode(from, to))) {
+			await unlink(to);
+		}
+	}
+}

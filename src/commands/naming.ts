@@ -4,7 +4,7 @@ import { logger } from "../cli-logger.ts";
 import { hasDefaultModifier, hasExportModifier } from "../core/ast-utils.ts";
 import { mapConcurrent } from "../core/concurrency.ts";
 import { TS_JS_VUE_EXTENSIONS } from "../core/constants.ts";
-import { ensureCleanWorktree } from "../core/git.ts";
+import { ensureCleanWorktree, rollbackMoves } from "../core/git.ts";
 import {
 	buildProjectGraphs,
 	type DependencyGraph,
@@ -669,58 +669,6 @@ export interface NamingFixResult {
 	errors: string[];
 }
 
-async function isSameInode(a: string, b: string): Promise<boolean> {
-	try {
-		const { stat } = await import("node:fs/promises");
-		const [statA, statB] = await Promise.all([stat(a), stat(b)]);
-		return statA.ino === statB.ino && statA.dev === statB.dev;
-	} catch {
-		return false;
-	}
-}
-
-async function rollbackNamingFix(
-	projectRoot: string,
-	renames: Array<{ from: string; to: string }>,
-	importerFiles: Set<string>
-): Promise<void> {
-	const { unlink } = await import("node:fs/promises");
-	const { getRuntime } = await import("../runtime/index.ts");
-	const rt = getRuntime();
-
-	const runGit = async (args: string[]): Promise<void> => {
-		const { stderr, exitCode } = await rt.process.exec(["git", ...args], {
-			cwd: projectRoot,
-		});
-		if (exitCode !== 0 && stderr.trim()) {
-			logger.error(`Rollback step failed (git ${args[0]}): ${stderr.trim()}`);
-		}
-	};
-
-	// Restore the original files in both the index and worktree. For a case-only
-	// rename this also rewrites the on-disk basename back to the original casing.
-	const restorePaths = [
-		...renames.map((r) => path.relative(projectRoot, r.from)),
-		...Array.from(importerFiles).map((f) => path.relative(projectRoot, f)),
-	];
-	if (restorePaths.length > 0) {
-		await runGit(["restore", "--staged", "--worktree", "--", ...restorePaths]);
-	}
-
-	// Clean up the new-name entries. Unstage them from the index ONLY — running
-	// `git restore --worktree` on the new path would, on a case-insensitive
-	// filesystem, delete the original we just restored (same inode). Physically
-	// remove the new file only when it is a genuinely distinct inode (e.g. a
-	// kebab/snake rename, or a case-only rename on a case-sensitive filesystem).
-	for (const { from, to } of renames) {
-		const toRel = path.relative(projectRoot, to);
-		await runGit(["restore", "--staged", "--", toRel]);
-		if ((await rt.fs.exists(to)) && !(await isSameInode(from, to))) {
-			await unlink(to);
-		}
-	}
-}
-
 export async function applyNamingFix(
 	options: NamingOptions
 ): Promise<NamingFixResult> {
@@ -784,7 +732,7 @@ export async function applyNamingFix(
 	const shouldRollback = after.incomplete || newTypeErrors.length > 0;
 
 	if (shouldRollback) {
-		await rollbackNamingFix(project.rootDir, computedRenames, importerFiles);
+		await rollbackMoves(project.rootDir, computedRenames, importerFiles);
 		const reason = after.incomplete
 			? "type checking did not complete"
 			: "type checking introduced new errors";
