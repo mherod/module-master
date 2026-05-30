@@ -32,7 +32,11 @@ export type TidyFixCategory =
 export interface TidyAppliedFix {
 	category: TidyFixCategory;
 	file: string;
-	mutationKind: "de-export" | "alias-normalise" | "mock-cleanup";
+	mutationKind:
+		| "de-export"
+		| "alias-normalise"
+		| "mock-cleanup"
+		| "case-rename";
 	target: string;
 	wasRolledBack: boolean;
 }

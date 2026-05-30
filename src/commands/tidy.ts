@@ -6,7 +6,9 @@ import { TS_JS_VUE_EXTENSIONS } from "../core/constants.ts";
 import {
 	ensureCleanWorktree,
 	isWorktreeDirty,
+	type MoveRename,
 	rollbackFiles,
+	rollbackMoves,
 } from "../core/git.ts";
 import {
 	buildProjectGraphs,
@@ -81,13 +83,31 @@ interface TidyApplyResult {
 	worktreeDirtyRollbackDisabled: boolean;
 }
 
-interface PlannedTidyChange {
+/** Text-mutation variant: edits applied to a single existing file. */
+interface PlannedTextChange {
+	kind: "text";
 	category: TidyFixCategory;
 	file: string;
 	/** Display label: export name (dead-exports) or "old → new" specifier (alias-normalisation). */
 	exportName: string;
 	changes: TextChange[];
 }
+
+/**
+ * Move variant: a file relocation (rename/move) delegated to the `move`
+ * pipeline. Not expressible as TextChange[] — it renames a file and rewrites
+ * importer specifiers across the graph, with move-aware rollback.
+ */
+interface PlannedMoveChange {
+	kind: "move";
+	category: TidyFixCategory;
+	source: string;
+	target: string;
+	/** Display label, e.g. "Foo.ts → foo.ts". */
+	exportName: string;
+}
+
+type PlannedTidyChange = PlannedTextChange | PlannedMoveChange;
 
 interface TidyProjectContext {
 	project: ProjectConfig;
@@ -526,6 +546,7 @@ function planDeadExportChangesForFile(options: {
 		}
 
 		planned.push({
+			kind: "text",
 			category: "dead-exports",
 			file: options.file,
 			exportName: finding.name,
@@ -592,6 +613,7 @@ async function planAliasNormalisationChanges(
 				sourceFile,
 				fileChanges
 			).map<PlannedTidyChange>((pair) => ({
+				kind: "text",
 				category: "alias-normalisation",
 				file,
 				exportName: `${pair.edit.oldSpecifier} → ${pair.edit.newSpecifier}`,
@@ -617,12 +639,45 @@ async function planMockCleanupChanges(
 
 	return fileChanges.map<PlannedTidyChange>(
 		({ file, orphanKeys, changes }) => ({
+			kind: "text",
 			category: "mock-cleanup",
 			file,
 			exportName: orphanKeys.join(", "),
 			changes,
 		})
 	);
+}
+
+/**
+ * Produce move-variant changes from naming-casing violations. This is the
+ * first producer of {@link PlannedMoveChange}: each violation becomes a
+ * case/convention rename whose target is the suggested name in the same
+ * directory, mirroring `applyNamingFix`'s rename computation.
+ */
+async function planCaseRenameChanges(
+	options: TidyOptions,
+	reportDirectory: string
+): Promise<PlannedTidyChange[]> {
+	const { buildNamingReport } = await import("./naming.ts");
+	const namingDir = options.scope
+		? path.resolve(options.scope)
+		: reportDirectory;
+	const report = await buildNamingReport({
+		directory: namingDir,
+		project: options.project,
+		workspace: options.workspace,
+	});
+
+	return report.findings.map<PlannedTidyChange>((violation) => {
+		const source = path.resolve(namingDir, violation.file);
+		return {
+			kind: "move",
+			category: "case-renames",
+			source,
+			target: path.join(path.dirname(source), violation.suggestedName),
+			exportName: `${path.basename(source)} → ${violation.suggestedName}`,
+		};
+	});
 }
 
 async function planTidyFixes(
@@ -667,6 +722,12 @@ async function planTidyFixes(
 		planned.push(...(await planMockCleanupChanges(target, project)));
 	}
 
+	// case-renames is an aggressive move-variant category: not in
+	// SAFE_TIDY_FIX_CATEGORIES, so it only runs under explicit --fix=case-renames.
+	if (categories.has("case-renames")) {
+		planned.push(...(await planCaseRenameChanges(options, reportDirectory)));
+	}
+
 	return planned;
 }
 
@@ -701,6 +762,7 @@ const MUTATION_KIND_BY_CATEGORY: Partial<
 > = {
 	"alias-normalisation": "alias-normalise",
 	"mock-cleanup": "mock-cleanup",
+	"case-renames": "case-rename",
 };
 
 function mutationKindForCategory(
@@ -709,12 +771,20 @@ function mutationKindForCategory(
 	return MUTATION_KIND_BY_CATEGORY[category] ?? "de-export";
 }
 
-async function applyPlannedTidyFixes(
-	planned: PlannedTidyChange[],
+interface AppliedTidyChanges {
+	applied: TidyAppliedFix[];
+	/** Renames performed via the move pipeline (for move-aware rollback). */
+	moveRenames: MoveRename[];
+	/** Importer files whose specifiers were rewritten by the moves. */
+	importerFiles: Set<string>;
+}
+
+async function applyTextTidyChanges(
+	textChanges: PlannedTextChange[],
 	reportDirectory: string
 ): Promise<TidyAppliedFix[]> {
-	const byFile = new Map<string, PlannedTidyChange[]>();
-	for (const change of planned) {
+	const byFile = new Map<string, PlannedTextChange[]>();
+	for (const change of textChanges) {
 		const changes = byFile.get(change.file) ?? [];
 		changes.push(change);
 		byFile.set(change.file, changes);
@@ -724,10 +794,10 @@ async function applyPlannedTidyFixes(
 		Array.from(byFile.entries()),
 		async ([file, changes]) => {
 			const content = await Bun.file(file).text();
-			const textChanges = deduplicateChanges(
+			const edits = deduplicateChanges(
 				changes.flatMap((change) => change.changes)
 			);
-			const next = applyTextChanges(content, textChanges);
+			const next = applyTextChanges(content, edits);
 			if (next !== content) {
 				await Bun.write(file, next);
 			}
@@ -743,6 +813,77 @@ async function applyPlannedTidyFixes(
 	);
 
 	return appliedByFile.flat();
+}
+
+/**
+ * Apply move-variant changes via the `move` pipeline. Runs sequentially —
+ * each `moveModule` rebuilds the dependency graph and rewrites importers, so
+ * concurrent moves would race on a shared file set (mirrors `applyNamingFix`).
+ * Collects the renames and importer files so a failed closing typecheck can be
+ * rolled back move-aware via {@link rollbackMoves}.
+ */
+async function applyMoveTidyChanges(
+	moveChanges: PlannedMoveChange[],
+	reportDirectory: string,
+	project: ProjectConfig
+): Promise<
+	{ applied: TidyAppliedFix[] } & Omit<AppliedTidyChanges, "applied">
+> {
+	const { moveModule } = await import("./move.ts");
+	const applied: TidyAppliedFix[] = [];
+	const moveRenames: MoveRename[] = [];
+	const importerFiles = new Set<string>();
+
+	for (const move of moveChanges) {
+		const result = await moveModule(
+			move.source,
+			move.target,
+			project,
+			false,
+			false
+		);
+		moveRenames.push({ from: move.source, to: move.target });
+		for (const ref of result.updatedReferences) {
+			if (ref.file !== move.source && ref.file !== move.target) {
+				importerFiles.add(ref.file);
+			}
+		}
+		applied.push({
+			category: move.category,
+			file: toRelativePath(reportDirectory, move.target),
+			mutationKind: mutationKindForCategory(move.category),
+			target: move.exportName,
+			wasRolledBack: false,
+		});
+	}
+
+	return { applied, moveRenames, importerFiles };
+}
+
+async function applyPlannedTidyFixes(
+	planned: PlannedTidyChange[],
+	reportDirectory: string,
+	project: ProjectConfig
+): Promise<AppliedTidyChanges> {
+	const textChanges = planned.filter(
+		(change): change is PlannedTextChange => change.kind === "text"
+	);
+	const moveChanges = planned.filter(
+		(change): change is PlannedMoveChange => change.kind === "move"
+	);
+
+	const appliedText = await applyTextTidyChanges(textChanges, reportDirectory);
+	const moveResult = await applyMoveTidyChanges(
+		moveChanges,
+		reportDirectory,
+		project
+	);
+
+	return {
+		applied: [...appliedText, ...moveResult.applied],
+		moveRenames: moveResult.moveRenames,
+		importerFiles: moveResult.importerFiles,
+	};
 }
 
 function markRolledBack(applied: TidyAppliedFix[]): TidyAppliedFix[] {
@@ -809,21 +950,38 @@ export async function applyTidyFixes(
 	}
 
 	const before = await runTypeCheckDetailed(context.project);
-	let applied = await applyPlannedTidyFixes(planned, context.reportDirectory);
+	const applyResult = await applyPlannedTidyFixes(
+		planned,
+		context.reportDirectory,
+		context.project
+	);
+	let applied = applyResult.applied;
 	const after = await runTypeCheckDetailed(context.project);
 	const delta = typecheckDelta({ before, after });
 	const shouldRollback =
 		delta.verificationIncomplete || delta.newErrors.length > 0;
 	if (shouldRollback) {
 		if (rollbackEnabled) {
-			const touchedFiles = Array.from(
+			// Move-aware rollback: reverse renames + created targets via the move
+			// pipeline's inverse, then git-restore the text-edited files. Both are
+			// safe here — the worktree was clean before apply (rollbackEnabled).
+			if (applyResult.moveRenames.length > 0) {
+				await rollbackMoves(
+					context.project.rootDir,
+					applyResult.moveRenames,
+					applyResult.importerFiles
+				);
+			}
+			const textFiles = Array.from(
 				new Set(
-					planned.map((item) =>
-						path.relative(context.project.rootDir, item.file)
-					)
+					planned
+						.filter((item): item is PlannedTextChange => item.kind === "text")
+						.map((item) => path.relative(context.project.rootDir, item.file))
 				)
 			);
-			await rollbackFiles(context.project.rootDir, touchedFiles);
+			if (textFiles.length > 0) {
+				await rollbackFiles(context.project.rootDir, textFiles);
+			}
 			applied = markRolledBack(applied);
 		}
 		const reason = delta.verificationIncomplete

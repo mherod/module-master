@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
-import { readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { CLI, cleanup, makeFixture as makeFixtureBase } from "./__test-helpers";
 
@@ -708,6 +708,131 @@ export function usedInternal() {
 			)
 		).toBe(false);
 		expect(await readFile(file, "utf8")).toBe(before);
+
+		await cleanup(dir);
+	});
+
+	// Case-only renames are invisible to stat() on case-insensitive filesystems
+	// (macOS APFS), so compare the exact on-disk basename via a directory listing.
+	async function hasExactFile(filePath: string): Promise<boolean> {
+		try {
+			const entries = await readdir(path.dirname(filePath));
+			return entries.includes(path.basename(filePath));
+		} catch {
+			return false;
+		}
+	}
+
+	const CASE_RENAME_FILES: Record<string, string> = {
+		"tsconfig.json": JSON.stringify({
+			compilerOptions: { strict: true, target: "ESNext", module: "Preserve" },
+			include: ["**/*.ts"],
+		}),
+		// camelCase-majority sibling directory + one PascalCase function file.
+		"src/group/alphaOne.ts": 'export function alphaOne() { return "a"; }\n',
+		"src/group/betaTwo.ts": 'export function betaTwo() { return "b"; }\n',
+		"src/group/gammaThree.ts": 'export function gammaThree() { return "g"; }\n',
+		"src/group/deltaFour.ts": 'export function deltaFour() { return "d"; }\n',
+		"src/group/BuildReport.ts":
+			'export function BuildReport() { return "r"; }\n',
+		// Consumer in a different directory imports the PascalCase file; its
+		// specifier must be rewritten when the file is renamed.
+		"src/consumer.ts":
+			'import { BuildReport } from "./group/BuildReport";\n\nexport const report = BuildReport();\n',
+	};
+
+	test("--fix=case-renames renames the file and rewrites importers", async () => {
+		const dir = await makeGitFixture("case-rename-apply", CASE_RENAME_FILES);
+
+		const proc = Bun.spawn(
+			[
+				...CLI,
+				"tidy",
+				path.join(dir, "src"),
+				"--experimental",
+				"--fix=case-renames",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" }
+		);
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+		expect(report.applied).toContainEqual(
+			expect.objectContaining({
+				category: "case-renames",
+				mutationKind: "case-rename",
+				target: "BuildReport.ts → buildReport.ts",
+				wasRolledBack: false,
+			})
+		);
+		// File renamed on disk (case-only).
+		expect(await hasExactFile(path.join(dir, "src/group/BuildReport.ts"))).toBe(
+			false
+		);
+		expect(await hasExactFile(path.join(dir, "src/group/buildReport.ts"))).toBe(
+			true
+		);
+		// Importer specifier rewritten.
+		const consumer = await readFile(path.join(dir, "src/consumer.ts"), "utf8");
+		expect(consumer).toContain('"./group/buildReport"');
+		expect(consumer).not.toContain('"./group/BuildReport"');
+
+		await cleanup(dir);
+	});
+
+	test("--fix=case-renames rolls back the move when closing typecheck is incomplete", async () => {
+		const dir = await makeGitFixture("case-rename-rollback", {
+			...CASE_RENAME_FILES,
+			// Unresolvable @types entry makes the closing tsc verification incomplete,
+			// forcing a move-aware rollback.
+			"tsconfig.json": JSON.stringify({
+				compilerOptions: {
+					strict: true,
+					target: "ESNext",
+					module: "Preserve",
+					types: ["missing-resect-test-types"],
+				},
+				include: ["**/*.ts"],
+			}),
+		});
+
+		const proc = Bun.spawn(
+			[
+				...CLI,
+				"tidy",
+				path.join(dir, "src"),
+				"--experimental",
+				"--fix=case-renames",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" }
+		);
+		const [stdout, stderr] = await Promise.all([
+			new Response(proc.stdout).text(),
+			new Response(proc.stderr).text(),
+		]);
+		await proc.exited;
+		expect(proc.exitCode).toBe(1);
+		expect(stderr).toContain("tidy rolled back");
+		const report = JSON.parse(stdout);
+		expect(report.applied).toContainEqual(
+			expect.objectContaining({
+				category: "case-renames",
+				wasRolledBack: true,
+			})
+		);
+		// The rename was reversed: original PascalCase name restored, new name gone.
+		expect(await hasExactFile(path.join(dir, "src/group/BuildReport.ts"))).toBe(
+			true
+		);
+		expect(await hasExactFile(path.join(dir, "src/group/buildReport.ts"))).toBe(
+			false
+		);
+		// Importer specifier restored.
+		const consumer = await readFile(path.join(dir, "src/consumer.ts"), "utf8");
+		expect(consumer).toContain('"./group/BuildReport"');
 
 		await cleanup(dir);
 	});
