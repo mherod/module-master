@@ -836,4 +836,41 @@ export function usedInternal() {
 
 		await cleanup(dir);
 	});
+
+	test("bare --fix leaves case-renames untouched (safe-default exclusion)", async () => {
+		const dir = await makeGitFixture(
+			"case-rename-safe-default",
+			CASE_RENAME_FILES
+		);
+
+		const proc = Bun.spawn(
+			[
+				...CLI,
+				"tidy",
+				path.join(dir, "src"),
+				"--experimental",
+				"--fix",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" }
+		);
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+		expect(
+			report.applied.some(
+				(fix: { category: string }) => fix.category === "case-renames"
+			)
+		).toBe(false);
+		// The PascalCase file is left in place under bare --fix.
+		expect(await hasExactFile(path.join(dir, "src/group/BuildReport.ts"))).toBe(
+			true
+		);
+		expect(await hasExactFile(path.join(dir, "src/group/buildReport.ts"))).toBe(
+			false
+		);
+
+		await cleanup(dir);
+	});
 });
