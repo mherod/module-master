@@ -161,6 +161,22 @@ resect alias src --rename-specifier="@utils/Foo=@utils/foo"
 - Detects and skips changes that would create duplicate bindings
 - Verification enabled by default; use `--no-verify` to skip
 
+### `inline <barrel-file>`
+
+Inline a pure re-export barrel: rewrite all importers to import directly from the canonical source(s), removing the barrel indirection at call sites.
+
+```bash
+resect inline src/shared/index.ts          # Rewrite all importers
+resect inline src/utils/barrel.ts --dry-run  # Preview changes
+resect inline src/api/index.ts --no-verify   # Skip type checking
+```
+
+- The barrel must be a **pure re-export barrel** — every statement must be `export … from "…"`. Any local declarations or `import` statements cause the command to abort with an error.
+- Barrel file is **left in place** after inlining; use `unused` to identify it for later removal.
+- Namespace imports (`import * as x`), dynamic imports, and multi-source barrels (re-exports from >1 canonical source per import statement) are skipped with a warning.
+- Verification enabled by default; use `--no-verify` to skip.
+- Supports `--force` to bypass the dirty-worktree guard and proceed past already-canonical import conflicts.
+
 ### `discover <directory>`
 
 Map all tsconfig.json files in a project.
@@ -317,6 +333,18 @@ resect barrel . --workspace
 
 The headline finding is **sub-path export shadowing**: a file reachable through a barrel that ALSO has a dedicated package `exports` sub-path entry (e.g. `"./cn"`). Consumers should import via the sub-path specifier (`@scope/utils/cn`), not the package root barrel, and a cross-package `move` should target that sub-path rather than collapsing to the root (see [#93](https://github.com/mherod/resect/issues/93)). It also reports **wildcard re-exports** (`export * from`) that obscure a package's public surface, **barrel chains** (barrels re-exporting other barrels), and **unused barrels** (no importers). Per barrel it returns entry counts by kind, distinct source-module count, and consumer count.
 
+### `inline <barrel-file>`
+
+Inline a pure re-export barrel: rewrite all importers to import directly from the canonical source(s), removing the barrel indirection at call sites. The barrel file itself is left in place (use `unused` to identify it for removal once all importers have been retargeted).
+
+```bash
+resect inline src/shared/index.ts
+resect inline src/utils/barrel.ts --dry-run
+resect inline src/api/index.ts --no-verify
+```
+
+The barrel must be a **pure re-export barrel** — every top-level statement must be an `export … from "…"` statement. Any local declarations, imports, or bare exports without a `from` clause cause the command to abort. Namespace imports (`import * as x`), dynamic imports, and barrels that re-export from more than one canonical source are skipped with a warning. By default, runs `tsc --noEmit` before and after applying changes; use `--no-verify` to skip. Supports `--dry-run`, `--force`, `--json`, `--verbose`.
+
 ### `tidy <directory>`
 
 Compose structural findings into one tidyup report, with guarded fix mode.
@@ -360,6 +388,7 @@ resect ships a stdio [Model Context Protocol](https://modelcontextprotocol.io) s
 | `move` | Move a file and rewrite every import (relative, alias, cross-package barrel) |
 | `rename` | Rename an exported symbol and every import binding across the project |
 | `alias` | Normalize import specifiers to `alias`, `relative`, or `shortest` style |
+| `inline` | Inline a pure re-export barrel, retargeting all importers to the canonical source |
 | `mock-cleanup` | Remove orphan mock factory keys with typecheck rollback |
 | `tidy` | Apply safe grouped tidy fixes with typecheck rollback |
 | `extract-common` | Consolidate duplicate functions into one canonical copy and rewrite callers |

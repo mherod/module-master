@@ -66,6 +66,14 @@ export type {
 	FindResult,
 } from "./commands/find.ts";
 export { findCommand, search } from "./commands/find.ts";
+// ── Commands: inline ────────────────────────────────────────────────
+export type {
+	InlineConflict,
+	InlineOptions,
+	InlineResult,
+	InlineRewrite,
+} from "./commands/inline.ts";
+export { inlineBarrel, inlineCommand } from "./commands/inline.ts";
 // ── Commands: mock-cleanup ─────────────────────────────────────────
 export {
 	applyMockCleanup,

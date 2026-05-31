@@ -45,3 +45,5 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Test temp directories
 __tmp_git_test__/
 __fixtures__/
+/.pipeline
+/.claude/agent-memory

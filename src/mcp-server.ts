@@ -47,6 +47,7 @@ import { analyzeBarrels, barrelReportToJson } from "./commands/barrel.ts";
 import { runExtractCommon } from "./commands/extract-common.ts";
 import { locateExtractComponentTarget } from "./commands/extract-component.ts";
 import { search } from "./commands/find.ts";
+import { inlineBarrel } from "./commands/inline.ts";
 import {
 	applyMockCleanup,
 	buildMockCleanupReport,
@@ -72,6 +73,7 @@ import {
 	type VerificationResult,
 } from "./core/verify.ts";
 import { discoverWorkspace } from "./core/workspace.ts";
+import type { InlineConflict, InlineRewrite } from "./types/inline.ts";
 import type { ProjectConfig } from "./types.ts";
 
 // ── Mutating-tool helpers ──────────────────────────────────────────
@@ -2007,6 +2009,127 @@ server.registerTool(
 				minLines,
 				skipDirectives,
 				skipWrappers,
+			});
+		} catch (error) {
+			return toError(error);
+		}
+	}
+);
+
+async function inlineTool(args: {
+	barrelFile: string;
+	project?: string;
+	dryRun: boolean;
+	force: boolean;
+	verify: boolean;
+}): Promise<CallToolResult> {
+	const absoluteBarrel = path.resolve(args.barrelFile);
+	const tsconfigPath = resolveTsConfig(args.project, absoluteBarrel);
+	if (!tsconfigPath) {
+		return errorText(`Could not find tsconfig.json for ${absoluteBarrel}`);
+	}
+	const project = loadProject(tsconfigPath, absoluteBarrel);
+
+	const wt = await checkWorktree(project.rootDir, args.force);
+	if (wt.blocked) {
+		return errorText(
+			"Working tree has uncommitted changes. Commit/stash first, or rerun with force=true."
+		);
+	}
+
+	const { result, changes } = await inlineBarrel(absoluteBarrel, project, {
+		dryRun: args.dryRun,
+		force: args.force,
+	});
+
+	let delta: VerificationResult | undefined;
+	let rolledBack = false;
+	if (!args.dryRun && result.isPureBarrel && changes.length > 0) {
+		if (args.verify) {
+			const verification = await applyAliasChangesWithVerification(
+				changes,
+				project
+			);
+			delta = verification;
+			rolledBack = !verification.success;
+		} else {
+			await applyAliasChanges(changes);
+		}
+	}
+
+	const root = project.rootDir;
+	return jsonText({
+		dryRun: args.dryRun,
+		force: args.force,
+		worktreeDirty: wt.dirty,
+		success:
+			result.isPureBarrel && result.conflicts.length === 0 && !rolledBack,
+		isPureBarrel: result.isPureBarrel,
+		canonicalSpecifier: result.canonicalSpecifier,
+		rolledBack,
+		filesChanged: rolledBack ? 0 : result.filesChanged,
+		rewrites: result.rewrites.map((r: InlineRewrite) => ({
+			file: path.relative(root, r.file),
+			line: r.line,
+			oldSpecifier: r.oldSpecifier,
+			newSpecifier: r.newSpecifier,
+			bindings: r.bindings,
+			typeOnly: r.typeOnly,
+		})),
+		conflicts: result.conflicts.map((c: InlineConflict) => ({
+			file: path.relative(root, c.file),
+			line: c.line,
+			reason: c.reason,
+		})),
+		typecheck: delta,
+	});
+}
+
+server.registerTool(
+	"inline",
+	{
+		description:
+			"Inline a pure re-export barrel: rewrite all importers to import directly from the canonical source(s), removing the barrel indirection at call sites. The barrel file itself is left in place. The barrel must be a 'pure re-export barrel' — every top-level statement must be an `export … from '…'` statement. Namespace imports (`import * as x`), dynamic imports, and multi-source barrels (re-exports from >1 canonical source) are skipped with a warning. Defaults to `dryRun: true` so callers preview the change first; when `dryRun: false` and `verify: true` (both default) runs `tsc --noEmit` before AND after and returns the diagnostic delta. A dirty worktree is returned as an error unless `force: true`.",
+		inputSchema: {
+			barrelFile: z
+				.string()
+				.describe(
+					"Absolute or cwd-relative path to the pure re-export barrel file to inline (e.g. 'src/shared/index.ts')"
+				),
+			project: z
+				.string()
+				.optional()
+				.describe(
+					"Optional path to the project root or tsconfig.json. Omit to auto-resolve the nearest tsconfig that owns the barrel file"
+				),
+			dryRun: z
+				.boolean()
+				.optional()
+				.describe(
+					"Preview the rewrites without writing files (default true). Set false to actually apply"
+				),
+			force: z
+				.boolean()
+				.optional()
+				.describe(
+					"Override the dirty-worktree guard (default false). Use with care — the guard prevents data loss on a clean commit boundary"
+				),
+			verify: z
+				.boolean()
+				.optional()
+				.describe(
+					"Run `tsc --noEmit` before and after and return the diagnostic delta (default true). Ignored when dryRun=true"
+				),
+		},
+	},
+	async ({ barrelFile, project, dryRun, force, verify }) => {
+		try {
+			return await inlineTool({
+				barrelFile,
+				project,
+				dryRun: dryRun ?? true,
+				force: force ?? false,
+				verify: verify ?? true,
 			});
 		} catch (error) {
 			return toError(error);

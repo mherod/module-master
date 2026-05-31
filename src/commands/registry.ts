@@ -8,6 +8,7 @@ import { discoverCommand } from "./discover.ts";
 import { extractCommonCommand } from "./extract-common.ts";
 import { extractComponentCommand } from "./extract-component.ts";
 import { findCommand } from "./find.ts";
+import { inlineCommand } from "./inline.ts";
 import { mockCleanupCommand } from "./mock-cleanup.ts";
 import { moveCommand } from "./move.ts";
 import { namingCommand } from "./naming.ts";
@@ -1155,6 +1156,59 @@ Examples:
 				logger.error(error instanceof Error ? error.message : String(error));
 				process.exit(1);
 			}
+		},
+	},
+
+	{
+		name: "inline",
+		helpText: `
+Usage: ${name} inline <barrel-file> [options]
+
+Inline a pure re-export barrel: rewrite all importers to import directly
+from the canonical source(s), removing the barrel indirection at call sites.
+The barrel file itself is left in place (use 'unused' to identify it for removal).
+
+Arguments:
+  barrel-file    Path to the barrel file to inline
+
+Options:
+  -n, --dry-run   Preview changes without modifying files
+  --force         Allow operation when git worktree has uncommitted changes
+  --no-verify     Disable type checking verification (enabled by default)
+  --verbose       Show detailed information about each change
+  --json          Output results as JSON
+  -p, --project   Path to project directory or tsconfig.json
+
+Requirements:
+  The barrel file must be a "pure re-export barrel" — every top-level statement
+  must be an \`export … from "…"\` statement. Any local declarations, imports, or
+  bare exports without a 'from' clause cause the command to abort.
+
+Limitations (v1):
+  • Namespace imports (\`import * as x\`) of the barrel are skipped with a warning.
+  • Dynamic imports and require() are skipped with a warning.
+  • Multi-source barrels (re-exports from >1 canonical source) are skipped with a warning.
+
+Examples:
+  ${name} inline src/shared/index.ts
+  ${name} inline src/utils/barrel.ts --dry-run
+  ${name} inline src/api/index.ts --no-verify
+`,
+		run: async ([barrelFile], values) => {
+			if (!barrelFile) {
+				logger.error("Error: inline requires a <barrel-file> argument");
+				logger.error(`Run '${name} inline --help' for usage`);
+				process.exit(1);
+			}
+			await inlineCommand({
+				barrelFile,
+				dryRun: values["dry-run"],
+				force: values.force,
+				verbose: values.verbose,
+				verify: !values["no-verify"],
+				project: values.project,
+				json: values.json,
+			});
 		},
 	},
 ];
