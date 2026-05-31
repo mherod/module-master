@@ -12,6 +12,7 @@ import { inlineCommand } from "./inline.ts";
 import { mockCleanupCommand } from "./mock-cleanup.ts";
 import { moveCommand } from "./move.ts";
 import { namingCommand } from "./naming.ts";
+import { FIND_TYPES, isInDomain, PREFER_STRATEGIES } from "./option-domains.ts";
 import { organiseCommand } from "./organise.ts";
 import { renameCommand } from "./rename.ts";
 import { similarCommand } from "./similar.ts";
@@ -323,8 +324,8 @@ Examples:
 				logger.error(`Run '${name} find --help' for usage`);
 				process.exit(1);
 			}
-			const findType = values.type as "file" | "export" | "all" | undefined;
-			if (findType && !["file", "export", "all"].includes(findType)) {
+			const findType = values.type;
+			if (findType !== undefined && !isInDomain(FIND_TYPES, findType)) {
 				logger.error("Error: --type must be 'file', 'export', or 'all'");
 				process.exit(1);
 			}
@@ -389,12 +390,8 @@ Examples:
 				logger.error(`Run '${name} alias --help' for usage`);
 				process.exit(1);
 			}
-			const prefer = values.prefer as
-				| "alias"
-				| "relative"
-				| "shortest"
-				| undefined;
-			if (prefer && !["alias", "relative", "shortest"].includes(prefer)) {
+			const prefer = values.prefer;
+			if (prefer !== undefined && !isInDomain(PREFER_STRATEGIES, prefer)) {
 				logger.error(
 					"Error: --prefer must be 'alias', 'relative', or 'shortest'"
 				);
@@ -967,14 +964,10 @@ Examples:
 					logger.error("Error: --max-changes must be a positive integer");
 					process.exit(1);
 				}
-				const aliasPrefer = values["alias-prefer"] as
-					| "alias"
-					| "relative"
-					| "shortest"
-					| undefined;
+				const aliasPrefer = values["alias-prefer"];
 				if (
-					aliasPrefer &&
-					!["alias", "relative", "shortest"].includes(aliasPrefer)
+					aliasPrefer !== undefined &&
+					!isInDomain(PREFER_STRATEGIES, aliasPrefer)
 				) {
 					logger.error(
 						"Error: --alias-prefer must be 'alias', 'relative', or 'shortest'"

@@ -68,7 +68,9 @@ const SAFE_TIDY_FIX_CATEGORIES = [
 	"alias-normalisation",
 ] as const satisfies readonly TidyFixCategory[];
 
-const ALL_TIDY_FIX_CATEGORIES = [
+/** Every tidy `--fix` category. Re-exported for the MCP `tidy` zod schema so
+ * the accepted set is defined once. */
+export const ALL_TIDY_FIX_CATEGORIES = [
 	...SAFE_TIDY_FIX_CATEGORIES,
 	"file-moves",
 	"mock-cleanup",

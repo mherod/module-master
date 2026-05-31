@@ -54,13 +54,22 @@ import {
 } from "./commands/mock-cleanup.ts";
 import { moveModule } from "./commands/move.ts";
 import { buildNamingReport } from "./commands/naming.ts";
+import {
+	FIND_TYPES,
+	PREFER_STRATEGIES,
+	type PreferStrategy,
+} from "./commands/option-domains.ts";
 import { buildOrganiseReport } from "./commands/organise.ts";
 import { renameSymbol } from "./commands/rename.ts";
 import {
 	applyRelocations,
 	buildTestRelocationReport,
 } from "./commands/test-relocation.ts";
-import { applyTidyFixes, buildTidyReport } from "./commands/tidy.ts";
+import {
+	ALL_TIDY_FIX_CATEGORIES,
+	applyTidyFixes,
+	buildTidyReport,
+} from "./commands/tidy.ts";
 import { findUnusedExports } from "./commands/unused.ts";
 import { isWorktreeDirty } from "./core/git.ts";
 import { buildDependencyGraph } from "./core/graph.ts";
@@ -74,6 +83,7 @@ import {
 } from "./core/verify.ts";
 import { discoverWorkspace } from "./core/workspace.ts";
 import type { InlineConflict, InlineRewrite } from "./types/inline.ts";
+import type { TidyFixCategory } from "./types/tidy.ts";
 import type { ProjectConfig } from "./types.ts";
 
 // ── Mutating-tool helpers ──────────────────────────────────────────
@@ -140,6 +150,15 @@ function toError(error: unknown): CallToolResult {
 	return errorText(error instanceof Error ? error.message : String(error));
 }
 
+/** Single source for the "no owning tsconfig" tool error. */
+function tsconfigNotFound(targetPath: string): CallToolResult {
+	return errorText(`Could not find tsconfig.json for ${targetPath}`);
+}
+
+/** Error message returned by mutating tools when the worktree is dirty and force is off. */
+const WORKTREE_BLOCKED_MESSAGE =
+	"Working tree has uncommitted changes. Commit/stash first, or rerun with force=true.";
+
 // ── Tool implementations ────────────────────────────────────────────
 
 function findTool(
@@ -173,7 +192,7 @@ async function analyzeTool(
 	const absolutePath = path.resolve(file);
 	const tsconfigPath = resolveTsConfig(project, path.dirname(absolutePath));
 	if (!tsconfigPath) {
-		return errorText(`Could not find tsconfig.json for ${absolutePath}`);
+		return tsconfigNotFound(absolutePath);
 	}
 	const projectConfig = loadProject(tsconfigPath, absolutePath);
 	const result = await analyze(absolutePath, projectConfig);
@@ -270,7 +289,7 @@ async function auditTool(
 	const absoluteDir = path.resolve(directory);
 	const tsconfigPath = resolveTsConfig(options.project, absoluteDir);
 	if (!tsconfigPath) {
-		return errorText(`Could not find tsconfig.json for ${absoluteDir}`);
+		return tsconfigNotFound(absoluteDir);
 	}
 	const projectConfig = loadProject(tsconfigPath);
 	const graph = await buildDependencyGraph(projectConfig);
@@ -423,15 +442,8 @@ async function tidyTool(
 		workspace?: boolean;
 		dryRun?: boolean;
 		force?: boolean;
-		fixCategories?: Array<
-			| "dead-exports"
-			| "alias-normalisation"
-			| "file-moves"
-			| "mock-cleanup"
-			| "case-renames"
-			| "layout-relocations"
-		>;
-		aliasPrefer?: "alias" | "relative" | "shortest";
+		fixCategories?: TidyFixCategory[];
+		aliasPrefer?: PreferStrategy;
 		maxChanges?: number;
 		fanOutThreshold?: number;
 		fanInThreshold?: number;
@@ -446,15 +458,13 @@ async function tidyTool(
 	const absoluteDir = path.resolve(directory);
 	const tsconfigPath = resolveTsConfig(options.project, absoluteDir);
 	if (!tsconfigPath) {
-		return errorText(`Could not find tsconfig.json for ${absoluteDir}`);
+		return tsconfigNotFound(absoluteDir);
 	}
 	const project = loadProject(tsconfigPath, absoluteDir);
 	const dryRun = options.dryRun ?? true;
 	const wt = await checkWorktree(project.rootDir, options.force ?? false);
 	if (wt.blocked && !dryRun) {
-		return errorText(
-			"Working tree has uncommitted changes. Commit/stash first, or rerun with force=true."
-		);
+		return errorText(WORKTREE_BLOCKED_MESSAGE);
 	}
 	const report = await buildTidyReport({
 		directory: absoluteDir,
@@ -517,14 +527,12 @@ async function namingTool(
 		const absoluteDir = path.resolve(directory);
 		const tsconfigPath = resolveTsConfig(options.project, absoluteDir);
 		if (!tsconfigPath) {
-			return errorText(`Could not find tsconfig.json for ${absoluteDir}`);
+			return tsconfigNotFound(absoluteDir);
 		}
 		const project = loadProject(tsconfigPath, absoluteDir);
 		const wt = await checkWorktree(project.rootDir, options.force ?? false);
 		if (wt.blocked) {
-			return errorText(
-				"Working tree has uncommitted changes. Commit/stash first, or rerun with force=true."
-			);
+			return errorText(WORKTREE_BLOCKED_MESSAGE);
 		}
 		const result = await applyNamingFix({
 			directory: absoluteDir,
@@ -579,15 +587,13 @@ async function testRelocationTool(
 	const absoluteDir = path.resolve(directory);
 	const tsconfigPath = resolveTsConfig(options.project, absoluteDir);
 	if (!tsconfigPath) {
-		return errorText(`Could not find tsconfig.json for ${absoluteDir}`);
+		return tsconfigNotFound(absoluteDir);
 	}
 	const project = loadProject(tsconfigPath, absoluteDir);
 	const dryRun = options.dryRun ?? true;
 	const wt = await checkWorktree(project.rootDir, options.force ?? false);
 	if (wt.blocked && !dryRun) {
-		return errorText(
-			"Working tree has uncommitted changes. Commit/stash first, or rerun with force=true."
-		);
+		return errorText(WORKTREE_BLOCKED_MESSAGE);
 	}
 	const report = await buildTestRelocationReport({
 		directory: absoluteDir,
@@ -622,15 +628,13 @@ async function mockCleanupTool(
 	const absoluteDir = path.resolve(directory);
 	const tsconfigPath = resolveTsConfig(options.project, absoluteDir);
 	if (!tsconfigPath) {
-		return errorText(`Could not find tsconfig.json for ${absoluteDir}`);
+		return tsconfigNotFound(absoluteDir);
 	}
 	const project = loadProject(tsconfigPath, absoluteDir);
 	const dryRun = options.dryRun ?? true;
 	const wt = await checkWorktree(project.rootDir, options.force ?? false);
 	if (wt.blocked && !dryRun) {
-		return errorText(
-			"Working tree has uncommitted changes. Commit/stash first, or rerun with force=true."
-		);
+		return errorText(WORKTREE_BLOCKED_MESSAGE);
 	}
 
 	const report = await buildMockCleanupReport({
@@ -678,7 +682,7 @@ server.registerTool(
 					"Absolute or cwd-relative path to the project root or a tsconfig.json; its tsconfig determines which files are in scope"
 				),
 			type: z
-				.enum(["file", "export", "all"])
+				.enum(FIND_TYPES)
 				.optional()
 				.describe(
 					"Restrict matches: 'file' = filenames only, 'export' = exported symbol names only, 'all' = both (default 'all')"
@@ -1052,22 +1056,13 @@ server.registerTool(
 				.optional()
 				.describe("Allow mutation when the git worktree is dirty"),
 			fixCategories: z
-				.array(
-					z.enum([
-						"dead-exports",
-						"alias-normalisation",
-						"file-moves",
-						"mock-cleanup",
-						"case-renames",
-						"layout-relocations",
-					])
-				)
+				.array(z.enum(ALL_TIDY_FIX_CATEGORIES))
 				.optional()
 				.describe(
 					"Fix categories to apply. Omit for safe defaults: dead-exports and alias-normalisation"
 				),
 			aliasPrefer: z
-				.enum(["alias", "relative", "shortest"])
+				.enum(PREFER_STRATEGIES)
 				.optional()
 				.describe(
 					"Strategy for the alias-normalisation fix category. Required to apply it; omitting it skips alias-normalisation."
@@ -1371,15 +1366,13 @@ async function moveTool(args: {
 		path.dirname(absoluteSource)
 	);
 	if (!tsconfigPath) {
-		return errorText(`Could not find tsconfig.json for ${absoluteSource}`);
+		return tsconfigNotFound(absoluteSource);
 	}
 	const project = loadProject(tsconfigPath, absoluteSource);
 
 	const wt = await checkWorktree(project.rootDir, args.force);
 	if (wt.blocked) {
-		return errorText(
-			"Working tree has uncommitted changes. Commit/stash first, or rerun with force=true."
-		);
+		return errorText(WORKTREE_BLOCKED_MESSAGE);
 	}
 
 	const workspace = (await discoverWorkspace(project.rootDir)) ?? undefined;
@@ -1441,15 +1434,13 @@ async function renameTool(args: {
 		path.dirname(absolutePath)
 	);
 	if (!tsconfigPath) {
-		return errorText(`Could not find tsconfig.json for ${absolutePath}`);
+		return tsconfigNotFound(absolutePath);
 	}
 	const project = loadProject(tsconfigPath, absolutePath);
 
 	const wt = await checkWorktree(project.rootDir, args.force);
 	if (wt.blocked) {
-		return errorText(
-			"Working tree has uncommitted changes. Commit/stash first, or rerun with force=true."
-		);
+		return errorText(WORKTREE_BLOCKED_MESSAGE);
 	}
 
 	const runRename = async () =>
@@ -1505,15 +1496,13 @@ async function aliasTool(args: {
 	const absoluteTarget = path.resolve(args.target);
 	const tsconfigPath = resolveTsConfig(args.project, absoluteTarget);
 	if (!tsconfigPath) {
-		return errorText(`Could not find tsconfig.json for ${absoluteTarget}`);
+		return tsconfigNotFound(absoluteTarget);
 	}
 	const project = loadProject(tsconfigPath);
 
 	const wt = await checkWorktree(project.rootDir, args.force);
 	if (wt.blocked) {
-		return errorText(
-			"Working tree has uncommitted changes. Commit/stash first, or rerun with force=true."
-		);
+		return errorText(WORKTREE_BLOCKED_MESSAGE);
 	}
 
 	const renames = parseSpecifierRenames(args.renameSpecifiers ?? []);
@@ -1735,7 +1724,7 @@ server.registerTool(
 					"Absolute or cwd-relative path to a file or directory whose imports should be normalized"
 				),
 			prefer: z
-				.enum(["alias", "relative", "shortest"])
+				.enum(PREFER_STRATEGIES)
 				.optional()
 				.describe(
 					"Normalization strategy: 'alias' = use tsconfig paths, 'relative' = use ./ paths, 'shortest' = pick the shorter option per import. Required unless renameSpecifiers is provided"
@@ -1817,7 +1806,7 @@ async function extractCommonTool(args: {
 	const absoluteDir = path.resolve(args.directory);
 	const tsconfigPath = resolveTsConfig(args.project, absoluteDir);
 	if (!tsconfigPath) {
-		return errorText(`Could not find tsconfig.json for ${absoluteDir}`);
+		return tsconfigNotFound(absoluteDir);
 	}
 	const project = loadProject(tsconfigPath);
 
@@ -2026,15 +2015,13 @@ async function inlineTool(args: {
 	const absoluteBarrel = path.resolve(args.barrelFile);
 	const tsconfigPath = resolveTsConfig(args.project, absoluteBarrel);
 	if (!tsconfigPath) {
-		return errorText(`Could not find tsconfig.json for ${absoluteBarrel}`);
+		return tsconfigNotFound(absoluteBarrel);
 	}
 	const project = loadProject(tsconfigPath, absoluteBarrel);
 
 	const wt = await checkWorktree(project.rootDir, args.force);
 	if (wt.blocked) {
-		return errorText(
-			"Working tree has uncommitted changes. Commit/stash first, or rerun with force=true."
-		);
+		return errorText(WORKTREE_BLOCKED_MESSAGE);
 	}
 
 	const { result, changes } = await inlineBarrel(absoluteBarrel, project, {
