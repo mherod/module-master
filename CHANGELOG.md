@@ -157,6 +157,18 @@ All notable user-facing changes to this project are documented here.
   checker-less callers (standalone source files, `.vue`, out-of-scope files),
   and `unused`/`audit` stay within the test timeout (#92).
 
+### Internal
+
+- **Single source of truth for global CLI option flags**: the global
+  option-flag set (kebab name + `parseArgs` shape + value type for each of the
+  43 flags) is now declared once in `src/commands/option-flags.ts`
+  (`OPTION_FLAGS`). Both `src/cli.ts`'s `parseArgs({ options })` map and
+  `src/commands/registry.ts`'s `CliValues` type are derived from it, replacing
+  what was a hand-maintained 1:1 duplicate. No user-facing behaviour change:
+  CLI flags, error strings, and the MCP server are untouched. First slice of a
+  larger command-spec consolidation; per-command specs and MCP schema
+  derivation are deferred.
+
 ## [1.7.0] — 2026-05-28
 
 ### New Features

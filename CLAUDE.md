@@ -50,9 +50,11 @@ The codebase uses the TypeScript Compiler API (`typescript` package) for parsing
 
 ### Entry Points
 
-Three entry points, all backed by `src/commands/*.ts`: **CLI** (`src/cli.ts`, dispatches `COMMANDS` from `registry.ts`, `bin: resect`); **MCP** (`src/mcp-server.ts`, one `registerTool` per command, `bin: resect-mcp`); **Library API** (`src/index.ts`, package `exports["."]`). No HTTP API — the third is the importable library. Every command must be reachable from all three; `src/index.test.ts` enforces CLI↔library parity (each `COMMANDS` entry needs a matching `<name>Command` export from `src/index.ts`).
+Three entry points, backed by `src/commands/*.ts`: **CLI** (`src/cli.ts`, dispatches `COMMANDS` from `registry.ts`, `bin: resect`); **MCP** (`src/mcp-server.ts`, one `registerTool` per command, `bin: resect-mcp`); **Library API** (`src/index.ts`, package `exports["."]`). No HTTP API. Every command must reach all three.
 
-DON'T: Add a command to `registry.ts` or `mcp-server.ts` without re-exporting its `*Command` and option/report types from `src/index.ts` — `src/index.test.ts` will fail.
+DON'T: Add a command to `registry.ts`/`mcp-server.ts` without re-exporting its `*Command` and option/report types from `src/index.ts` — `src/index.test.ts` enforces CLI↔library parity (each `COMMANDS` name needs a matching `<name>Command` export) and will fail.
+
+DON'T: Add a global CLI flag in `cli.ts`/`registry.ts` — declare it in `OPTION_FLAGS` (`src/commands/option-flags.ts`); `option-flags.test.ts` guards drift.
 
 ### Core Modules (`src/core/`)
 

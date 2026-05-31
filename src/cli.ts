@@ -3,6 +3,7 @@
 import { parseArgs } from "node:util";
 import { name, version } from "../package.json";
 import { logger } from "./cli-logger.ts";
+import { PARSE_ARGS_OPTIONS } from "./commands/option-flags.ts";
 import type { CliValues } from "./commands/registry.ts";
 import { COMMANDS } from "./commands/registry.ts";
 
@@ -16,51 +17,7 @@ const rawArgs = cliArgs.flatMap((arg) => {
 
 const { values, positionals } = parseArgs({
 	args: rawArgs,
-	options: {
-		help: { type: "boolean", short: "h" },
-		version: { type: "boolean", short: "v" },
-		verbose: { type: "boolean" },
-		"dry-run": { type: "boolean", short: "n" },
-		project: { type: "string", short: "p" },
-		type: { type: "string", short: "t" },
-		prefer: { type: "string" },
-		"alias-prefer": { type: "string" },
-		"rename-specifier": { type: "string", multiple: true },
-		force: { type: "boolean" },
-		"no-verify": { type: "boolean" },
-		fix: { type: "boolean" },
-		"fix-category": { type: "string", multiple: true },
-		json: { type: "boolean" },
-		threshold: { type: "string" },
-		"max-groups": { type: "string" },
-		"max-changes": { type: "string" },
-		strict: { type: "boolean" },
-		"name-threshold": { type: "string" },
-		"same-name-only": { type: "boolean" },
-		"skip-same-file": { type: "boolean" },
-		"only-related-to": { type: "string" },
-		"min-lines": { type: "string" },
-		"skip-directives": { type: "boolean" },
-		"skip-wrappers": { type: "boolean" },
-		kinds: { type: "string" },
-		group: { type: "string" },
-		output: { type: "string", short: "o" },
-		workspace: { type: "boolean" },
-		experimental: { type: "boolean" },
-		scope: { type: "string" },
-		out: { type: "string" },
-		bucket: { type: "string" },
-		format: { type: "string" },
-		"fan-out-threshold": { type: "string" },
-		"fan-in-threshold": { type: "string" },
-		"export-threshold": { type: "string" },
-		"min-siblings": { type: "string" },
-		"majority-threshold": { type: "string" },
-		"include-tests": { type: "boolean" },
-		"convention-threshold": { type: "string" },
-		ignore: { type: "string" },
-		"entrypoint-globs": { type: "string", multiple: true },
-	},
+	options: PARSE_ARGS_OPTIONS,
 	allowPositionals: true,
 });
 

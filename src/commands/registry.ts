@@ -13,58 +13,16 @@ import { mockCleanupCommand } from "./mock-cleanup.ts";
 import { moveCommand } from "./move.ts";
 import { namingCommand } from "./naming.ts";
 import { FIND_TYPES, isInDomain, PREFER_STRATEGIES } from "./option-domains.ts";
+import type { CliValues } from "./option-flags.ts";
+
+export type { CliValues } from "./option-flags.ts";
+
 import { organiseCommand } from "./organise.ts";
 import { renameCommand } from "./rename.ts";
 import { similarCommand } from "./similar.ts";
 import { testRelocationCommand } from "./test-relocation.ts";
 import { parseTidyFixCategories, tidyCommand } from "./tidy.ts";
 import { workspaceCommand } from "./workspace.ts";
-
-export interface CliValues {
-	help?: boolean;
-	ignore?: string;
-	"entrypoint-globs"?: string | string[];
-	version?: boolean;
-	verbose?: boolean;
-	"dry-run"?: boolean;
-	project?: string;
-	type?: string;
-	prefer?: string;
-	"alias-prefer"?: string;
-	"rename-specifier"?: string[];
-	force?: boolean;
-	"no-verify"?: boolean;
-	fix?: boolean;
-	"fix-category"?: string[];
-	json?: boolean;
-	threshold?: string;
-	"max-groups"?: string;
-	"max-changes"?: string;
-	strict?: boolean;
-	"name-threshold"?: string;
-	"same-name-only"?: boolean;
-	"skip-same-file"?: boolean;
-	"only-related-to"?: string;
-	"min-lines"?: string;
-	"skip-directives"?: boolean;
-	"skip-wrappers"?: boolean;
-	kinds?: string;
-	group?: string;
-	output?: string;
-	workspace?: boolean;
-	experimental?: boolean;
-	scope?: string;
-	out?: string;
-	"fan-out-threshold"?: string;
-	"fan-in-threshold"?: string;
-	"export-threshold"?: string;
-	"min-siblings"?: string;
-	"majority-threshold"?: string;
-	"include-tests"?: boolean;
-	"convention-threshold"?: string;
-	bucket?: string;
-	format?: string;
-}
 
 interface CommandDef {
 	name: string;
