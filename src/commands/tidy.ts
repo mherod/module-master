@@ -682,6 +682,73 @@ async function planCaseRenameChanges(
 	});
 }
 
+/**
+ * Colocation heuristic: a source file with exactly one unique importer that
+ * lives in a different directory is a move candidate — relocate it next to its
+ * only consumer. Barrel files and files that are part of a barrel's re-export
+ * surface are excluded (they are API boundaries, not implementation details).
+ */
+async function planFileMoveChanges(
+	scanDir: string,
+	project: ProjectConfig
+): Promise<PlannedTidyChange[]> {
+	const graphs = await buildProjectGraphs(project.tsconfigPath);
+	const graph = mergeDependencyGraphs(graphs.map(({ graph: g }) => g));
+
+	const barrelReExported = new Set<string>();
+	for (const files of graph.barrelReExports.values()) {
+		for (const f of files) {
+			barrelReExported.add(f);
+		}
+	}
+	const barrelFiles = new Set(graph.barrelReExports.keys());
+
+	const planned: PlannedTidyChange[] = [];
+
+	for (const [file, refs] of graph.importedBy.entries()) {
+		if (!isWithinPath(scanDir, file)) {
+			continue;
+		}
+		if (!TS_JS_VUE_EXTENSIONS.test(file)) {
+			continue;
+		}
+		if (barrelFiles.has(file) || barrelReExported.has(file)) {
+			continue;
+		}
+
+		const uniqueImporters = new Set(refs.map((ref) => ref.sourceFile));
+		if (uniqueImporters.size !== 1) {
+			continue;
+		}
+
+		const importerFile = Array.from(uniqueImporters)[0];
+		if (!importerFile) {
+			continue;
+		}
+		const sourceDir = path.dirname(file);
+		const importerDir = path.dirname(importerFile);
+		if (sourceDir === importerDir) {
+			continue;
+		}
+
+		const basename = path.basename(file);
+		const targetFile = path.join(importerDir, basename);
+		if (graph.imports.has(targetFile)) {
+			continue;
+		}
+
+		planned.push({
+			kind: "move",
+			category: "file-moves",
+			source: file,
+			target: targetFile,
+			exportName: `${path.relative(scanDir, file)} → ${path.relative(scanDir, targetFile)}`,
+		});
+	}
+
+	return planned;
+}
+
 async function planTidyFixes(
 	report: TidyReport,
 	options: TidyOptions,
@@ -730,6 +797,17 @@ async function planTidyFixes(
 		planned.push(...(await planCaseRenameChanges(options, reportDirectory)));
 	}
 
+	// file-moves is an aggressive move-variant category: not in
+	// SAFE_TIDY_FIX_CATEGORIES, so it only runs under explicit --fix=file-moves.
+	// Uses the colocation heuristic: files with exactly one unique importer in a
+	// different directory are moved next to that importer.
+	if (categories.has("file-moves")) {
+		const target = options.scope
+			? path.resolve(options.scope)
+			: reportDirectory;
+		planned.push(...(await planFileMoveChanges(target, project)));
+	}
+
 	return planned;
 }
 
@@ -763,6 +841,7 @@ const MUTATION_KIND_BY_CATEGORY: Partial<
 	Record<TidyFixCategory, TidyAppliedFix["mutationKind"]>
 > = {
 	"alias-normalisation": "alias-normalise",
+	"file-moves": "move",
 	"mock-cleanup": "mock-cleanup",
 	"case-renames": "case-rename",
 };

@@ -873,4 +873,146 @@ export function usedInternal() {
 
 		await cleanup(dir);
 	});
+
+	// file-moves: colocation heuristic — a file with exactly one importer in a
+	// different directory is a move candidate.
+	const FILE_MOVES_FILES: Record<string, string> = {
+		"tsconfig.json": JSON.stringify({
+			compilerOptions: { strict: true, target: "ESNext", module: "Preserve" },
+			include: ["**/*.ts"],
+		}),
+		// helper.ts lives in utils/ but is only used by feature/consumer.ts.
+		"src/utils/helper.ts":
+			'export function helper(): string { return "help"; }\n',
+		"src/feature/consumer.ts":
+			'import { helper } from "../utils/helper";\nexport const result = helper();\n',
+	};
+
+	test("--fix=file-moves moves single-importer file next to its consumer", async () => {
+		const dir = await makeGitFixture("file-moves-apply", FILE_MOVES_FILES);
+
+		const proc = Bun.spawn(
+			[
+				...CLI,
+				"tidy",
+				path.join(dir, "src"),
+				"--experimental",
+				"--fix=file-moves",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" }
+		);
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+		expect(report.applied).toContainEqual(
+			expect.objectContaining({
+				category: "file-moves",
+				mutationKind: "move",
+				wasRolledBack: false,
+			})
+		);
+		// helper.ts relocated from utils/ to feature/.
+		expect(await Bun.file(path.join(dir, "src/utils/helper.ts")).exists()).toBe(
+			false
+		);
+		expect(
+			await Bun.file(path.join(dir, "src/feature/helper.ts")).exists()
+		).toBe(true);
+		// consumer.ts specifier rewritten to local sibling.
+		const consumer = await Bun.file(
+			path.join(dir, "src/feature/consumer.ts")
+		).text();
+		expect(consumer).toContain('"./helper"');
+		expect(consumer).not.toContain('"../utils/helper"');
+
+		await cleanup(dir);
+	});
+
+	test("--fix=file-moves rolls back the move when closing typecheck is incomplete", async () => {
+		const dir = await makeGitFixture("file-moves-rollback", {
+			...FILE_MOVES_FILES,
+			// Unresolvable @types entry forces typecheck to be incomplete, triggering
+			// move-aware rollback.
+			"tsconfig.json": JSON.stringify({
+				compilerOptions: {
+					strict: true,
+					target: "ESNext",
+					module: "Preserve",
+					types: ["missing-resect-test-types"],
+				},
+				include: ["**/*.ts"],
+			}),
+		});
+
+		const proc = Bun.spawn(
+			[
+				...CLI,
+				"tidy",
+				path.join(dir, "src"),
+				"--experimental",
+				"--fix=file-moves",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" }
+		);
+		const [stdout, stderr] = await Promise.all([
+			new Response(proc.stdout).text(),
+			new Response(proc.stderr).text(),
+		]);
+		await proc.exited;
+		expect(proc.exitCode).toBe(1);
+		expect(stderr).toContain("tidy rolled back");
+		const report = JSON.parse(stdout);
+		expect(report.applied).toContainEqual(
+			expect.objectContaining({
+				category: "file-moves",
+				wasRolledBack: true,
+			})
+		);
+		// Move reversed: original path restored.
+		expect(await Bun.file(path.join(dir, "src/utils/helper.ts")).exists()).toBe(
+			true
+		);
+		expect(
+			await Bun.file(path.join(dir, "src/feature/helper.ts")).exists()
+		).toBe(false);
+
+		await cleanup(dir);
+	});
+
+	test("bare --fix leaves file-moves untouched (safe-default exclusion)", async () => {
+		const dir = await makeGitFixture(
+			"file-moves-safe-default",
+			FILE_MOVES_FILES
+		);
+
+		const proc = Bun.spawn(
+			[
+				...CLI,
+				"tidy",
+				path.join(dir, "src"),
+				"--experimental",
+				"--fix",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" }
+		);
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+		expect(
+			report.applied.some(
+				(fix: { category: string }) => fix.category === "file-moves"
+			)
+		).toBe(false);
+		// helper.ts left in its original location under bare --fix.
+		expect(await Bun.file(path.join(dir, "src/utils/helper.ts")).exists()).toBe(
+			true
+		);
+
+		await cleanup(dir);
+	});
 });

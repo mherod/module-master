@@ -36,7 +36,8 @@ export interface TidyAppliedFix {
 		| "de-export"
 		| "alias-normalise"
 		| "mock-cleanup"
-		| "case-rename";
+		| "case-rename"
+		| "move";
 	target: string;
 	wasRolledBack: boolean;
 }
