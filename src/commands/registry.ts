@@ -24,6 +24,18 @@ import { testRelocationCommand } from "./test-relocation.ts";
 import { parseTidyFixCategories, tidyCommand } from "./tidy.ts";
 import { workspaceCommand } from "./workspace.ts";
 
+function requireArg(
+	cmdName: string,
+	argSpec: string,
+	value: string | undefined
+): asserts value is string {
+	if (!value) {
+		logger.error(`Error: ${cmdName} requires a ${argSpec} argument`);
+		logger.error(`Run '${name} ${cmdName} --help' for usage`);
+		process.exit(1);
+	}
+}
+
 interface CommandDef {
 	name: string;
 	helpText: string;
@@ -155,11 +167,7 @@ Examples:
   ${name} analyze src/components/Button.tsx --verbose
 `,
 		run: async ([file], values) => {
-			if (!file) {
-				logger.error("Error: analyze requires a <file> argument");
-				logger.error(`Run '${name} analyze --help' for usage`);
-				process.exit(1);
-			}
+			requireArg("analyze", "<file>", file);
 			await analyzeCommand({
 				file,
 				verbose: values.verbose,
@@ -197,11 +205,7 @@ Examples:
   ${name} discover . --workspace
 `,
 		run: async ([directory], values) => {
-			if (!directory) {
-				logger.error("Error: discover requires a <directory> argument");
-				logger.error(`Run '${name} discover --help' for usage`);
-				process.exit(1);
-			}
+			requireArg("discover", "<directory>", directory);
 			await discoverCommand({
 				directory,
 				verbose: values.verbose,
@@ -231,11 +235,7 @@ Examples:
   ${name} workspace . --verbose
 `,
 		run: async ([directory], values) => {
-			if (!directory) {
-				logger.error("Error: workspace requires a <directory> argument");
-				logger.error(`Run '${name} workspace --help' for usage`);
-				process.exit(1);
-			}
+			requireArg("workspace", "<directory>", directory);
 			await workspaceCommand({
 				directory,
 				verbose: values.verbose,
@@ -272,11 +272,7 @@ Examples:
   ${name} find config -p . --type file --verbose
 `,
 		run: async ([query], values) => {
-			if (!query) {
-				logger.error("Error: find requires a <query> argument");
-				logger.error(`Run '${name} find --help' for usage`);
-				process.exit(1);
-			}
+			requireArg("find", "<query>", query);
 			if (!values.project) {
 				logger.error("Error: find requires -p <project> option");
 				logger.error(`Run '${name} find --help' for usage`);
@@ -337,11 +333,7 @@ Examples:
   ${name} alias src --rename-specifier="@utils/Foo=@utils/foo"
 `,
 		run: async ([target], values) => {
-			if (!target) {
-				logger.error("Error: alias requires a <target> argument");
-				logger.error(`Run '${name} alias --help' for usage`);
-				process.exit(1);
-			}
+			requireArg("alias", "<target>", target);
 			const renameSpecifiers = values["rename-specifier"] ?? [];
 			if (!(values.prefer || renameSpecifiers.length > 0)) {
 				logger.error("Error: alias requires --prefer option");
@@ -425,11 +417,7 @@ Examples:
   ${name} similar src --format=compact      # minimal output for scripting
 `,
 		run: async ([directory], values) => {
-			if (!directory) {
-				logger.error("Error: similar requires a <directory> argument");
-				logger.error(`Run '${name} similar --help' for usage`);
-				process.exit(1);
-			}
+			requireArg("similar", "<directory>", directory);
 			const rawThreshold = values.threshold;
 			const threshold = rawThreshold === undefined ? 0.8 : Number(rawThreshold);
 			if (Number.isNaN(threshold) || threshold < 0 || threshold > 1) {
@@ -543,11 +531,7 @@ Examples:
   ${name} extract-common src --dry-run --strict
 `,
 		run: async ([directory], values) => {
-			if (!directory) {
-				logger.error("Error: extract-common requires a <directory> argument");
-				logger.error(`Run '${name} extract-common --help' for usage`);
-				process.exit(1);
-			}
+			requireArg("extract-common", "<directory>", directory);
 			const rawThreshold = values.threshold;
 			const threshold =
 				rawThreshold === undefined ? 0.95 : Number(rawThreshold);
@@ -648,11 +632,7 @@ Examples:
   ${name} test-relocation src --fix
 `,
 		run: async ([directory], values) => {
-			if (!directory) {
-				logger.error("Error: test-relocation requires a <directory> argument");
-				logger.error(`Run '${name} test-relocation --help' for usage`);
-				process.exit(1);
-			}
+			requireArg("test-relocation", "<directory>", directory);
 			const rawConventionThreshold = values["convention-threshold"];
 			const conventionThreshold =
 				rawConventionThreshold === undefined
@@ -718,11 +698,7 @@ Examples:
   ${name} mock-cleanup src --fix
 `,
 		run: async ([directory], values) => {
-			if (!directory) {
-				logger.error("Error: mock-cleanup requires a <directory> argument");
-				logger.error(`Run '${name} mock-cleanup --help' for usage`);
-				process.exit(1);
-			}
+			requireArg("mock-cleanup", "<directory>", directory);
 			try {
 				await mockCleanupCommand({
 					directory,
@@ -768,11 +744,7 @@ Examples:
   ${name} naming src --fix
 `,
 		run: async ([directory], values) => {
-			if (!directory) {
-				logger.error("Error: naming requires a <directory> argument");
-				logger.error(`Run '${name} naming --help' for usage`);
-				process.exit(1);
-			}
+			requireArg("naming", "<directory>", directory);
 			const rawMinSiblings = values["min-siblings"];
 			const minSiblings =
 				rawMinSiblings === undefined ? undefined : Number(rawMinSiblings);
@@ -849,11 +821,7 @@ Examples:
   ${name} organise src --ignore="*.generated.ts"
 `,
 		run: async ([directory], values) => {
-			if (!directory) {
-				logger.error("Error: organise requires a <directory> argument");
-				logger.error(`Run '${name} organise --help' for usage`);
-				process.exit(1);
-			}
+			requireArg("organise", "<directory>", directory);
 			try {
 				await organiseCommand({
 					directory,
@@ -902,11 +870,7 @@ Examples:
   ${name} tidy src --experimental --out tidy-report.json --json
 `,
 		run: async ([directory], values) => {
-			if (!directory) {
-				logger.error("Error: tidy requires a <directory> argument");
-				logger.error(`Run '${name} tidy --help' for usage`);
-				process.exit(1);
-			}
+			requireArg("tidy", "<directory>", directory);
 			try {
 				const fixCategories =
 					values.fix || values["fix-category"]
@@ -994,11 +958,7 @@ Examples:
   ${name} audit src --fan-out-threshold=8 --export-threshold=5
 `,
 		run: async ([directory], values) => {
-			if (!directory) {
-				logger.error("Error: audit requires a <directory> argument");
-				logger.error(`Run '${name} audit --help' for usage`);
-				process.exit(1);
-			}
+			requireArg("audit", "<directory>", directory);
 			await auditCommand({
 				directory,
 				project: values.project,
@@ -1044,11 +1004,7 @@ Examples:
   ${name} unused src --entrypoint-globs="hooks/**" --entrypoint-globs="scripts/*.ts"
 `,
 		run: async ([directory], values) => {
-			if (!directory) {
-				logger.error("Error: unused requires a <directory> argument");
-				logger.error(`Run '${name} unused --help' for usage`);
-				process.exit(1);
-			}
+			requireArg("unused", "<directory>", directory);
 			const { unusedCommand: cmd } = await import("./unused.ts");
 			await cmd({
 				directory,
@@ -1090,11 +1046,7 @@ Examples:
   ${name} barrel . --workspace
 `,
 		run: async ([directory], values) => {
-			if (!directory) {
-				logger.error("Error: barrel requires a <directory> argument");
-				logger.error(`Run '${name} barrel --help' for usage`);
-				process.exit(1);
-			}
+			requireArg("barrel", "<directory>", directory);
 			try {
 				await barrelCommand({
 					directory,
@@ -1146,11 +1098,7 @@ Examples:
   ${name} inline src/api/index.ts --no-verify
 `,
 		run: async ([barrelFile], values) => {
-			if (!barrelFile) {
-				logger.error("Error: inline requires a <barrel-file> argument");
-				logger.error(`Run '${name} inline --help' for usage`);
-				process.exit(1);
-			}
+			requireArg("inline", "<barrel-file>", barrelFile);
 			await inlineCommand({
 				barrelFile,
 				dryRun: values["dry-run"],
