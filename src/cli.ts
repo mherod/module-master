@@ -3,6 +3,7 @@
 import { parseArgs } from "node:util";
 import { name, version } from "../package.json";
 import { logger } from "./cli-logger.ts";
+import { formatCommandList } from "./commands/command-spec.ts";
 import { PARSE_ARGS_OPTIONS } from "./commands/option-flags.ts";
 import type { CliValues } from "./commands/registry.ts";
 import { COMMANDS } from "./commands/registry.ts";
@@ -31,23 +32,7 @@ Usage:
   ${name} <command> [options] [args]
 
 Commands:
-  find <query> -p <project>           Find files and exports by name
-  analyze <file>                      Analyze a module's imports, exports, and references
-  discover <directory>                Discover tsconfig files and project structure
-  workspace <directory>               Discover pnpm/yarn/npm workspace packages
-  alias <target> --prefer=<strategy>  Normalize imports to use aliases, relative paths, or shortest
-  move <source> <target>              Move a module and update all references
-  rename <file> <oldName> <newName>   Rename an export and update all imports
-  similar <directory>                 Find similar or duplicate functions for consolidation
-  extract-common <directory>           Extract duplicate functions into shared modules
-  audit <directory>                    Analyze module health: fan-out, fan-in, cycles
-  barrel <directory>                   Analyze barrel files: shadowing, wildcards, chains
-  unused <directory>                   Find exports never imported by other files
-  mock-cleanup <directory>             Find orphan keys in mock factories
-  test-relocation <directory>          Find stranded or misnamed test files
-  naming <directory>                   Audit per-directory filename casing
-  organise <directory>                 Audit folder organisation and basename collisions
-  tidy <directory>                     Compose unused, similar, and audit reports
+${formatCommandList()}
 
 Options:
   -h, --help        Show this help message
