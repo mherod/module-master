@@ -11,6 +11,9 @@ import {
 import {
 	calculateRelativeSpecifier,
 	findAliasForPath,
+	isRelativeImport,
+	normalizePath,
+	resolveModuleSpecifier,
 } from "../core/resolver.ts";
 import { scanModuleReferences } from "../core/scanner.ts";
 import { withSourceFile } from "../core/source-file.ts";
@@ -41,6 +44,14 @@ export interface AliasResult {
 	importsUpdated: number;
 	changes: AliasChange[];
 	conflicts: AliasConflict[];
+	/**
+	 * Importers that reach a renamed module through a different specifier form
+	 * (e.g. a relative `./error` vs the aliased `@scope/error`) but could not be
+	 * rewritten automatically because the `to` specifier is relative and would
+	 * resolve differently from their directory. Surfaced so a module redirect is
+	 * never silently incomplete (issue #113).
+	 */
+	missedEquivalents?: MissedEquivalent[];
 }
 
 export interface AliasChange extends UpdatedReference {
@@ -51,9 +62,22 @@ interface AliasConflict extends AliasChange {
 	reason: string;
 }
 
+export interface MissedEquivalent {
+	file: string;
+	line: number;
+	specifier: string;
+	from: string;
+	to: string;
+}
+
 interface SpecifierRename {
 	from: string;
 	to: string;
+}
+
+interface ResolvedReference {
+	ref: ModuleReference;
+	resolvedPath: string | null;
 }
 
 const ALIAS_WRITE_CONCURRENCY = 4;
@@ -259,6 +283,10 @@ async function aliasRenameSpecifierCommand(options: {
 	);
 
 	if (result.changes.length === 0 && result.conflicts.length === 0) {
+		if (result.missedEquivalents && result.missedEquivalents.length > 0) {
+			printMissedEquivalents(result.missedEquivalents, project.rootDir);
+			return;
+		}
 		logger.info("✨ No changes needed. No matching specifiers found.\n");
 		return;
 	}
@@ -420,23 +448,65 @@ export function renameImportSpecifiers(
 ): AliasResult {
 	const changes: AliasChange[] = [];
 	const conflicts: AliasConflict[] = [];
+	const missedEquivalents: MissedEquivalent[] = [];
 	const filesToProcess = getFilesToProcess(target, project);
 	const program = createProgram(project, filesToProcess);
 	const renameByFrom = new Map(
 		renames.map((rename) => [rename.from, rename.to])
 	);
 
+	// Resolve every literal specifier up front so we can also rewrite importers
+	// that reach the same module through a different specifier form (issue #113).
+	// The raw scan is intentional: scanModuleReferences drops unresolvable
+	// specifiers, but exact-string rename must still catch those.
+	const fileReferences = new Map<string, ResolvedReference[]>();
+	const targetPathsByFrom = new Map<string, Set<string>>();
+
+	const recordTarget = (from: string, resolvedPath: string) => {
+		const paths = targetPathsByFrom.get(from) ?? new Set<string>();
+		paths.add(normalizePath(resolvedPath));
+		targetPathsByFrom.set(from, paths);
+	};
+
 	for (const file of filesToProcess) {
-		const references = getRawFileReferences(file, program);
-		const existingSpecifiers = buildSpecifierBindingMap(references);
-
-		for (const ref of references) {
-			const newSpecifier = renameByFrom.get(ref.specifier);
-			if (!newSpecifier) {
-				continue;
+		const resolved = getRawFileReferences(file, program).map((ref) => {
+			const result = resolveModuleSpecifier(ref.specifier, file, project);
+			return {
+				ref,
+				resolvedPath: result.kind === "resolved" ? result.path : null,
+			};
+		});
+		fileReferences.set(file, resolved);
+		for (const { ref, resolvedPath } of resolved) {
+			if (resolvedPath && renameByFrom.has(ref.specifier)) {
+				recordTarget(ref.specifier, resolvedPath);
 			}
+		}
+	}
 
-			const change = {
+	// A non-relative `from` resolves identically from any file, so anchor-resolve
+	// it once to learn its canonical target even when no importer used that exact
+	// spelling. Relative `from` is anchor-dependent and stays exact-match only.
+	const anchor =
+		filesToProcess[0] ?? path.join(project.rootDir, "__resect_anchor__.ts");
+	for (const { from } of renames) {
+		if (isRelativeImport(from)) {
+			continue;
+		}
+		const result = resolveModuleSpecifier(from, anchor, project);
+		if (result.kind === "resolved") {
+			recordTarget(from, result.path);
+		}
+	}
+
+	for (const file of filesToProcess) {
+		const resolved = fileReferences.get(file) ?? [];
+		const existingSpecifiers = buildSpecifierBindingMap(
+			resolved.map((entry) => entry.ref)
+		);
+
+		const record = (ref: ModuleReference, newSpecifier: string) => {
+			const change: AliasChange = {
 				file,
 				line: ref.line,
 				oldSpecifier: ref.specifier,
@@ -450,9 +520,51 @@ export function renameImportSpecifiers(
 					...change,
 					reason: `rewriting would create a duplicate "${newSpecifier}" specifier in the same file`,
 				});
-				continue;
+				return;
 			}
 			changes.push(change);
+		};
+
+		for (const { ref, resolvedPath } of resolved) {
+			// 1. Exact specifier match — original behavior, catches every spelling
+			//    including unresolvable specifiers.
+			const exactTarget = renameByFrom.get(ref.specifier);
+			if (exactTarget) {
+				record(ref, exactTarget);
+				continue;
+			}
+
+			// 2. Equivalent-form match — a different specifier that resolves to the
+			//    same module a `from` points at. Completing the redirect here means
+			//    deleting the old module afterwards no longer orphans these
+			//    importers, which was the silent breakage in issue #113.
+			if (!resolvedPath) {
+				continue;
+			}
+			const normalizedRefPath = normalizePath(resolvedPath);
+			for (const [from, to] of renameByFrom) {
+				if (from === ref.specifier || ref.specifier === to) {
+					continue;
+				}
+				if (!targetPathsByFrom.get(from)?.has(normalizedRefPath)) {
+					continue;
+				}
+				// A relative `to` would resolve differently from this importer's
+				// directory, so it cannot be applied blindly — surface it instead of
+				// silently skipping or producing a broken rewrite.
+				if (isRelativeImport(to)) {
+					missedEquivalents.push({
+						file,
+						line: ref.line,
+						specifier: ref.specifier,
+						from,
+						to,
+					});
+				} else {
+					record(ref, to);
+				}
+				break;
+			}
 		}
 	}
 
@@ -461,6 +573,7 @@ export function renameImportSpecifiers(
 		importsUpdated: changes.length,
 		changes,
 		conflicts,
+		missedEquivalents,
 	};
 }
 
@@ -864,7 +977,33 @@ function printResults(
 		logger.empty();
 	}
 
+	if (result.missedEquivalents && result.missedEquivalents.length > 0) {
+		printMissedEquivalents(result.missedEquivalents, pathBase);
+	}
+
 	if (!dryRun) {
 		logger.info("✨ Import normalization complete.\n");
 	}
+}
+
+/**
+ * Warn about importers that reach a renamed module through a different specifier
+ * form but were not rewritten because the target specifier is relative. Without
+ * this, deleting the old module after a redirect would silently orphan them
+ * (issue #113).
+ */
+function printMissedEquivalents(
+	missed: readonly MissedEquivalent[],
+	pathBase: string
+): void {
+	logger.warn(
+		`⚠️  ${missed.length} importer(s) resolve to a renamed module via a different specifier but were not rewritten (relative target cannot be applied across directories):`
+	);
+	for (const item of missed) {
+		const relativePath = path.relative(pathBase, item.file);
+		logger.warn(
+			`   ${relativePath}:${item.line}: "${item.specifier}" also resolves to "${item.from}" — rerun scoped to this file with --rename-specifier "${item.specifier}=<target>" to redirect it`
+		);
+	}
+	logger.empty();
 }

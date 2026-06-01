@@ -1565,6 +1565,13 @@ async function aliasTool(args: {
 			newSpecifier: c.newSpecifier,
 			reason: c.reason,
 		})),
+		missedEquivalents: (result.missedEquivalents ?? []).map((m) => ({
+			file: path.relative(root, m.file),
+			line: m.line,
+			specifier: m.specifier,
+			from: m.from,
+			to: m.to,
+		})),
 		typecheck: delta,
 	});
 }
@@ -1716,7 +1723,7 @@ server.registerTool(
 	"alias",
 	{
 		description:
-			"Normalize import specifiers across a file or directory to a chosen style, or rewrite exact specifier strings with `renameSpecifiers` for case-only alias moves. Strategies: `alias` rewrites relative paths to tsconfig `paths` aliases where available; `relative` rewrites alias paths to `./…` relative paths; `shortest` picks whichever resulting specifier is shorter per import. `renameSpecifiers` accepts repeated `<from>=<to>` strings and skips normalization logic. Defaults to `dryRun: true`; when `dryRun: false` and `verify: true` (both default) runs `tsc --noEmit` before AND after and returns the diagnostic delta. A dirty worktree is returned as an error unless `force: true`. Returns the strategy used, files processed, import count updated, conflicts, the per-change list, and (when verified) the typecheck delta.",
+			"Normalize import specifiers across a file or directory to a chosen style, or redirect a module's importers with `renameSpecifiers`. Strategies: `alias` rewrites relative paths to tsconfig `paths` aliases where available; `relative` rewrites alias paths to `./…` relative paths; `shortest` picks whichever resulting specifier is shorter per import. `renameSpecifiers` accepts repeated `<from>=<to>` strings: it rewrites every exact `<from>` match AND, when `<to>` is a non-relative specifier, every other importer that resolves to the same module (e.g. a sibling's relative `./error` when redirecting `@scope/error`), so a module redirect completes in one pass. Importers reaching the module via a different specifier that cannot be rewritten (relative `<to>`) are reported in `missedEquivalents` rather than silently skipped. Defaults to `dryRun: true`; when `dryRun: false` and `verify: true` (both default) runs `tsc --noEmit` before AND after and returns the diagnostic delta. A dirty worktree is returned as an error unless `force: true`. Returns the strategy used, files processed, import count updated, conflicts, missedEquivalents, the per-change list, and (when verified) the typecheck delta.",
 		inputSchema: {
 			target: z
 				.string()
@@ -1733,7 +1740,7 @@ server.registerTool(
 				.array(z.string())
 				.optional()
 				.describe(
-					"Exact specifier rewrite pairs in '<from>=<to>' form, for example '@utils/Foo=@utils/foo'. When provided, normalization strategy is skipped"
+					"Specifier rewrite pairs in '<from>=<to>' form, for example '@scope/error=@scope/shared/error'. Rewrites every exact '<from>' match; when '<to>' is non-relative it also redirects other importers that resolve to the same module (e.g. relative './error'). When provided, normalization strategy is skipped"
 				),
 			project: z
 				.string()

@@ -250,4 +250,78 @@ describe("renameImportSpecifiers", () => {
 		expect(result.conflicts[0]?.oldSpecifier).toBe("@utils/Foo");
 		expect(result.conflicts[0]?.newSpecifier).toBe("@utils/foo");
 	});
+
+	test("redirects relative importers of the same module to a non-relative target (#113)", async () => {
+		const { srcDir } = await writeAliasProject({
+			"src/lib/error.ts": "export const fail = () => {};\n",
+			"src/consumer.ts": 'import { fail } from "@lib/error";\n',
+			"src/lib/sibling.ts": 'import { fail } from "./error";\n',
+		});
+
+		await aliasCommand({
+			target: srcDir,
+			renameSpecifiers: ["@lib/error=@utils/error"],
+			force: true,
+			verify: false,
+		});
+
+		const consumer = await Bun.file(path.join(srcDir, "consumer.ts")).text();
+		const sibling = await Bun.file(path.join(srcDir, "lib/sibling.ts")).text();
+
+		// Exact alias match is rewritten…
+		expect(consumer).toContain('from "@utils/error"');
+		// …and the relative importer of the SAME module is redirected too,
+		// so deleting src/lib/error.ts afterwards no longer orphans it.
+		expect(sibling).toContain('from "@utils/error"');
+		expect(sibling).not.toContain('"./error"');
+	});
+
+	test("redirects relative importers even with no exact-spelled importer (#113)", async () => {
+		const { projectPath, srcDir } = await writeAliasProject({
+			"src/lib/error.ts": "export const fail = () => {};\n",
+			"src/lib/sibling.ts": 'import { fail } from "./error";\n',
+		});
+		const project = loadProject(projectPath);
+
+		// No file imports via "@lib/error" exactly — the canonical target is found
+		// by anchor-resolving the non-relative `from`.
+		const result = renameImportSpecifiers(
+			srcDir,
+			parseSpecifierRenames(["@lib/error=@utils/error"]),
+			project
+		);
+
+		expect(result.conflicts).toHaveLength(0);
+		expect(result.changes).toHaveLength(1);
+		expect(result.changes[0]?.oldSpecifier).toBe("./error");
+		expect(result.changes[0]?.newSpecifier).toBe("@utils/error");
+	});
+
+	test("surfaces missed equivalents when the target is relative (#113)", async () => {
+		const { projectPath, srcDir } = await writeAliasProject({
+			"src/lib/error.ts": "export const fail = () => {};\n",
+			"src/consumer.ts": 'import { fail } from "@lib/error";\n',
+			"src/lib/sibling.ts": 'import { fail } from "./error";\n',
+		});
+		const project = loadProject(projectPath);
+
+		const result = renameImportSpecifiers(
+			srcDir,
+			parseSpecifierRenames(["@lib/error=./relocated"]),
+			project
+		);
+
+		// Exact match still rewritten even though the target is relative…
+		expect(result.changes.some((c) => c.oldSpecifier === "@lib/error")).toBe(
+			true
+		);
+		// …but the relative-form sibling cannot be safely redirected to a relative
+		// target across directories, so it is reported, never silently skipped.
+		expect(result.changes.some((c) => c.oldSpecifier === "./error")).toBe(
+			false
+		);
+		expect(result.missedEquivalents).toHaveLength(1);
+		expect(result.missedEquivalents?.[0]?.specifier).toBe("./error");
+		expect(result.missedEquivalents?.[0]?.from).toBe("@lib/error");
+	});
 });

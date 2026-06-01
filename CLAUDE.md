@@ -58,19 +58,19 @@ DON'T: Add a global CLI flag in `cli.ts`/`registry.ts` — declare it in `OPTION
 
 ### Core Modules (`src/core/`)
 
-- **project.ts** - Loads tsconfig.json, extracts path aliases, creates TS programs
-- **tsconfig-discovery.ts** - Smart discovery of all tsconfig files, handles monorepos and project references
-- **similarity-algorithms.ts** - Pure stateless algorithm primitives (bigrams, Jaccard, name similarity, normalization). No I/O, no async — unit-testable without mocking
-- **source-file.ts** - `parseSourceFile()` and `withSourceFile()` (file-path and program overloads, both invoke a callback with the parsed source file)
-- **scanner.ts** - AST traversal to extract all imports/exports from a source file; scanner functions take `ts.SourceFile` directly (use `source-file.ts` to obtain one)
-- **resolver.ts** - Module path resolution, alias matching, relative path calculation, cross-package import resolution
-- **graph.ts** - Builds dependency graph (imports/importedBy maps) for the entire project
-- **updater.ts** - Applies text changes to update import specifiers in files, adds exports to destination barrels
-- **verify.ts** - Type checking verification using `tsc --noEmit` before/after changes
-- **workspace.ts** - Discovers pnpm/yarn/npm workspace packages, barrel files, and tsconfig paths
-- **text-changes.ts** - Shared utilities for applying text edits: `TextChange` interface, `applyTextChanges()`, `deduplicateChanges()`
-- **constants.ts** - Shared constants and patterns: `TSC_ERROR_PATTERN`, `EXPORT_STATEMENT_PATTERN`, `removeExtension()`
-- **git.ts** - Git worktree safety: `isWorktreeDirty()` and `ensureCleanWorktree()` for dirty-worktree guard
+- **project.ts** — loads tsconfig.json, extracts path aliases, creates TS programs
+- **tsconfig-discovery.ts** — discovers all tsconfig files; handles monorepos and project references
+- **similarity-algorithms.ts** — stateless primitives (bigrams, Jaccard, name similarity, normalization); no I/O/async
+- **source-file.ts** — `parseSourceFile()` and `withSourceFile()` (file-path + program overloads; callback gets the parsed source file)
+- **scanner.ts** — AST traversal extracting imports/exports; functions take `ts.SourceFile` (obtain via `source-file.ts`)
+- **resolver.ts** — module path resolution, alias matching, relative-path calc, cross-package import resolution
+- **graph.ts** — builds dependency graph (imports/importedBy maps)
+- **updater.ts** — applies text changes to import specifiers; adds exports to destination barrels
+- **verify.ts** — type-check verification via `tsc --noEmit` before/after
+- **workspace.ts** — discovers pnpm/yarn/npm packages, barrel files, tsconfig paths
+- **text-changes.ts** — text-edit utils: `TextChange`, `applyTextChanges()`, `deduplicateChanges()`
+- **constants.ts** — shared constants: `TSC_ERROR_PATTERN`, `EXPORT_STATEMENT_PATTERN`, `removeExtension()`
+- **git.ts** — worktree safety: `isWorktreeDirty()`, `ensureCleanWorktree()`
 
 ### Commands (`src/commands/`)
 
@@ -216,36 +216,33 @@ Case-insensitive dual search (filenames + exports) via `discoverProject()` + `sc
 
 `alias` (`src/commands/alias.ts`) normalizes import specifiers:
 
-- **Strategies**: `--prefer=alias`, `--prefer=relative`, `--prefer=shortest`
-- **Exact rewrites**: repeat `--rename-specifier="<from>=<to>"` for static specifier batches without strategy selection
-- **Scope**: single files or directories; skips node_modules and imports outside `project.rootDir`
-- **Coverage**: relative (`./foo`) and alias (`@/foo`) imports; specifiers need not start with `.`
-- **Safety**: default `tsc --noEmit` before/after verification
-- **Edits**: scanner/updater positions plus `applyTextChanges()`; never TypeScript-printer reserialize
-- **Resolver**: use `calculateRelativeSpecifier()` and `findAliasForPath()` from `src/core/resolver.ts`
+- **Strategies**: `--prefer=alias|relative|shortest`
+- **Module redirect**: repeat `--rename-specifier="<from>=<to>"` (no strategy)
+- **Scope**: files or directories; skips node_modules and imports outside `project.rootDir`
+- **Coverage**: relative (`./foo`) and alias (`@/foo`) imports; need not start with `.`
+- **Safety**: default `tsc --noEmit` before/after (see Type Checking Verification)
+- **Edits**: scanner/updater positions + `applyTextChanges()`; never printer-reserialize
+- **Resolver** (`src/core/resolver.ts`): `calculateRelativeSpecifier()`, `findAliasForPath()`, `resolveModuleSpecifier()`, `normalizePath()`, `isRelativeImport()`
 
-Case-only alias rename flow:
+### `renameImportSpecifiers()` — resolution-aware redirect (#113)
 
-1. `move src/utils/Foo.ts src/utils/foo.ts` updates relative importers.
-2. `alias src --rename-specifier="@utils/Foo=@utils/foo"` updates alias importers.
+Per `<from>=<to>`: rewrites literal `<from>` AND, when `<to>` is non-relative, every other importer resolving to the same module (relative `./error` redirected with `@scope/error`); relative-`<to>` equivalents go to `AliasResult.missedEquivalents` (CLI/MCP-surfaced), never silently skipped.
+
+DON'T: swap `getRawFileReferences()` for `scanModuleReferences()` in rename mode — it drops unresolvable/external specifiers (`resolveDeclarationRef` → `null`). Resolve raw refs on demand.
+
+DON'T: trust a green verify as complete — `alias` never deletes the source, so missed importers still resolve (`newErrors:[]`). Act on `missedEquivalents` first.
+
+Case-only alias rename flow: `move src/utils/Foo.ts src/utils/foo.ts` (relative importers), then `alias src --rename-specifier="@utils/Foo=@utils/foo"` (alias importers).
 
 DON'T: Apply alias to complex dynamic imports or computed module paths; rely on verification and manual review.
 
 ## Type Checking Verification
 
-- **Before/after comparison**: Runs `tsc --noEmit -p <tsconfig>` before and after changes
-- **Error diffing**: Identifies new issues introduced by changes
-- **Exit on failure**: Commands exit non-zero for new type errors
-- **Bonus tracking**: Reports errors fixed by refactoring
-- **Enabled by default**: `--no-verify` skips it
+- Runs `tsc --noEmit -p <tsconfig>` before/after and diffs output: new type errors → non-zero exit; errors fixed by the refactor are reported too. Enabled by default; `--no-verify` skips.
 
-Verification spawns `tsc` and diffs output. `runTypeCheck(project)` is exported from `verify.ts` and reused by `move.ts`.
+`runTypeCheck(project)` is exported from `verify.ts` and reused by `move.ts`. `collectUnresolvableDiagnostics(project)` returns `UnresolvableDiagnosticWithFile[]` (project-wide unresolvable imports), exposed as `VerificationResult.unresolvableDiagnostics`.
 
-`collectUnresolvableDiagnostics(project)` returns `UnresolvableDiagnosticWithFile[]` for project-wide unresolvable import reporting. Exposed as `VerificationResult.unresolvableDiagnostics` after a verify pass.
-
-DON'T: Duplicate `runTypeCheck` logic in command files. Import from `verify.ts`.
-
-DON'T: Duplicate unresolvable-import scanning across command files. Call `collectUnresolvableDiagnostics(project)` from `verify.ts`.
+DON'T: Duplicate `runTypeCheck` or unresolvable-import scanning in command files — import both from `verify.ts`.
 
 ## Case-Insensitive Filesystems
 

@@ -10,6 +10,7 @@ export type {
 	AliasChange,
 	AliasOptions,
 	AliasResult,
+	MissedEquivalent,
 } from "./commands/alias.ts";
 export { aliasCommand } from "./commands/alias.ts";
 // ── Commands: analyze ───────────────────────────────────────────────
