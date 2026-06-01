@@ -1015,4 +1015,144 @@ export function usedInternal() {
 
 		await cleanup(dir);
 	});
+
+	// layout-relocations: organise LCA-based heuristic — a file whose importers
+	// all cluster in one subdirectory is a relocation candidate.
+	const LAYOUT_RELOC_FILES: Record<string, string> = {
+		"tsconfig.json": JSON.stringify({
+			compilerOptions: { strict: true, target: "ESNext", module: "Preserve" },
+			include: ["**/*.ts"],
+		}),
+		// util.ts lives in shared/ but all importers are in calc/.
+		"src/shared/util.ts":
+			'export function util(): string { return "utility"; }\n',
+		"src/calc/a.ts":
+			'import { util } from "../shared/util";\nexport const a = util();\n',
+		"src/calc/b.ts":
+			'import { util } from "../shared/util";\nexport const b = util() + "!";\n',
+	};
+
+	test("--fix=layout-relocations moves LCA-misplaced file next to its consumers", async () => {
+		const dir = await makeGitFixture("layout-reloc-apply", LAYOUT_RELOC_FILES);
+
+		const proc = Bun.spawn(
+			[
+				...CLI,
+				"tidy",
+				path.join(dir, "src"),
+				"--experimental",
+				"--fix=layout-relocations",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" }
+		);
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+		expect(report.applied).toContainEqual(
+			expect.objectContaining({
+				category: "layout-relocations",
+				mutationKind: "move",
+				wasRolledBack: false,
+			})
+		);
+		// util.ts relocated from shared/ to calc/.
+		expect(await Bun.file(path.join(dir, "src/shared/util.ts")).exists()).toBe(
+			false
+		);
+		expect(await Bun.file(path.join(dir, "src/calc/util.ts")).exists()).toBe(
+			true
+		);
+		// Importer specifiers rewritten to local sibling.
+		const aContent = await Bun.file(path.join(dir, "src/calc/a.ts")).text();
+		expect(aContent).toContain('"./util"');
+		expect(aContent).not.toContain('"../shared/util"');
+
+		await cleanup(dir);
+	});
+
+	test("--fix=layout-relocations rolls back when closing typecheck is incomplete", async () => {
+		const dir = await makeGitFixture("layout-reloc-rollback", {
+			...LAYOUT_RELOC_FILES,
+			"tsconfig.json": JSON.stringify({
+				compilerOptions: {
+					strict: true,
+					target: "ESNext",
+					module: "Preserve",
+					types: ["missing-resect-test-types"],
+				},
+				include: ["**/*.ts"],
+			}),
+		});
+
+		const proc = Bun.spawn(
+			[
+				...CLI,
+				"tidy",
+				path.join(dir, "src"),
+				"--experimental",
+				"--fix=layout-relocations",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" }
+		);
+		const [stdout, stderr] = await Promise.all([
+			new Response(proc.stdout).text(),
+			new Response(proc.stderr).text(),
+		]);
+		await proc.exited;
+		expect(proc.exitCode).toBe(1);
+		expect(stderr).toContain("tidy rolled back");
+		const report = JSON.parse(stdout);
+		expect(report.applied).toContainEqual(
+			expect.objectContaining({
+				category: "layout-relocations",
+				wasRolledBack: true,
+			})
+		);
+		// Move reversed: original path restored.
+		expect(await Bun.file(path.join(dir, "src/shared/util.ts")).exists()).toBe(
+			true
+		);
+		expect(await Bun.file(path.join(dir, "src/calc/util.ts")).exists()).toBe(
+			false
+		);
+
+		await cleanup(dir);
+	});
+
+	test("bare --fix leaves layout-relocations untouched (safe-default exclusion)", async () => {
+		const dir = await makeGitFixture(
+			"layout-reloc-safe-default",
+			LAYOUT_RELOC_FILES
+		);
+
+		const proc = Bun.spawn(
+			[
+				...CLI,
+				"tidy",
+				path.join(dir, "src"),
+				"--experimental",
+				"--fix",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" }
+		);
+		const stdout = await new Response(proc.stdout).text();
+		await proc.exited;
+		expect(proc.exitCode).toBe(0);
+		const report = JSON.parse(stdout);
+		expect(
+			report.applied.some(
+				(fix: { category: string }) => fix.category === "layout-relocations"
+			)
+		).toBe(false);
+		// util.ts left in its original location under bare --fix.
+		expect(await Bun.file(path.join(dir, "src/shared/util.ts")).exists()).toBe(
+			true
+		);
+
+		await cleanup(dir);
+	});
 });

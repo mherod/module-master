@@ -749,6 +749,64 @@ async function planFileMoveChanges(
 	return planned;
 }
 
+/**
+ * Layout-relocation planner: sources suggested moves from two complementary
+ * heuristics — `organise`'s LCA-based misplacement detection (any number of
+ * importers all clustered in one subtree) and `test-relocation`'s stranded-test
+ * detection. Unlike `planFileMoveChanges` (single-importer only), this covers
+ * multi-importer misplacement and stranded tests.
+ */
+async function planLayoutRelocationChanges(
+	options: TidyOptions,
+	reportDirectory: string,
+	project: ProjectConfig
+): Promise<PlannedTidyChange[]> {
+	const { buildOrganiseReport } = await import("./organise.ts");
+	const { findTestRelocations } = await import("./test-relocation.ts");
+
+	const scopeDir = options.scope
+		? path.resolve(options.scope)
+		: reportDirectory;
+	const planned: PlannedTidyChange[] = [];
+	const seenSources = new Set<string>();
+
+	// Source 1: organise LCA-based misplaced non-test files.
+	const organiseReport = await buildOrganiseReport({
+		directory: scopeDir,
+		project: options.project,
+	});
+	for (const misplaced of organiseReport.misplacedFiles) {
+		planned.push({
+			kind: "move",
+			category: "layout-relocations",
+			source: misplaced.absolutePath,
+			target: path.resolve(scopeDir, misplaced.suggestedPath),
+			exportName: `${misplaced.file} → ${misplaced.suggestedPath}`,
+		});
+		seenSources.add(misplaced.absolutePath);
+	}
+
+	// Source 2: test-relocation stranded tests (not colocated with their subject).
+	const graphs = await buildProjectGraphs(project.tsconfigPath);
+	const graph = mergeDependencyGraphs(graphs.map(({ graph: g }) => g));
+	const relocations = findTestRelocations(graph, { directory: scopeDir });
+	for (const relocation of relocations) {
+		const source = path.resolve(scopeDir, relocation.currentLocation);
+		if (seenSources.has(source)) {
+			continue;
+		}
+		planned.push({
+			kind: "move",
+			category: "layout-relocations",
+			source,
+			target: path.resolve(scopeDir, relocation.suggestedLocation),
+			exportName: `${relocation.currentLocation} → ${relocation.suggestedLocation}`,
+		});
+	}
+
+	return planned;
+}
+
 async function planTidyFixes(
 	report: TidyReport,
 	options: TidyOptions,
@@ -808,6 +866,16 @@ async function planTidyFixes(
 		planned.push(...(await planFileMoveChanges(target, project)));
 	}
 
+	// layout-relocations is an aggressive move-variant category: not in
+	// SAFE_TIDY_FIX_CATEGORIES, so it only runs under explicit
+	// --fix=layout-relocations. Sources moves from organise (LCA-based
+	// multi-importer misplacement) and test-relocation (stranded tests).
+	if (categories.has("layout-relocations")) {
+		planned.push(
+			...(await planLayoutRelocationChanges(options, reportDirectory, project))
+		);
+	}
+
 	return planned;
 }
 
@@ -844,6 +912,7 @@ const MUTATION_KIND_BY_CATEGORY: Partial<
 	"file-moves": "move",
 	"mock-cleanup": "mock-cleanup",
 	"case-renames": "case-rename",
+	"layout-relocations": "move",
 };
 
 function mutationKindForCategory(
