@@ -18,6 +18,12 @@ import {
 	findBarrelReExports,
 } from "../core/graph.ts";
 import {
+	applyDependencyAdditions,
+	computeDependencyAdditions,
+	serializePackageJson,
+} from "../core/package-deps.ts";
+import { readPackageJson } from "../core/package-json.ts";
+import {
 	createProgram,
 	loadProject,
 	resolveTsConfig,
@@ -28,7 +34,11 @@ import {
 	isCrossPackageMove,
 	normalizePath,
 } from "../core/resolver.ts";
-import { scanExports, scanModuleReferences } from "../core/scanner.ts";
+import {
+	scanExports,
+	scanExternalImports,
+	scanModuleReferences,
+} from "../core/scanner.ts";
 import { createSourceFileFromText } from "../core/source-file.ts";
 import { applyTextChanges } from "../core/text-changes.ts";
 import {
@@ -47,7 +57,12 @@ import {
 } from "../core/workspace.ts";
 import { getRuntime } from "../runtime/index.ts";
 import type { Runtime } from "../runtime/types.ts";
-import type { MoveError, MoveResult, UpdatedReference } from "../types/move.ts";
+import type {
+	DependencyChange,
+	MoveError,
+	MoveResult,
+	UpdatedReference,
+} from "../types/move.ts";
 import type { MutatingCommandOptions, ProjectConfig } from "../types.ts";
 
 export interface MoveOptions extends MutatingCommandOptions {
@@ -179,6 +194,16 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 
 	printCommandResult(result, "move", "Moved", dryRun, verbose, project.rootDir);
 
+	if (result.dependencyChanges && result.dependencyChanges.length > 0) {
+		logger.info(
+			`📦 ${dryRun ? "Would add" : "Added"} ${result.dependencyChanges.length} dependency(ies) to the destination package.json:`
+		);
+		for (const dep of result.dependencyChanges) {
+			logger.info(`   • ${dep.field}: "${dep.name}": "${dep.version}"`);
+		}
+		logger.empty();
+	}
+
 	if (!result.success) {
 		process.exit(1);
 	}
@@ -269,6 +294,82 @@ async function runPackageBuilds(
 	);
 }
 
+/**
+ * Sync the moved file's external dependencies into the destination package.json
+ * on a cross-package move (issue #118). The moved file's npm imports must be
+ * declared by the destination package or it will fail to build with phantom
+ * dependencies. Copies each missing external dep's version range from the
+ * SOURCE package, mirroring `dependencies`/`peerDependencies` placement and
+ * never duplicating/downgrading an existing destination entry. Returns the
+ * entries added (empty when there is nothing to add); writes nothing on dryRun.
+ */
+async function syncCrossPackageDependencies(
+	rt: Runtime,
+	sourceAst: ts.SourceFile,
+	sourcePath: string,
+	targetPath: string,
+	project: ProjectConfig,
+	workspace: WorkspaceInfo,
+	dryRun: boolean
+): Promise<DependencyChange[]> {
+	const sourcePkgRef = findPackageForPath(sourcePath, workspace);
+	const targetPkgRef = findPackageForPath(targetPath, workspace);
+	if (!(sourcePkgRef && targetPkgRef)) {
+		return [];
+	}
+	const sourcePkg = workspace.packages.find(
+		(p) => p.name === sourcePkgRef.packageName
+	);
+	const targetPkg = workspace.packages.find(
+		(p) => p.name === targetPkgRef.packageName
+	);
+	if (!(sourcePkg && targetPkg)) {
+		return [];
+	}
+
+	const externalImports = scanExternalImports(sourceAst, project);
+	if (externalImports.length === 0) {
+		return [];
+	}
+
+	// Read the destination package.json fresh so additions compute against its
+	// real, current maps and unrelated fields are preserved on write.
+	const destJson = await readPackageJson(targetPkg.packageJsonPath);
+	if (!destJson) {
+		return [];
+	}
+
+	const additions = computeDependencyAdditions(
+		externalImports.map((imp) => imp.packageName),
+		{
+			dependencies: sourcePkg.dependencies,
+			peerDependencies: sourcePkg.peerDependencies,
+		},
+		{
+			dependencies: destJson.dependencies as Record<string, string> | undefined,
+			peerDependencies: destJson.peerDependencies as
+				| Record<string, string>
+				| undefined,
+		}
+	);
+	if (additions.length === 0) {
+		return [];
+	}
+
+	if (!dryRun) {
+		const updated = applyDependencyAdditions(destJson, additions);
+		await rt.fs.writeFile(
+			targetPkg.packageJsonPath,
+			serializePackageJson(updated)
+		);
+	}
+
+	return additions.map((add) => ({
+		...add,
+		packageJsonPath: targetPkg.packageJsonPath,
+	}));
+}
+
 export async function moveModule(
 	sourcePath: string,
 	targetPath: string,
@@ -280,6 +381,7 @@ export async function moveModule(
 ): Promise<MoveResult> {
 	const errors: MoveError[] = [];
 	const updatedReferences: UpdatedReference[] = [];
+	const dependencyChanges: DependencyChange[] = [];
 	const rt = getRuntime();
 
 	// Validate source exists
@@ -613,11 +715,42 @@ export async function moveModule(
 		}
 	}
 
+	// Sync the moved file's external dependencies into the destination
+	// package.json so the new package can build (issue #118).
+	if (workspace && crossPackage && sourceAst) {
+		try {
+			const synced = await syncCrossPackageDependencies(
+				rt,
+				sourceAst,
+				sourcePath,
+				targetPath,
+				project,
+				workspace,
+				dryRun
+			);
+			if (synced.length > 0) {
+				dependencyChanges.push(...synced);
+				if (verbose) {
+					logger.info(
+						`${dryRun ? "Would sync" : "Synced"} ${synced.length} dependency(ies) to ${path.basename(synced[0]?.packageJsonPath ?? "package.json")}`
+					);
+				}
+			}
+		} catch (error) {
+			errors.push({
+				file: targetPath,
+				message: `Could not sync dependencies: ${error instanceof Error ? error.message : String(error)}`,
+				recoverable: true,
+			});
+		}
+	}
+
 	return {
 		success: errors.filter((e) => !e.recoverable).length === 0,
 		movedFile: { from: sourcePath, to: targetPath },
 		updatedReferences,
 		errors,
+		dependencyChanges,
 	};
 }
 

@@ -196,9 +196,11 @@ export {
 	resolveModuleSpecifier,
 } from "./core/resolver.ts";
 // ── Core: scanner ───────────────────────────────────────────────────
+export type { ExternalImport } from "./core/scanner.ts";
 export {
 	scanBarrelExports,
 	scanExports,
+	scanExternalImports,
 	scanModuleReferences,
 } from "./core/scanner.ts";
 // ── Core: similarity ────────────────────────────────────────────────
@@ -266,6 +268,8 @@ export type {
 	MockSourceRange,
 } from "./types/mock-cleanup.ts";
 export type {
+	DependencyChange,
+	DependencyField,
 	MoveError,
 	MoveOperation,
 	MoveResult,

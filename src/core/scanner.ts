@@ -16,7 +16,11 @@ import type {
 	MockSourceRange,
 } from "../types/mock-cleanup.ts";
 import type { ProjectConfig } from "../types.ts";
-import { type ResolveResult, resolveModuleSpecifier } from "./resolver.ts";
+import {
+	packageNameFromSpecifier,
+	type ResolveResult,
+	resolveModuleSpecifier,
+} from "./resolver.ts";
 
 /**
  * Warn when a specifier cannot be resolved. External packages are expected
@@ -104,6 +108,76 @@ export function scanUnresolvableImports(
 
 	visit(sourceFile);
 	return diagnostics;
+}
+
+export interface ExternalImport {
+	/** The raw import specifier, e.g. "lodash/fp" */
+	specifier: string;
+	/** The npm package name the specifier belongs to, e.g. "lodash" */
+	packageName: string;
+	/** 1-based line number of the import in the source file */
+	line: number;
+}
+
+/**
+ * Scan a source file for external (bare, non-relative, non-aliased) module
+ * specifiers — the npm/workspace packages the file depends on.
+ *
+ * `scanModuleReferences()` deliberately DROPS these: `resolveDeclarationRef()`
+ * returns `null` for every specifier whose `resolveModuleSpecifier` kind is not
+ * `"resolved"`. Cross-package dependency sync (move into another package) needs
+ * to know the moved file's external imports, so this is a dedicated collector.
+ *
+ * Covers static `import … from "pkg"` and `export … from "pkg"`. Results are
+ * deduplicated by package name (the first occurrence's specifier + line is kept).
+ */
+export function scanExternalImports(
+	sourceFile: ts.SourceFile,
+	project: ProjectConfig
+): ExternalImport[] {
+	const byPackage = new Map<string, ExternalImport>();
+
+	function visit(node: ts.Node) {
+		let specifierNode: ts.StringLiteral | undefined;
+		if (
+			ts.isImportDeclaration(node) &&
+			ts.isStringLiteral(node.moduleSpecifier)
+		) {
+			specifierNode = node.moduleSpecifier;
+		} else if (
+			ts.isExportDeclaration(node) &&
+			node.moduleSpecifier &&
+			ts.isStringLiteral(node.moduleSpecifier)
+		) {
+			specifierNode = node.moduleSpecifier;
+		}
+
+		if (specifierNode) {
+			const resolved = resolveModuleSpecifier(
+				specifierNode.text,
+				sourceFile.fileName,
+				project
+			);
+			if (resolved.kind === "external") {
+				const packageName = packageNameFromSpecifier(specifierNode.text);
+				if (packageName && !byPackage.has(packageName)) {
+					const { line } = sourceFile.getLineAndCharacterOfPosition(
+						node.getStart(sourceFile)
+					);
+					byPackage.set(packageName, {
+						specifier: specifierNode.text,
+						packageName,
+						line: line + 1,
+					});
+				}
+			}
+		}
+
+		ts.forEachChild(node, visit);
+	}
+
+	visit(sourceFile);
+	return [...byPackage.values()];
 }
 
 /**

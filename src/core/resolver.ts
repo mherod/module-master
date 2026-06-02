@@ -367,6 +367,28 @@ export function findPackageForPath(
 }
 
 /**
+ * Extract the npm package name from a bare module specifier.
+ *
+ * `"lodash"` → `"lodash"`; `"lodash/fp"` → `"lodash"`;
+ * `"@scope/pkg"` → `"@scope/pkg"`; `"@scope/pkg/sub"` → `"@scope/pkg"`.
+ * Returns `null` for relative/absolute specifiers (not packages).
+ */
+export function packageNameFromSpecifier(specifier: string): string | null {
+	if (specifier.startsWith(".") || path.isAbsolute(specifier)) {
+		return null;
+	}
+	const parts = specifier.split("/");
+	if (specifier.startsWith("@")) {
+		// Scoped package: name is the first two segments (@scope/name).
+		return parts.length >= 2 && parts[0] && parts[1]
+			? `${parts[0]}/${parts[1]}`
+			: null;
+	}
+	const name = parts[0];
+	return name && name.length > 0 ? name : null;
+}
+
+/**
  * Check if two paths are in different workspace packages
  */
 export function isCrossPackageMove(

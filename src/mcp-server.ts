@@ -1503,6 +1503,12 @@ async function moveTool(args: {
 			oldSpecifier: r.oldSpecifier,
 			newSpecifier: r.newSpecifier,
 		})),
+		dependencyChanges: (result.dependencyChanges ?? []).map((d) => ({
+			packageJson: path.relative(root, d.packageJsonPath),
+			name: d.name,
+			version: d.version,
+			field: d.field,
+		})),
 		errors: result.errors.map((e) => ({
 			file: path.relative(root, e.file),
 			message: e.message,
