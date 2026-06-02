@@ -265,20 +265,25 @@ function updateAliasedSpecifier(
 
 				const aliased = aliasPrefix + newRemainder;
 
-				// #121: when the importing file now lives inside this alias's own
-				// root directory, an alias specifier that resolves to a barrel
-				// `index` (`<alias>/index`) is a self-referential, unexported
-				// subpath that fails to resolve (TS2307). Rewrite it as a relative
-				// import to the (sibling) target instead.
-				if (
-					aliased.endsWith("/index") &&
-					normalizePath(fromFile).startsWith(`${absolutePattern}/`)
-				) {
-					return calculateRelativeSpecifier(
-						fromFile,
-						newTargetPath,
-						oldSpecifier
-					);
+				// An alias that resolves to the root's own barrel `index`
+				// (`<alias>/index`) is (almost) never an exported subpath, so it
+				// fails to resolve (TS2307).
+				if (aliased.endsWith("/index")) {
+					// #121: the importing file now lives inside this alias's own
+					// root — a self-referential barrel import. Rewrite it as a
+					// relative import to the (sibling) target instead.
+					if (normalizePath(fromFile).startsWith(`${absolutePattern}/`)) {
+						return calculateRelativeSpecifier(
+							fromFile,
+							newTargetPath,
+							oldSpecifier
+						);
+					}
+					// #122: the importer is outside the alias root (e.g. an
+					// unrelated package's barrel). The bare alias resolves to the
+					// same barrel from any location, so drop the redundant `/index`
+					// and leave the package specifier untouched.
+					return aliased.slice(0, -"/index".length);
 				}
 
 				return aliased;

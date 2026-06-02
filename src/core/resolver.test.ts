@@ -626,8 +626,9 @@ describe("calculateNewSpecifier intra-package self-import (#121)", () => {
 		expect(result).toBe(".");
 	});
 
-	test("keeps the alias for an importer outside the package root", () => {
-		// An app file outside the alias root keeps using the package specifier.
+	test("leaves an outside importer's bare barrel specifier untouched (#122)", () => {
+		// An importer outside the alias root keeps the bare package specifier —
+		// never `<alias>/index`, which is an unexported subpath (TS2307).
 		const fromFile = "/repo/apps/web/consumer.ts";
 		const result = calculateNewSpecifier(
 			"@scope/web-analytics",
@@ -637,6 +638,7 @@ describe("calculateNewSpecifier intra-package self-import (#121)", () => {
 			project
 		);
 		expect(result.startsWith(".")).toBe(false);
-		expect(result).toContain("@scope/web-analytics");
+		expect(result).not.toContain("/index");
+		expect(result).toBe("@scope/web-analytics");
 	});
 });
