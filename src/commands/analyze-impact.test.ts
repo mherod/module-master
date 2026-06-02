@@ -115,6 +115,55 @@ describe("analyze-impact engine (#115)", () => {
 		expect(report.missingDependencies).toEqual([]);
 	});
 
+	test("scores breakingRisk 'low' for an unimported leaf module", async () => {
+		const dir = await fixture("risk-low", {
+			"tsconfig.json": TSCONFIG,
+			"leaf.ts": "export const leaf = 1;",
+		});
+
+		const report = await analyzeImpact({
+			source: path.join(dir, "leaf.ts"),
+			target: path.join(dir, "leaf2.ts"),
+			project: dir,
+		});
+
+		expect(report.impactedFilesCount).toBe(0);
+		expect(report.breakingRisk).toBe("low");
+	});
+
+	test("scores breakingRisk 'high' when the target package is missing deps", async () => {
+		const dir = await fixture("risk-high", { ...WORKSPACE });
+
+		const report = await analyzeImpact({
+			source: path.join(dir, "packages/pkg-a/src/foo.ts"),
+			target: path.join(dir, "packages/pkg-b/src/foo.ts"),
+			project: dir,
+		});
+
+		// Cross-package move with a missing dependency (lodash) → guaranteed break.
+		expect(report.missingDependencies).toEqual(["lodash"]);
+		expect(report.breakingRisk).toBe("high");
+	});
+
+	test("scores breakingRisk 'medium' for a stable, imported module within one package", async () => {
+		const dir = await fixture("risk-medium", {
+			"tsconfig.json": TSCONFIG,
+			"util.ts": "export const util = 1;",
+			"a.ts": 'import { util } from "./util";\nexport const a = util;',
+		});
+
+		const report = await analyzeImpact({
+			source: path.join(dir, "util.ts"),
+			target: path.join(dir, "renamed.ts"),
+			project: dir,
+		});
+
+		// util.ts has an importer and zero imports → instability 0 (stable) → medium.
+		expect(report.impactedFilesCount).toBeGreaterThanOrEqual(1);
+		expect(report.boundaryCrossedCount).toBe(0);
+		expect(report.breakingRisk).toBe("medium");
+	});
+
 	test("is read-only — the source file is never modified", async () => {
 		const original = "export const foo = 1;\n";
 		const dir = await fixture("read-only", {

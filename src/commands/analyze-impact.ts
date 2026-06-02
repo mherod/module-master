@@ -21,8 +21,9 @@ import {
 import { parseSourceFile } from "../core/source-file.ts";
 import type { WorkspaceInfo } from "../core/workspace.ts";
 import { discoverWorkspace } from "../core/workspace.ts";
-import type { ImpactReport } from "../types/impact.ts";
+import type { BreakingRisk, ImpactReport } from "../types/impact.ts";
 import type { ProjectConfig, ReadOnlyCommandOptions } from "../types.ts";
+import { computeMetrics } from "./audit.ts";
 
 export interface AnalyzeImpactOptions extends ReadOnlyCommandOptions {
 	/** File proposed to move/rename. */
@@ -104,6 +105,20 @@ export async function analyzeImpact(
 			? computeMissingDependencies(source, project, targetPackage, workspace)
 			: [];
 
+	// Risk scoring (#116): blast radius + boundary crossing + missing deps, with
+	// the source's instability as a tie-breaker. Target instability is N/A — the
+	// destination does not exist before the move.
+	const sourceInstability =
+		computeMetrics(graph).find(
+			(m) => normalizePath(m.file) === normalizedSource
+		)?.instability ?? 1;
+	const breakingRisk = scoreBreakingRisk({
+		impactedFilesCount: impactedFiles.length,
+		boundaryCrossedCount,
+		missingDependencyCount: missingDependencies.length,
+		sourceInstability,
+	});
+
 	return {
 		source,
 		target,
@@ -112,10 +127,57 @@ export async function analyzeImpact(
 		boundaryCrossedCount,
 		sourcePackage,
 		targetPackage,
-		// Risk scoring is #116 — keep the stub band until then.
-		breakingRisk: "low",
+		breakingRisk,
 		missingDependencies,
 	};
+}
+
+/** Blast radius (impacted files) at/above which a move is inherently high-risk. */
+const HIGH_IMPACT_THRESHOLD = 20;
+/** Blast radius at/above which a move is at least medium-risk. */
+const MEDIUM_IMPACT_THRESHOLD = 5;
+/** Instability at/below which a module counts as "stable" (widely depended on). */
+const STABLE_INSTABILITY_THRESHOLD = 0.3;
+
+/**
+ * Derive the coarse `breakingRisk` band (#116) from the impact signals.
+ *
+ * Ordering, highest first:
+ *  - missing target deps → a cross-package move would not build → `high`.
+ *  - very large blast radius, or a boundary crossing with a sizeable radius → `high`.
+ *  - any boundary crossing, or a medium blast radius → `medium`.
+ *  - a stable (low-instability) module with at least one importer → `medium`.
+ *  - otherwise `low`.
+ */
+function scoreBreakingRisk(signals: {
+	impactedFilesCount: number;
+	boundaryCrossedCount: number;
+	missingDependencyCount: number;
+	sourceInstability: number;
+}): BreakingRisk {
+	const {
+		impactedFilesCount,
+		boundaryCrossedCount,
+		missingDependencyCount,
+		sourceInstability,
+	} = signals;
+
+	if (
+		missingDependencyCount > 0 ||
+		impactedFilesCount >= HIGH_IMPACT_THRESHOLD ||
+		(boundaryCrossedCount >= 1 && impactedFilesCount >= MEDIUM_IMPACT_THRESHOLD)
+	) {
+		return "high";
+	}
+	if (
+		boundaryCrossedCount >= 1 ||
+		impactedFilesCount >= MEDIUM_IMPACT_THRESHOLD ||
+		(impactedFilesCount > 0 &&
+			sourceInstability <= STABLE_INSTABILITY_THRESHOLD)
+	) {
+		return "medium";
+	}
+	return "low";
 }
 
 export async function analyzeImpactCommand(
