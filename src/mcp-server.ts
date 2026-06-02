@@ -45,7 +45,11 @@ import { analyze } from "./commands/analyze.ts";
 import { buildAuditReport } from "./commands/audit.ts";
 import { analyzeBarrels, barrelReportToJson } from "./commands/barrel.ts";
 import { runExtractCommon } from "./commands/extract-common.ts";
-import { locateExtractComponentTarget } from "./commands/extract-component.ts";
+import {
+	analyzeExtractComponentFreeVariables,
+	type FreeVariableReport,
+	locateExtractComponentTarget,
+} from "./commands/extract-component.ts";
 import { search } from "./commands/find.ts";
 import { inlineBarrel } from "./commands/inline.ts";
 import {
@@ -245,7 +249,22 @@ function extractComponentTool(
 ): CallToolResult {
 	const absolutePath = path.resolve(file);
 	const report = locateExtractComponentTarget(absolutePath, selector, newFile);
-	return jsonText(report);
+	// Free-variable classification (#108) needs the type-checker, so it only runs
+	// when the file resolves to a tsconfig project; degrade to locate-only when
+	// it doesn't rather than failing the tool call.
+	let classification: FreeVariableReport | null = null;
+	let classificationError: string | null = null;
+	try {
+		classification = analyzeExtractComponentFreeVariables({
+			file: absolutePath,
+			selector,
+			newFile,
+		});
+	} catch (error) {
+		classificationError =
+			error instanceof Error ? error.message : String(error);
+	}
+	return jsonText({ ...report, classification, classificationError });
 }
 
 function discoverTool(directory: string): CallToolResult {
@@ -730,7 +749,7 @@ server.registerTool(
 	"extract-component",
 	{
 		description:
-			"Locate the JSX/TSX subtree you intend to split into its own typed sub-component, BEFORE any mutation. Resolves a selector — a line range ('L12-40' or '12-40', 1-based inclusive) or a JSX tag/component name ('Card', 'div') — to exactly ONE JSX node and reports its kind (element/self-closing/fragment), tag name, character span, and line range. Errors clearly when nothing matches or the selector is ambiguous (lists the candidates so you can narrow with a line range). This is slice 1 of the extract-component feature: it is READ-ONLY and writes nothing — free-variable/hook classification, Props-interface codegen, and the call-site rewrite + tsc verify/rollback arrive in later slices.",
+			"Locate the JSX/TSX subtree you intend to split into its own typed sub-component, BEFORE any mutation. Resolves a selector — a line range ('L12-40' or '12-40', 1-based inclusive) or a JSX tag/component name ('Card', 'div') — to exactly ONE JSX node and reports its kind (element/self-closing/fragment), tag name, character span, and line range. When the file resolves to a tsconfig project, it also returns a `classification`: prop candidates (name + resolved type, for the eventual Props interface) and unliftable hooks (values derived from useState/use* that cannot be lifted into a child) with a `blocked` flag; `classificationError` is set instead when the type-checker is unavailable. Errors clearly when nothing matches or the selector is ambiguous (lists the candidates so you can narrow with a line range). READ-ONLY and writes nothing — Props-interface codegen and the call-site rewrite + tsc verify/rollback arrive in later slices.",
 		inputSchema: {
 			file: z
 				.string()

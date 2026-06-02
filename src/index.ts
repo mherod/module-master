@@ -50,14 +50,20 @@ export { extractCommonCommand } from "./commands/extract-common.ts";
 export type {
 	ExtractComponentOptions,
 	ExtractComponentReport,
+	FreeVariableReport,
 	JsxNodeKind,
 	LocatedJsxNode,
+	PropCandidate,
+	UnliftableHook,
 } from "./commands/extract-component.ts";
 export {
+	analyzeExtractComponentFreeVariables,
+	classifyFreeVariables,
 	extractComponentCommand,
 	locateExtractComponentTarget,
 	locateJsxNode,
 	parseSelector,
+	resolveJsxTsNode,
 } from "./commands/extract-component.ts";
 // ── Commands: find ──────────────────────────────────────────────────
 export type {
