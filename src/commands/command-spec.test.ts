@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	COMMAND_NAMES,
 	COMMAND_SPECS,
+	commandSpec,
 	formatCommandList,
 } from "./command-spec.ts";
 import { COMMANDS } from "./registry.ts";
@@ -54,6 +55,44 @@ describe("command roster parity", () => {
 		expect(new Set(summaryColumns).size).toBeGreaterThan(0);
 		for (const row of rows) {
 			expect(row.startsWith("  ")).toBe(true);
+		}
+	});
+});
+
+/**
+ * Prose-derivation guard (#112).
+ *
+ * Each command's `cliHelp` (CLI `--help`) and `mcpDescription` (MCP tool
+ * description) now live on its `CommandSpec`. `registry.ts` derives every
+ * `helpText` from `cliHelp`, and `mcp-server.ts` derives every `registerTool`
+ * description from `mcpDescription`. These tests fail if a command stops
+ * deriving its prose from the spec (the drift mode this consolidation closes).
+ */
+describe("command prose derivation", () => {
+	test("every spec carries non-empty cliHelp and mcpDescription", () => {
+		for (const spec of COMMAND_SPECS) {
+			expect(spec.cliHelp.length).toBeGreaterThan(0);
+			expect(spec.mcpDescription.length).toBeGreaterThan(0);
+			// Structural sanity: the CLI help is a usage block naming the command.
+			expect(spec.cliHelp).toContain("Usage:");
+			expect(spec.cliHelp).toContain(spec.name);
+		}
+	});
+
+	test("CLI registry helpText derives from the spec's cliHelp", () => {
+		for (const command of COMMANDS) {
+			expect(command.helpText).toBe(commandSpec(command.name).cliHelp);
+		}
+	});
+
+	test("every MCP tool derives its description from the spec", async () => {
+		// mcp-server.ts boots a stdio server on import, so read it as text.
+		const source = await Bun.file(`${import.meta.dir}/../mcp-server.ts`).text();
+		// No inline description string literals survive the consolidation.
+		expect(source).not.toMatch(/description:\s*\n\s*["'`]/);
+		// Every command's tool references mcpDescription("<name>").
+		for (const { name } of COMMAND_SPECS) {
+			expect(source).toContain(`description: mcpDescription("${name}")`);
 		}
 	});
 });

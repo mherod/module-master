@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 
 import { parseArgs } from "node:util";
-import { name, version } from "../package.json";
+import { version } from "../package.json";
 import { logger } from "./cli-logger.ts";
-import { formatCommandList } from "./commands/command-spec.ts";
+import { CLI_NAME, formatCommandList } from "./commands/command-spec.ts";
 import { PARSE_ARGS_OPTIONS } from "./commands/option-flags.ts";
 import type { CliValues } from "./commands/registry.ts";
 import { COMMANDS } from "./commands/registry.ts";
@@ -24,12 +24,12 @@ const { values, positionals } = parseArgs({
 
 function showHelp() {
 	logger.info(`
-${name} v${version}
+${CLI_NAME} v${version}
 
 Precise TypeScript/JavaScript module refactoring tool.
 
 Usage:
-  ${name} <command> [options] [args]
+  ${CLI_NAME} <command> [options] [args]
 
 Commands:
 ${formatCommandList()}
@@ -76,19 +76,19 @@ Options:
   --ignore          Glob pattern to exclude files (unused command, e.g. "*.test.ts")
 
 Examples:
-  ${name} find Entity -p /path/to/project
-  ${name} analyze src/utils/helpers.ts
-  ${name} alias src --prefer=alias --dry-run
-  ${name} alias src --rename-specifier="@utils/Foo=@utils/foo"
-  ${name} move src/old/file.ts src/new/file.ts --dry-run
-  ${name} rename src/components/Button.tsx Button PrimaryButton
-  ${name} similar src --json
-  ${name} mock-cleanup src --fix
+  ${CLI_NAME} find Entity -p /path/to/project
+  ${CLI_NAME} analyze src/utils/helpers.ts
+  ${CLI_NAME} alias src --prefer=alias --dry-run
+  ${CLI_NAME} alias src --rename-specifier="@utils/Foo=@utils/foo"
+  ${CLI_NAME} move src/old/file.ts src/new/file.ts --dry-run
+  ${CLI_NAME} rename src/components/Button.tsx Button PrimaryButton
+  ${CLI_NAME} similar src --json
+  ${CLI_NAME} mock-cleanup src --fix
 `);
 }
 
 function showVersion() {
-	logger.info(`${name} v${version}`);
+	logger.info(`${CLI_NAME} v${version}`);
 }
 
 async function main() {

@@ -1,10 +1,10 @@
-import { name } from "../../package.json";
 import { logger } from "../cli-logger.ts";
 import { aliasCommand } from "./alias.ts";
 import { analyzeCommand } from "./analyze.ts";
 import { analyzeImpactCommand } from "./analyze-impact.ts";
 import { auditCommand } from "./audit.ts";
 import { barrelCommand } from "./barrel.ts";
+import { CLI_NAME, cliHelp } from "./command-spec.ts";
 import { discoverCommand } from "./discover.ts";
 import { extractCommonCommand } from "./extract-common.ts";
 import { extractComponentCommand } from "./extract-component.ts";
@@ -32,7 +32,7 @@ function requireArg(
 ): asserts value is string {
 	if (!value) {
 		logger.error(`Error: ${cmdName} requires a ${argSpec} argument`);
-		logger.error(`Run '${name} ${cmdName} --help' for usage`);
+		logger.error(`Run '${CLI_NAME} ${cmdName} --help' for usage`);
 		process.exit(1);
 	}
 }
@@ -46,36 +46,11 @@ interface CommandDef {
 export const COMMANDS: CommandDef[] = [
 	{
 		name: "move",
-		helpText: `
-Usage: ${name} move <source> <target> [options]
-
-Move a TypeScript/JavaScript module to a new location and update all references.
-
-Arguments:
-  source    Path to the file to move
-  target    Destination path for the file
-
-Options:
-  -n, --dry-run   Preview changes without modifying files
-  --force         Allow operation when git worktree has uncommitted changes
-  --verbose       Show detailed information about each change
-  --workspace     Scan across all workspace packages
-
-Features:
-  • Updates all import statements referencing the moved file
-  • Preserves path aliases when possible
-  • Updates barrel file re-exports
-  • Handles dynamic imports and require() calls
-  • Updates internal imports within the moved file
-
-Examples:
-  ${name} move src/utils/old.ts src/helpers/new.ts
-  ${name} move src/components/Button.tsx src/ui/Button.tsx --dry-run
-`,
+		helpText: cliHelp("move"),
 		run: async ([source, target], values) => {
 			if (!(source && target)) {
 				logger.error("Error: move requires <source> and <target> arguments");
-				logger.error(`Run '${name} move --help' for usage`);
+				logger.error(`Run '${CLI_NAME} move --help' for usage`);
 				process.exit(1);
 			}
 			await moveCommand({
@@ -93,40 +68,13 @@ Examples:
 
 	{
 		name: "rename",
-		helpText: `
-Usage: ${name} rename <file> <oldName> <newName> [options]
-
-Rename an exported symbol (class, function, component, type) and update all imports.
-
-Arguments:
-  file       Path to the file containing the export
-  oldName    Current name of the export
-  newName    New name for the export
-
-Options:
-  -n, --dry-run   Preview changes without modifying files
-  --force         Allow operation when git worktree has uncommitted changes
-  --verbose       Show detailed information about each change
-  --workspace     Scan across all workspace packages
-
-Features:
-  • Renames the export in the source file
-  • Updates all named imports across the codebase
-  • Updates barrel file re-exports
-  • Preserves import aliases (import { Old as X } → import { New as X })
-  • Handles classes, functions, constants, types, and interfaces
-
-Examples:
-  ${name} rename src/components/Button.tsx Button PrimaryButton
-  ${name} rename src/utils/api.ts fetchUser getUser --dry-run
-  ${name} rename src/types.ts UserDTO User --verbose
-`,
+		helpText: cliHelp("rename"),
 		run: async ([file, oldName, newName], values) => {
 			if (!(file && oldName && newName)) {
 				logger.error(
 					"Error: rename requires <file>, <oldName>, and <newName> arguments"
 				);
-				logger.error(`Run '${name} rename --help' for usage`);
+				logger.error(`Run '${CLI_NAME} rename --help' for usage`);
 				process.exit(1);
 			}
 			await renameCommand({
@@ -144,29 +92,7 @@ Examples:
 
 	{
 		name: "analyze",
-		helpText: `
-Usage: ${name} analyze <file> [options]
-
-Analyze a module's imports, exports, and references throughout the codebase.
-
-Arguments:
-  file    Path to the file to analyze
-
-Options:
-  --verbose          Show detailed reference information
-  --workspace        Scan across all workspace packages
-  --only-related-to  Filter referencedBy results to a file, folder, or glob pattern
-
-Output includes:
-  • All exports from the file
-  • All imports used by the file
-  • All files that reference this module
-  • Barrel files that re-export this module
-
-Examples:
-  ${name} analyze src/utils/helpers.ts
-  ${name} analyze src/components/Button.tsx --verbose
-`,
+		helpText: cliHelp("analyze"),
 		run: async ([file], values) => {
 			requireArg("analyze", "<file>", file);
 			await analyzeCommand({
@@ -181,28 +107,7 @@ Examples:
 
 	{
 		name: "analyze-impact",
-		helpText: `
-Usage: ${name} analyze-impact <source> <target> [options]
-
-Scout the impact radius of a proposed move/rename BEFORE mutating anything.
-Read-only — safe to call speculatively.
-
-Arguments:
-  source    Path to the file you plan to move or rename
-  target    Proposed destination path
-
-Options:
-  --verbose    Show resolved source/target paths
-
-Output includes:
-  • Impacted files (direct + indirect importers)
-  • Workspace package boundaries crossed
-  • Breaking-risk band (low/medium/high)
-  • Dependencies missing from the target package
-
-Examples:
-  ${name} analyze-impact src/utils/foo.ts packages/shared/src/foo.ts
-`,
+		helpText: cliHelp("analyze-impact"),
 		run: async ([source, target], values) => {
 			requireArg("analyze-impact", "<source>", source);
 			requireArg("analyze-impact", "<target>", target);
@@ -218,30 +123,7 @@ Examples:
 
 	{
 		name: "discover",
-		helpText: `
-Usage: ${name} discover <directory> [options]
-
-Discover all tsconfig.json files in a directory and understand project structure.
-
-Arguments:
-  directory    Path to the project directory to scan
-
-Options:
-  --verbose          Show detailed file ownership and path aliases
-  --workspace        Scan across all workspace packages
-  --only-related-to  Filter file ownership output to a file, folder, or glob pattern
-
-Output includes:
-  • All tsconfig.json files found
-  • Include/exclude patterns for each config
-  • Project references (for solution-style configs)
-  • File ownership map (which config controls each file)
-
-Examples:
-  ${name} discover .
-  ${name} discover /path/to/project --verbose
-  ${name} discover . --workspace
-`,
+		helpText: cliHelp("discover"),
 		run: async ([directory], values) => {
 			requireArg("discover", "<directory>", directory);
 			await discoverCommand({
@@ -255,23 +137,7 @@ Examples:
 
 	{
 		name: "workspace",
-		helpText: `
-Usage: ${name} workspace <directory> [options]
-
-Discover pnpm/yarn/npm workspace packages and their structure.
-
-Arguments:
-  directory    Path to the workspace root
-
-Options:
-  --verbose    Show detailed export maps
-  --json       Output results as JSON
-
-Examples:
-  ${name} workspace .
-  ${name} workspace . --json
-  ${name} workspace . --verbose
-`,
+		helpText: cliHelp("workspace"),
 		run: async ([directory], values) => {
 			requireArg("workspace", "<directory>", directory);
 			await workspaceCommand({
@@ -284,36 +150,12 @@ Examples:
 
 	{
 		name: "find",
-		helpText: `
-Usage: ${name} find <query> -p <project> [options]
-
-Find files and exports by name within a project.
-
-Arguments:
-  query    Name to search for (case-insensitive, partial match)
-
-Options:
-  -p, --project      Path to project directory (required)
-  -t, --type         Filter: file, export, or all (default: all)
-  --verbose          Show helpful tips for next steps
-  --workspace        Scan across all workspace packages
-  --only-related-to  Limit searched files to a file, folder, or glob pattern
-
-Output includes:
-  • Files matching the query by filename
-  • Exports matching the query by name
-  • Line numbers for each export
-
-Examples:
-  ${name} find Entity -p /path/to/project
-  ${name} find User -p . --type export
-  ${name} find config -p . --type file --verbose
-`,
+		helpText: cliHelp("find"),
 		run: async ([query], values) => {
 			requireArg("find", "<query>", query);
 			if (!values.project) {
 				logger.error("Error: find requires -p <project> option");
-				logger.error(`Run '${name} find --help' for usage`);
+				logger.error(`Run '${CLI_NAME} find --help' for usage`);
 				process.exit(1);
 			}
 			const findType = values.type;
@@ -334,48 +176,13 @@ Examples:
 
 	{
 		name: "alias",
-		helpText: `
-Usage: ${name} alias <target> --prefer=<strategy> [options]
-       ${name} alias <target> --rename-specifier="<from>=<to>" [options]
-
-Normalize import specifiers to use path aliases, relative paths, or the shortest option.
-Rewrite exact import specifiers with --rename-specifier for case-only alias moves.
-
-Arguments:
-  target    File or directory to process
-
-Options:
-  --prefer        Strategy: alias, relative, or shortest (required unless --rename-specifier is used)
-  --rename-specifier  Exact specifier rewrite pair: <from>=<to> (repeatable)
-  -p, --project   Path to project directory or tsconfig.json
-  -n, --dry-run   Preview changes without modifying files
-  --force         Allow operation when git worktree has uncommitted changes
-  --no-verify     Disable type checking verification (enabled by default)
-  --verbose       Show detailed changes
-  --workspace     Scan across all workspace packages
-
-Strategies:
-  alias      Convert to tsconfig path aliases where possible
-  relative   Convert to relative paths (./... or ../...)
-  shortest   Pick whichever is shorter
-
-Verification:
-  By default, runs tsc --noEmit before and after changes to ensure no
-  type errors are introduced. Use --no-verify to skip this check.
-
-Examples:
-  ${name} alias src --prefer=alias
-  ${name} alias src/utils --prefer=relative --dry-run
-  ${name} alias src/components/Button.tsx --prefer=shortest
-  ${name} alias src --prefer=alias --no-verify
-  ${name} alias src --rename-specifier="@utils/Foo=@utils/foo"
-`,
+		helpText: cliHelp("alias"),
 		run: async ([target], values) => {
 			requireArg("alias", "<target>", target);
 			const renameSpecifiers = values["rename-specifier"] ?? [];
 			if (!(values.prefer || renameSpecifiers.length > 0)) {
 				logger.error("Error: alias requires --prefer option");
-				logger.error(`Run '${name} alias --help' for usage`);
+				logger.error(`Run '${CLI_NAME} alias --help' for usage`);
 				process.exit(1);
 			}
 			const prefer = values.prefer;
@@ -401,59 +208,7 @@ Examples:
 
 	{
 		name: "similar",
-		helpText: `
-Usage: ${name} similar <directory> [options]
-
-Scan a project or directory for similar or duplicate top-level functions,
-type aliases, and interfaces. Reports candidate groups with similarity score,
-file paths, symbol names, and line numbers for consolidation work.
-
-Arguments:
-  directory    Path to the project directory to scan
-
-Options:
-  --json            Output results as JSON
-  --threshold       Minimum similarity score 0.0–1.0 (default: 0.8)
-  --max-groups      Maximum number of groups to display (default: 10, 0 for unlimited)
-  --strict          Exit with error code 1 if similar declarations are found (for CI/hooks)
-  --name-threshold  Only group declarations whose names also meet this similarity (0.0–1.0)
-  --same-name-only  Only group declarations with identical names
-  --skip-same-file  Skip groups where all declarations are in the same file
-  --only-related-to Only show groups related to a file or folder (path or glob)
-  --min-lines       Exclude declarations with fewer body lines (filters thin wrappers)
-  --skip-directives Skip functions containing compile-time directives
-  --kinds           Comma-separated list of declaration kinds to include:
-                    function, type, interface (default: all)
-  --bucket          Filter groups by similarity bucket: exact, high, or medium
-  --format          Output format: compact (minimal name + file:line per group)
-  --workspace       Scan across all workspace packages
-  -p, --project     Path to project directory or tsconfig.json
-
-Similarity buckets:
-  exact   Identical after normalization (renamed identifiers or literal differences)
-  high    ≥85% token overlap
-  medium  ≥80% token overlap
-
-Name filtering:
-  Uses camelCase token comparison. E.g., makeTempDir and createTempDir
-  share tokens "temp" + "dir" and score high, while isShellTool and
-  createTempDir share nothing and are filtered out.
-
-Examples:
-  ${name} similar src
-  ${name} similar . --threshold=0.85
-  ${name} similar src --json
-  ${name} similar . --workspace
-  ${name} similar src --max-groups=20
-  ${name} similar src --strict              # fail if duplicates found
-  ${name} similar src --name-threshold=0.5  # require similar names
-  ${name} similar src --same-name-only      # only identical names
-  ${name} similar src --only-related-to=src/utils/helpers.ts
-  ${name} similar src --kinds=function      # functions only (previous default)
-  ${name} similar src --kinds=type,interface # types and interfaces only
-  ${name} similar src --bucket=exact        # only exact duplicates
-  ${name} similar src --format=compact      # minimal output for scripting
-`,
+		helpText: cliHelp("similar"),
 		run: async ([directory], values) => {
 			requireArg("similar", "<directory>", directory);
 			const rawThreshold = values.threshold;
@@ -529,45 +284,7 @@ Examples:
 
 	{
 		name: "extract-common",
-		helpText: `
-Usage: ${name} extract-common <directory> [options]
-
-Extract duplicate functions found by 'similar' into shared modules.
-Keeps one canonical copy and replaces all others with imports.
-
-Arguments:
-  directory    Path to the project directory to scan
-
-Options:
-  --threshold        Minimum similarity score 0.0–1.0 (default: 0.95)
-  --group            Target a specific group number (from 'similar' output)
-  -o, --output       Write extracted functions to this file (consolidate into one location)
-  -n, --dry-run      Preview changes without modifying files
-  --force            Allow operation when git worktree has uncommitted changes
-  --json             Output results as JSON
-  --strict           Exit 1 if extractable duplicate groups are found (use with --dry-run for CI)
-  --skip-same-file   Skip groups where all functions are in the same file
-  --only-related-to  Only process groups related to a file or folder (path or glob)
-  --min-lines        Exclude functions with fewer body lines (filters thin wrappers)
-  --skip-directives  Skip functions containing compile-time directives
-  --name-threshold   Name similarity threshold 0.0–1.0 for filtering groups by function name
-  --same-name-only   Only group functions with identical names
-  --workspace        Scan across all workspace packages
-  -p, --project      Path to project directory or tsconfig.json
-
-Without --output, keeps one canonical copy in place and removes others.
-With --output, writes the function to the specified file and removes from all sources.
-
-Examples:
-  ${name} extract-common src --dry-run
-  ${name} extract-common . --threshold=1.0
-  ${name} extract-common src --group=1
-  ${name} extract-common src --output=src/shared/utils.ts
-  ${name} extract-common src --only-related-to=src/utils/helpers.ts
-  ${name} extract-common . --workspace
-  ${name} extract-common src --dry-run --json
-  ${name} extract-common src --dry-run --strict
-`,
+		helpText: cliHelp("extract-common"),
 		run: async ([directory], values) => {
 			requireArg("extract-common", "<directory>", directory);
 			const rawThreshold = values.threshold;
@@ -605,41 +322,13 @@ Examples:
 
 	{
 		name: "extract-component",
-		helpText: `
-Usage: ${name} extract-component <file> <selector> <new-file> [options]
-
-Extract a JSX/TSX subtree into its own typed sub-component.
-
-Writes the generated module to <new-file>, inserts its import into the source
-file, and replaces the extracted span with <NewComponent propA={propA} … />
-passing each classified prop. Refuses to write when the subtree references
-hook-derived values, on a dirty worktree (unless --force), or when a call-site
-name conflict is detected. Runs tsc --noEmit before/after and rolls every write
-back on any new type error. Use --dry-run to preview locate + classify + codegen
-without writing.
-
-Arguments:
-  file        Path to the source file containing the JSX
-  selector    Either a line range (L<start>-<end> or <start>-<end>, 1-based,
-              inclusive) or a JSX tag/component name (e.g. Card, div)
-  new-file    Destination module the extracted component will live in
-
-Options:
-  -n, --dry-run   Preview the locate + classify + codegen report; write nothing
-  --force         Override the dirty-worktree guard and call-site conflict check
-  --json          Output the result/report as JSON
-  -p, --project   Path to project directory or tsconfig.json
-
-Examples:
-  ${name} extract-component src/App.tsx Card src/Card.tsx
-  ${name} extract-component src/App.tsx L12-40 src/Panel.tsx --dry-run --json
-`,
+		helpText: cliHelp("extract-component"),
 		run: async ([file, selector, newFile], values) => {
 			if (!(file && selector && newFile)) {
 				logger.error(
 					"Error: extract-component requires <file>, <selector>, and <new-file> arguments"
 				);
-				logger.error(`Run '${name} extract-component --help' for usage`);
+				logger.error(`Run '${CLI_NAME} extract-component --help' for usage`);
 				process.exit(1);
 			}
 			await extractComponentCommand({
@@ -657,26 +346,7 @@ Examples:
 
 	{
 		name: "test-relocation",
-		helpText: `
-Usage: ${name} test-relocation <directory> [options]
-
-Find stranded or misnamed test files from their imports-under-test.
-
-Arguments:
-  directory    Path to the project directory to scan
-
-Options:
-  --json                    Output results as JSON
-  --fix                     Move tests via the existing move pipeline
-  -n, --dry-run             Preview even when --fix is set
-  --force                   Allow --fix when the git worktree is dirty
-  --convention-threshold    Required __tests__ majority 0.0-1.0 or 0-100 (default: 0.7)
-
-Examples:
-  ${name} test-relocation src
-  ${name} test-relocation src --json
-  ${name} test-relocation src --fix
-`,
+		helpText: cliHelp("test-relocation"),
 		run: async ([directory], values) => {
 			requireArg("test-relocation", "<directory>", directory);
 			const rawConventionThreshold = values["convention-threshold"];
@@ -723,26 +393,7 @@ Examples:
 
 	{
 		name: "mock-cleanup",
-		helpText: `
-Usage: ${name} mock-cleanup <directory> [options]
-
-Find mock factory keys that no longer exist as exports on the mocked module.
-
-Arguments:
-  directory    Path to the project directory to scan
-
-Options:
-  --json        Output results as JSON
-  --fix         Remove orphan factory keys and run type checking
-  -n, --dry-run Preview even when --fix is set
-  --force       Allow --fix when the git worktree is dirty
-  --no-verify   Skip type checking verification (not recommended)
-
-Examples:
-  ${name} mock-cleanup src
-  ${name} mock-cleanup src --json
-  ${name} mock-cleanup src --fix
-`,
+		helpText: cliHelp("mock-cleanup"),
 		run: async ([directory], values) => {
 			requireArg("mock-cleanup", "<directory>", directory);
 			try {
@@ -764,31 +415,7 @@ Examples:
 
 	{
 		name: "naming",
-		helpText: `
-Usage: ${name} naming <directory> [options]
-
-Audit per-directory filename casing conventions and report outliers.
-
-Arguments:
-  directory    Path to the project directory to scan
-
-Options:
-  --json                  Output results as JSON
-  --workspace             Scan across workspace packages
-  --min-siblings          Minimum files in a directory before auditing (default: 3)
-  --majority-threshold    Required casing majority 0.0-1.0 (default: 0.6)
-  --include-tests         Include *.test.* and *.spec.* files
-  --fix                   Rename flagged files to their suggested names
-  -n, --dry-run           Preview planned renames without writing files
-  --force                 Allow --fix when the git worktree is dirty
-
-Examples:
-  ${name} naming src
-  ${name} naming src --json
-  ${name} naming src --majority-threshold=0.8
-  ${name} naming src --fix --dry-run
-  ${name} naming src --fix
-`,
+		helpText: cliHelp("naming"),
 		run: async ([directory], values) => {
 			requireArg("naming", "<directory>", directory);
 			const rawMinSiblings = values["min-siblings"];
@@ -840,32 +467,7 @@ Examples:
 
 	{
 		name: "organise",
-		helpText: `
-Usage: ${name} organise <directory> [options]
-
-Audit folder organisation: detect non-test files that live outside their
-primary importer cluster and identify basename collisions between files that
-export same-named symbols with divergent signatures.
-
-Arguments:
-  directory    Path to the project directory to scan
-
-Options:
-  --json        Output results as JSON
-  --ignore      Glob pattern to exclude files (e.g. "*.generated.ts")
-  --verbose     Show detailed output
-
-Findings:
-  Misplaced files — files whose only importers are in a single subdirectory
-    but the file itself lives outside that cluster.
-  Basename collisions — files sharing a basename that export same-named
-    symbols with structurally different signatures.
-
-Examples:
-  ${name} organise src
-  ${name} organise src --json
-  ${name} organise src --ignore="*.generated.ts"
-`,
+		helpText: cliHelp("organise"),
 		run: async ([directory], values) => {
 			requireArg("organise", "<directory>", directory);
 			try {
@@ -885,36 +487,7 @@ Examples:
 
 	{
 		name: "tidy",
-		helpText: `
-Usage: ${name} tidy <directory> --experimental [options]
-
-Run a structural tidyup report by composing unused, similar, and audit.
-
-Arguments:
-  directory    Path to the project directory to scan
-
-Options:
-  --experimental         Required in 1.x to opt into the unstable tidy schema
-  --json                 Output results as JSON
-  --scope                Only show findings whose source file is under this path
-  --out                  Write the report to a file instead of stdout
-  --workspace            Scan across all workspace packages where supported
-  --fix                  Apply safe fixes (dead-exports, alias-normalisation)
-  --fix=<categories>     Apply comma-separated tidy fix categories
-  --alias-prefer=<s>     Alias-normalisation strategy: alias, relative, or shortest
-  --max-changes          Abort --fix when planned changes exceed this limit (default: 50)
-  --force                Allow --fix when the git worktree is dirty
-  --verbose              Show extra operational messages
-
-Examples:
-  ${name} tidy src --experimental
-  ${name} tidy src --experimental --json
-  ${name} tidy src --experimental --fix
-  ${name} tidy src --experimental --fix=dead-exports
-  ${name} tidy src --experimental --fix=alias-normalisation --alias-prefer=relative
-  ${name} tidy src --experimental --scope src/core
-  ${name} tidy src --experimental --out tidy-report.json --json
-`,
+		helpText: cliHelp("tidy"),
 		run: async ([directory], values) => {
 			requireArg("tidy", "<directory>", directory);
 			try {
@@ -975,34 +548,7 @@ Examples:
 
 	{
 		name: "audit",
-		helpText: `
-Usage: ${name} audit <directory> [options]
-
-Analyze module health metrics: fan-out, fan-in, instability ratios,
-and circular dependency detection.
-
-Arguments:
-  directory    Path to the project directory to scan
-
-Options:
-  -p, --project          Path to project directory or tsconfig.json
-  --json                 Output results as JSON
-  --workspace            Scan across all workspace packages
-  --fan-out-threshold    Flag files with more than N imports (default: 10)
-  --fan-in-threshold     Flag files with more than N consumers (default: 10)
-  --export-threshold     Flag files with more than N exports (default: 8)
-
-Metrics:
-  Fan-out       Number of distinct modules a file imports
-  Fan-in        Number of distinct files that import a module
-  Instability   fan-out / (fan-in + fan-out) — 0 = maximally stable, 1 = maximally unstable
-
-Examples:
-  ${name} audit src
-  ${name} audit . --json
-  ${name} audit . --workspace
-  ${name} audit src --fan-out-threshold=8 --export-threshold=5
-`,
+		helpText: cliHelp("audit"),
 		run: async ([directory], values) => {
 			requireArg("audit", "<directory>", directory);
 			await auditCommand({
@@ -1025,30 +571,7 @@ Examples:
 
 	{
 		name: "unused",
-		helpText: `
-Usage: ${name} unused <directory> [options]
-
-Find exports and files that are never imported by any other file in the project.
-
-Arguments:
-  directory    Path to the project directory to scan
-
-Options:
-  -p, --project    Path to project directory or tsconfig.json
-  --json           Output results as JSON
-  --verbose        Show detailed output
-  --ignore              Glob pattern to exclude files (e.g. "*.test.ts")
-  --entrypoint-globs    Glob pattern(s) for convention entrypoints to exclude from
-                        orphan/dead reporting (e.g. "hooks/**", "scripts/*.ts").
-                        Repeat the flag for multiple patterns.
-
-Examples:
-  ${name} unused src
-  ${name} unused . --json
-  ${name} unused src --ignore="*.test.ts"
-  ${name} unused src --entrypoint-globs="hooks/**"
-  ${name} unused src --entrypoint-globs="hooks/**" --entrypoint-globs="scripts/*.ts"
-`,
+		helpText: cliHelp("unused"),
 		run: async ([directory], values) => {
 			requireArg("unused", "<directory>", directory);
 			const { unusedCommand: cmd } = await import("./unused.ts");
@@ -1065,32 +588,7 @@ Examples:
 
 	{
 		name: "barrel",
-		helpText: `
-Usage: ${name} barrel <directory> [options]
-
-Analyze barrel files (index.ts re-export hubs) and surface problem cases.
-
-Arguments:
-  directory    Path to the project directory to scan
-
-Options:
-  -p, --project   Path to project directory or tsconfig.json
-  --json          Output results as JSON
-  --workspace     Scan across all workspace packages
-
-Findings:
-  Sub-path export shadowing — files reachable through a barrel that ALSO have a
-    dedicated package "exports" sub-path entry; consumers should prefer the
-    sub-path specifier (e.g. @scope/utils/cn), not the package root barrel.
-  Wildcard re-exports — barrels using \`export * from\` that obscure the surface.
-  Barrel chains — barrels that re-export other barrels.
-  Unused barrels — barrel files no other file imports.
-
-Examples:
-  ${name} barrel src
-  ${name} barrel . --json
-  ${name} barrel . --workspace
-`,
+		helpText: cliHelp("barrel"),
 		run: async ([directory], values) => {
 			requireArg("barrel", "<directory>", directory);
 			try {
@@ -1110,39 +608,7 @@ Examples:
 
 	{
 		name: "inline",
-		helpText: `
-Usage: ${name} inline <barrel-file> [options]
-
-Inline a pure re-export barrel: rewrite all importers to import directly
-from the canonical source(s), removing the barrel indirection at call sites.
-The barrel file itself is left in place (use 'unused' to identify it for removal).
-
-Arguments:
-  barrel-file    Path to the barrel file to inline
-
-Options:
-  -n, --dry-run   Preview changes without modifying files
-  --force         Allow operation when git worktree has uncommitted changes
-  --no-verify     Disable type checking verification (enabled by default)
-  --verbose       Show detailed information about each change
-  --json          Output results as JSON
-  -p, --project   Path to project directory or tsconfig.json
-
-Requirements:
-  The barrel file must be a "pure re-export barrel" — every top-level statement
-  must be an \`export … from "…"\` statement. Any local declarations, imports, or
-  bare exports without a 'from' clause cause the command to abort.
-
-Limitations (v1):
-  • Namespace imports (\`import * as x\`) of the barrel are skipped with a warning.
-  • Dynamic imports and require() are skipped with a warning.
-  • Multi-source barrels (re-exports from >1 canonical source) are skipped with a warning.
-
-Examples:
-  ${name} inline src/shared/index.ts
-  ${name} inline src/utils/barrel.ts --dry-run
-  ${name} inline src/api/index.ts --no-verify
-`,
+		helpText: cliHelp("inline"),
 		run: async ([barrelFile], values) => {
 			requireArg("inline", "<barrel-file>", barrelFile);
 			await inlineCommand({

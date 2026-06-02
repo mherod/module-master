@@ -45,6 +45,7 @@ import { analyze } from "./commands/analyze.ts";
 import { analyzeImpact } from "./commands/analyze-impact.ts";
 import { buildAuditReport } from "./commands/audit.ts";
 import { analyzeBarrels, barrelReportToJson } from "./commands/barrel.ts";
+import { mcpDescription } from "./commands/command-spec.ts";
 import { runExtractCommon } from "./commands/extract-common.ts";
 import {
 	analyzeExtractComponentFreeVariables,
@@ -728,8 +729,7 @@ const server = new McpServer({ name: "resect", version });
 server.registerTool(
 	"find",
 	{
-		description:
-			"Locate where a symbol or file lives when you know its name but not its path. Searches BOTH filenames and exported symbol names with case-insensitive partial matching (e.g. 'user' matches UserService.ts and `getUserById`). Use this FIRST to turn a name into a concrete file path + line before calling `analyze`, or before a CLI move/rename. Exact matches rank ahead of partial ones. Returns matched file paths plus exports (name, file, line, kind, isType). Read-only.",
+		description: mcpDescription("find"),
 		inputSchema: {
 			query: z
 				.string()
@@ -761,8 +761,7 @@ server.registerTool(
 server.registerTool(
 	"analyze",
 	{
-		description:
-			"Get the full dependency picture of ONE module before you edit, move, rename, or delete it. Reports the file's exports, its imports (with bindings and type-only flags), every file that references it (reverse dependencies — the blast radius of a change), barrel files that re-export it, imports that fail to resolve, and exports that no other file imports. Reach for this whenever you need to understand impact or wiring of a specific file; use `find` first if you only know the name. Pass a file, not a directory. Read-only.",
+		description: mcpDescription("analyze"),
 		inputSchema: {
 			file: z
 				.string()
@@ -789,8 +788,7 @@ server.registerTool(
 server.registerTool(
 	"analyze-impact",
 	{
-		description:
-			"Scout the blast radius of a proposed move/rename BEFORE you mutate anything. Given a source file and a proposed target path, returns the impact radius — impactedFilesCount + impactedFiles (direct + indirect/barrel-chain importers), boundaryCrossedCount with source/target package (workspace boundaries crossed), missingDependencies (external imports of the source absent from the target package, for cross-package moves), and breakingRisk ('low'|'medium'|'high'). Call this speculatively instead of running move/rename and reading the fallout. Strictly read-only — no writes, no worktree gating. NOTE: breakingRisk is not yet scored (always 'low') until #116 lands.",
+		description: mcpDescription("analyze-impact"),
 		inputSchema: {
 			source: z
 				.string()
@@ -822,8 +820,7 @@ server.registerTool(
 server.registerTool(
 	"extract-component",
 	{
-		description:
-			"Split a JSX/TSX subtree into its own typed sub-component. Resolves a selector — a line range ('L12-40' or '12-40', 1-based inclusive) or a JSX tag/component name ('Card', 'div') — to exactly ONE JSX node. Returns its kind (element/self-closing/fragment), tag name, character span, line range, and (when the file resolves to a tsconfig project) a `classification`: prop candidates (name + resolved type) and unliftable hooks (values derived from useState/use* that cannot be lifted into a child) with a `blocked` flag; `classificationError` is set instead when the type-checker is unavailable. Defaults to `dryRun: true`, returning the located node plus the `generatedModule` text WITHOUT writing. When `dryRun: false`, it writes the new module to newFile, inserts its import into the source file, replaces the extracted span with `<NewComponent propA={propA} … />`, then runs `tsc --noEmit` before/after and returns a `result` with success, the writes, modifiedFiles, and the typecheck delta — rolling every write back on any new type error. Refuses to write when the subtree references hook-derived values (blocked), on a dirty worktree unless `force: true`, or when a call-site name conflict is detected. Errors clearly when nothing matches or the selector is ambiguous (lists candidates so you can narrow with a line range).",
+		description: mcpDescription("extract-component"),
 		inputSchema: {
 			file: z
 				.string()
@@ -869,8 +866,7 @@ server.registerTool(
 server.registerTool(
 	"discover",
 	{
-		description:
-			"Map the TypeScript project topology of an unfamiliar repo before doing anything else. Recursively finds every tsconfig.json and reports the root config, total owned file count, and per-config rootDir, solution-style flag, file count, extends chain, project-reference count, and path aliases. Use this to learn how a repo is laid out, where path aliases (e.g. '@/…') point, and which config owns which files — context that `analyze`/`audit` need. For monorepo PACKAGE metadata (entrypoints, published exports) use `workspace` instead. Read-only.",
+		description: mcpDescription("discover"),
 		inputSchema: {
 			directory: z
 				.string()
@@ -891,8 +887,7 @@ server.registerTool(
 server.registerTool(
 	"workspace",
 	{
-		description:
-			"Enumerate the packages in a pnpm/yarn/npm monorepo and how each is wired. Reads pnpm-workspace.yaml or the package.json 'workspaces' field, then reports per package: name, main/module/types entrypoints, the 'exports' map, dependencies, detected barrel (index) files, and tsconfig path. Use this in a monorepo to see what packages exist and their public surface before a cross-package move or import. For tsconfig/path-alias topology (including single-package repos) use `discover` instead. Returns an error if the directory is not a workspace root. Read-only.",
+		description: mcpDescription("workspace"),
 		inputSchema: {
 			directory: z
 				.string()
@@ -913,8 +908,7 @@ server.registerTool(
 server.registerTool(
 	"audit",
 	{
-		description:
-			"Assess architectural health across a whole project and surface refactoring targets. Builds the import graph and reports: circular dependencies (cycles), files with high fan-out (import too many modules — likely doing too much), files with high fan-in (imported by many — high-blast-radius hubs), and files with large export surfaces. Use this to find god modules, over-coupled files, and dependency cycles, or to answer 'what's the riskiest/most-tangled part of this codebase?'. To drill into one file the audit flags, follow up with `analyze`. Tune thresholds to widen or narrow what gets flagged. Read-only.",
+		description: mcpDescription("audit"),
 		inputSchema: {
 			directory: z
 				.string()
@@ -970,8 +964,7 @@ server.registerTool(
 server.registerTool(
 	"barrel",
 	{
-		description:
-			'Analyze barrel files (index.ts re-export hubs) and surface problem cases for consumers. The headline finding is sub-path export shadowing (issue #93): files reachable through a barrel that ALSO have a dedicated package `exports` sub-path entry (e.g. `"./cn"`) — consumers should import via the sub-path specifier (`@scope/utils/cn`), NOT the package root barrel, and a cross-package `move` should target that sub-path. Also reports: wildcard re-exports (`export * from`) that obscure a package\'s public surface, barrel chains (barrels re-exporting other barrels), and unused barrels (no importers). Per barrel it returns entry counts by kind (wildcard/named/namespace), distinct source-module count, and consumer count. Workspace-aware (set `workspace:true` to span every package). Read-only.',
+		description: mcpDescription("barrel"),
 		inputSchema: {
 			directory: z
 				.string()
@@ -1004,8 +997,7 @@ server.registerTool(
 server.registerTool(
 	"unused",
 	{
-		description:
-			"Find exports that no OTHER file in the project imports, plus exported files with no external usage. A per-export hit is a DE-EXPORT signal, not automatically a DELETE signal: each entry carries `internalUsage`/`internalRefCount` telling you whether the symbol is still referenced WITHIN its own file. `internalUsage:false` (`internalRefCount:0`) means referenced nowhere — safe to delete; `internalUsage:true` means only the `export` keyword is redundant — deleting the symbol would break its own module, so just drop the `export`. `orphanFiles` lists files with exports but zero external importers, excluding package entrypoints. Aliased imports (`import { a as b }`) count as cross-file usage; whole-module imports (`import *`, `export *`, dynamic `import()`, `require()`) mark every export of that module as used. Usage is counted across ALL tsconfigs discovered in the project (the scanned set is returned as `scannedConfigs`/`scannedFileCount`), so an export consumed only by a sibling config (e.g. `scripts/` on `tsconfig.scripts.json`) is not falsely reported dead. The `ignore` glob suppresses files only as reported candidates — ignored files (e.g. tests) still count as usage sources, so a test-only export is not reported dead. Returns total export/file counts, `deadCount`, `internalOnlyCount`, `orphanFiles`, `scannedConfigs`, `scannedFileCount`, and the unused list. Read-only.",
+		description: mcpDescription("unused"),
 		inputSchema: {
 			directory: z
 				.string()
@@ -1038,8 +1030,7 @@ server.registerTool(
 server.registerTool(
 	"similar",
 	{
-		description:
-			"Find duplicate or near-duplicate top-level declarations (functions, type aliases, interfaces) that are candidates for consolidation. Use this to hunt copy-paste code, redundant types, or DRY opportunities across the project. Groups declarations by structural similarity and returns each group with its similarity bucket, score, and members (name, kind, file, line). Tune `threshold` for how alike members must be, and use `sameNameOnly`/`nameThreshold`/`minLines`/`kinds`/`skipSameFile` to narrow noise. Identifies candidates only — it does not merge anything. Read-only.",
+		description: mcpDescription("similar"),
 		inputSchema: {
 			directory: z
 				.string()
@@ -1127,8 +1118,7 @@ server.registerTool(
 server.registerTool(
 	"tidy",
 	{
-		description:
-			"Run the experimental tidy orchestrator over a TypeScript project. Composes the existing unused, similar, and audit analyses into one versioned grouped report with per-category findings and a summary. Defaults to dryRun:true. When dryRun:false, applies safe fixes, refuses a dirty worktree unless force:true, runs type checking after the batch, and rolls back on new errors or incomplete verification.",
+		description: mcpDescription("tidy"),
 		inputSchema: {
 			directory: z
 				.string()
@@ -1234,8 +1224,7 @@ server.registerTool(
 server.registerTool(
 	"naming",
 	{
-		description:
-			"Audit per-directory filename casing conventions and report files whose basename casing is an outlier not justified by the primary export kind. Groups files by directory, finds a casing majority across camelCase, PascalCase, kebab-case, and snake_case, and returns suggested filenames plus confidence. When fix=true and dryRun=false, applies safe case-only renames via the move pipeline, runs a closing tsc --noEmit gate, and rolls back on new type errors. Mutating when fix=true and dryRun=false; read-only otherwise.",
+		description: mcpDescription("naming"),
 		inputSchema: {
 			directory: z
 				.string()
@@ -1317,8 +1306,7 @@ server.registerTool(
 server.registerTool(
 	"organise",
 	{
-		description:
-			"Audit folder organisation: detect non-test source files whose entire importer set lives within a single subdirectory elsewhere (misplaced files) and identify basename collisions between files that export same-named symbols with divergent type signatures. Read-only.",
+		description: mcpDescription("organise"),
 		inputSchema: {
 			directory: z
 				.string()
@@ -1351,8 +1339,7 @@ server.registerTool(
 server.registerTool(
 	"test-relocation",
 	{
-		description:
-			"Find test files whose imports indicate they are stranded away from their subject module or misnamed relative to the subject they import. Defaults to dryRun=true and returns suggested moves. When dryRun=false, moves each test through the existing move pipeline, then runs one closing typecheck and rolls back on regression. Mutating.",
+		description: mcpDescription("test-relocation"),
 		inputSchema: {
 			directory: z
 				.string()
@@ -1410,8 +1397,7 @@ server.registerTool(
 server.registerTool(
 	"mock-cleanup",
 	{
-		description:
-			"Detect orphan keys in jest.mock, vi.mock, vitest.mock, and bun:test mock.module object-literal factories. Defaults to dryRun=true and reports keys whose names are no longer exports on the mocked module, plus skipped factories such as spread or computed shapes. When dryRun=false, removes only those orphan keys, leaves the mock call in place even if the factory becomes empty, runs tsc before/after by default, and rolls back on typecheck regression. Mutating.",
+		description: mcpDescription("mock-cleanup"),
 		inputSchema: {
 			directory: z
 				.string()
@@ -1689,8 +1675,7 @@ async function aliasTool(args: {
 server.registerTool(
 	"move",
 	{
-		description:
-			"Move a TypeScript/JavaScript file to a new path and rewrite every import that referenced it. Updates relative and alias specifiers, splits mixed barrel imports when only some bindings moved, updates barrel re-exports for same-package moves, and rewrites cross-package imports to use the destination package name (adding a barrel export at the destination when needed). Defaults to `dryRun: true` so callers preview the change first; when `dryRun: false` and `verify: true` (both default) the tool runs `tsc --noEmit` before AND after the move and returns the diagnostic delta in `typecheck` — `newErrors` lists any errors the move introduced. A dirty worktree is returned as an error unless `force: true`. Returns success flag, updated reference list, errors, worktree-dirty flag, and (when verified) the typecheck delta.",
+		description: mcpDescription("move"),
 		inputSchema: {
 			source: z
 				.string()
@@ -1752,8 +1737,7 @@ server.registerTool(
 server.registerTool(
 	"rename",
 	{
-		description:
-			"Rename an exported symbol (function, class, type, interface, enum, const) in its source file and update every import that references it across the project. Updates both the declaration and all unaliased import bindings; aliased imports (`import { foo as bar }`) are left intact because the local name is already decoupled. Checks for conflicts before mutating: aborts if the new name already exists in the source file or in any importing file's local bindings. Defaults to `dryRun: true`; when `dryRun: false` and `verify: true` (both default) runs `tsc --noEmit` before AND after and returns the diagnostic delta. A dirty worktree is returned as an error unless `force: true`. Returns success, updated reference list, errors, worktree-dirty flag, and (when verified) the typecheck delta.",
+		description: mcpDescription("rename"),
 		inputSchema: {
 			file: z
 				.string()
@@ -1830,8 +1814,7 @@ server.registerTool(
 server.registerTool(
 	"alias",
 	{
-		description:
-			"Normalize import specifiers across a file or directory to a chosen style, or redirect a module's importers with `renameSpecifiers`. Strategies: `alias` rewrites relative paths to tsconfig `paths` aliases where available; `relative` rewrites alias paths to `./…` relative paths; `shortest` picks whichever resulting specifier is shorter per import. `renameSpecifiers` accepts repeated `<from>=<to>` strings: it rewrites every exact `<from>` match AND, when `<to>` is a non-relative specifier, every other importer that resolves to the same module (e.g. a sibling's relative `./error` when redirecting `@scope/error`), so a module redirect completes in one pass. Importers reaching the module via a different specifier that cannot be rewritten (relative `<to>`) are reported in `missedEquivalents` rather than silently skipped. Defaults to `dryRun: true`; when `dryRun: false` and `verify: true` (both default) runs `tsc --noEmit` before AND after and returns the diagnostic delta. A dirty worktree is returned as an error unless `force: true`. Returns the strategy used, files processed, import count updated, conflicts, missedEquivalents, the per-change list, and (when verified) the typecheck delta.",
+		description: mcpDescription("alias"),
 		inputSchema: {
 			target: z
 				.string()
@@ -1985,8 +1968,7 @@ async function extractCommonTool(args: {
 server.registerTool(
 	"extract-common",
 	{
-		description:
-			"Consolidate duplicate or near-duplicate top-level functions across a project by extracting one canonical copy and removing the rest. Internally runs `similar` to find groups, picks a canonical per group, removes the others, and rewrites their callers' imports to reference the canonical's location (or a shared `output` file when provided). Defaults to `dryRun: true` — preview the extraction plan first. When `dryRun: false` and `verify: true` (both default) runs `tsc --noEmit` before AND after and returns the diagnostic delta in `typecheck`. A dirty worktree is returned as an error unless `force: true`. Returns success flag, total groups extracted, total duplicates removed, modified file list, per-group plan (canonical + removed + all functions), errors, worktree-dirty flag, and (when verified) the typecheck delta. Skips groups that would create circular imports.",
+		description: mcpDescription("extract-common"),
 		inputSchema: {
 			directory: z
 				.string()
@@ -2190,8 +2172,7 @@ async function inlineTool(args: {
 server.registerTool(
 	"inline",
 	{
-		description:
-			"Inline a pure re-export barrel: rewrite all importers to import directly from the canonical source(s), removing the barrel indirection at call sites. The barrel file itself is left in place. The barrel must be a 'pure re-export barrel' — every top-level statement must be an `export … from '…'` statement. Namespace imports (`import * as x`), dynamic imports, and multi-source barrels (re-exports from >1 canonical source) are skipped with a warning. Defaults to `dryRun: true` so callers preview the change first; when `dryRun: false` and `verify: true` (both default) runs `tsc --noEmit` before AND after and returns the diagnostic delta. A dirty worktree is returned as an error unless `force: true`.",
+		description: mcpDescription("inline"),
 		inputSchema: {
 			barrelFile: z
 				.string()
