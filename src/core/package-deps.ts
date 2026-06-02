@@ -53,6 +53,55 @@ export function computeDependencyAdditions(
 	return additions;
 }
 
+/** The workspace-protocol range internal monorepo deps are declared with. */
+const WORKSPACE_PROTOCOL_RANGE = "workspace:*";
+
+/**
+ * Compute the internal (monorepo) dependency entries missing from the
+ * destination package, for collected specifiers that match a workspace
+ * package name (issue #119 — internal-dependency sync on cross-package move).
+ *
+ * - Adds each missing internal dep as `workspace:*` rather than copying a
+ *   semver range: the destination resolves siblings through the workspace, so
+ *   a phantom semver range would be wrong even when the source declared one.
+ * - Mirrors the source's `dependencies` vs `peerDependencies` placement when
+ *   the source declares the dep; defaults to `dependencies` otherwise.
+ * - Never duplicates, downgrades, or clobbers an existing destination entry
+ *   (checked against both `dependencies` and `peerDependencies`), so an
+ *   existing `workspace:^`-style protocol is left untouched.
+ *
+ * Callers must exclude the destination package's own name — a package never
+ * depends on itself.
+ */
+export function computeInternalDependencyAdditions(
+	internalPackageNames: string[],
+	source: DependencySource,
+	destination: DependencySource
+): DependencyAddition[] {
+	const additions: DependencyAddition[] = [];
+	const destinationHas = (name: string): boolean =>
+		destination.dependencies?.[name] !== undefined ||
+		destination.peerDependencies?.[name] !== undefined;
+
+	const seen = new Set<string>();
+	for (const name of internalPackageNames) {
+		if (seen.has(name) || destinationHas(name)) {
+			continue;
+		}
+		let field: DependencyField = "dependencies";
+		if (
+			source.dependencies?.[name] === undefined &&
+			source.peerDependencies?.[name] !== undefined
+		) {
+			field = "peerDependencies";
+		}
+		additions.push({ name, version: WORKSPACE_PROTOCOL_RANGE, field });
+		seen.add(name);
+	}
+
+	return additions;
+}
+
 /**
  * Apply dependency additions to a parsed package.json object, returning a new
  * object. The touched fields are sorted alphabetically for deterministic diffs

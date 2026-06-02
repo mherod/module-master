@@ -143,3 +143,152 @@ describe("move cross-package dependency sync (#118)", () => {
 		expect(result.dependencyChanges).toEqual([]);
 	});
 });
+
+/**
+ * End-to-end coverage for #119 (#102 B/3): a cross-package `move` must sync the
+ * moved file's INTERNAL monorepo imports into the destination package.json as
+ * `workspace:*`, distinct from #118's external semver copy. Exercises the
+ * internal/external partition keyed on `workspace.packages[].name`.
+ */
+const INTERNAL_WORKSPACE = {
+	"pnpm-workspace.yaml": 'packages:\n  - "packages/*"\n',
+	"tsconfig.json": JSON.stringify({
+		compilerOptions: { strict: true },
+		include: ["packages/**/*.ts"],
+	}),
+	"packages/core/package.json": JSON.stringify({ name: "@scope/core" }),
+	"packages/core/src/index.ts": "export const core = 1;",
+	"packages/pkg-a/package.json": JSON.stringify({
+		name: "@scope/pkg-a",
+		dependencies: { lodash: "^4.17.21" },
+	}),
+	"packages/pkg-a/src/foo.ts":
+		'import { core } from "@scope/core";\nexport const foo = core;',
+	"packages/pkg-b/package.json": JSON.stringify({
+		name: "@scope/pkg-b",
+		dependencies: {},
+	}),
+	"packages/pkg-b/src/keep.ts": "export const keep = true;",
+} as const;
+
+describe("move cross-package internal-dependency sync (#119)", () => {
+	test("adds an imported sibling workspace package as workspace:*", async () => {
+		const dir = await fixture("internal-added", { ...INTERNAL_WORKSPACE });
+		const result = await moveInFixture(
+			dir,
+			"packages/pkg-a/src/foo.ts",
+			"packages/pkg-b/src/foo.ts"
+		);
+
+		expect(result.success).toBe(true);
+		expect(result.dependencyChanges).toEqual([
+			{
+				packageJsonPath: path.join(dir, "packages/pkg-b/package.json"),
+				name: "@scope/core",
+				version: "workspace:*",
+				field: "dependencies",
+			},
+		]);
+		const destPkg = await readJson(
+			path.join(dir, "packages/pkg-b/package.json")
+		);
+		expect(
+			(destPkg.dependencies as Record<string, string>)["@scope/core"]
+		).toBe("workspace:*");
+	});
+
+	test("splits a mixed external + internal import correctly", async () => {
+		const dir = await fixture("mixed", {
+			...INTERNAL_WORKSPACE,
+			"packages/pkg-a/src/foo.ts":
+				'import _ from "lodash";\nimport { core } from "@scope/core";\nexport const foo = [_, core];',
+		});
+		const result = await moveInFixture(
+			dir,
+			"packages/pkg-a/src/foo.ts",
+			"packages/pkg-b/src/foo.ts"
+		);
+
+		expect(result.success).toBe(true);
+		const destPkg = await readJson(
+			path.join(dir, "packages/pkg-b/package.json")
+		);
+		const deps = destPkg.dependencies as Record<string, string>;
+		// External keeps the source semver; internal becomes workspace:*.
+		expect(deps.lodash).toBe("^4.17.21");
+		expect(deps["@scope/core"]).toBe("workspace:*");
+	});
+
+	test("never declares the destination package as its own dependency", async () => {
+		const dir = await fixture("self-import", {
+			...INTERNAL_WORKSPACE,
+			// The moved file imports the destination package's own barrel.
+			"packages/pkg-a/src/foo.ts":
+				'import { keep } from "@scope/pkg-b";\nexport const foo = keep;',
+			"packages/pkg-b/src/index.ts": 'export { keep } from "./keep.ts";',
+			"packages/pkg-b/package.json": JSON.stringify({
+				name: "@scope/pkg-b",
+				dependencies: {},
+			}),
+		});
+		const result = await moveInFixture(
+			dir,
+			"packages/pkg-a/src/foo.ts",
+			"packages/pkg-b/src/foo.ts"
+		);
+
+		// @scope/pkg-b must NOT be added as a dependency of @scope/pkg-b.
+		expect(result.dependencyChanges).toEqual([]);
+		const destPkg = await readJson(
+			path.join(dir, "packages/pkg-b/package.json")
+		);
+		expect(destPkg.dependencies).toEqual({});
+	});
+
+	test("dry-run reports the internal addition without writing", async () => {
+		const dir = await fixture("internal-dry-run", { ...INTERNAL_WORKSPACE });
+		const result = await moveInFixture(
+			dir,
+			"packages/pkg-a/src/foo.ts",
+			"packages/pkg-b/src/foo.ts",
+			true
+		);
+
+		expect(result.dependencyChanges).toEqual([
+			{
+				packageJsonPath: path.join(dir, "packages/pkg-b/package.json"),
+				name: "@scope/core",
+				version: "workspace:*",
+				field: "dependencies",
+			},
+		]);
+		const destPkg = await readJson(
+			path.join(dir, "packages/pkg-b/package.json")
+		);
+		expect(destPkg.dependencies).toEqual({});
+	});
+
+	test("does not clobber an existing workspace protocol style", async () => {
+		const dir = await fixture("internal-existing", {
+			...INTERNAL_WORKSPACE,
+			"packages/pkg-b/package.json": JSON.stringify({
+				name: "@scope/pkg-b",
+				dependencies: { "@scope/core": "workspace:^" },
+			}),
+		});
+		const result = await moveInFixture(
+			dir,
+			"packages/pkg-a/src/foo.ts",
+			"packages/pkg-b/src/foo.ts"
+		);
+
+		expect(result.dependencyChanges).toEqual([]);
+		const destPkg = await readJson(
+			path.join(dir, "packages/pkg-b/package.json")
+		);
+		// Existing protocol style is preserved (no downgrade to workspace:*).
+		expect(
+			(destPkg.dependencies as Record<string, string>)["@scope/core"]
+		).toBe("workspace:^");
+	});
+});

@@ -21,6 +21,7 @@ import {
 import {
 	applyDependencyAdditions,
 	computeDependencyAdditions,
+	computeInternalDependencyAdditions,
 	serializePackageJson,
 } from "../core/package-deps.ts";
 import { readPackageJson } from "../core/package-json.ts";
@@ -336,6 +337,25 @@ async function syncCrossPackageDependencies(
 		return [];
 	}
 
+	// Partition the moved file's bare imports into internal monorepo packages
+	// (declared as `workspace:*` — issue #119) vs true external npm deps (semver
+	// copied from the source — issue #118). A specifier matching a workspace
+	// package name is internal; the destination's own package is never a
+	// self-dependency (a barrel self-import is rewritten relative by #121).
+	const workspaceNames = new Set(workspace.packages.map((pkg) => pkg.name));
+	const internalNames: string[] = [];
+	const externalNames: string[] = [];
+	for (const imp of externalImports) {
+		if (imp.packageName === targetPkg.name) {
+			continue;
+		}
+		if (workspaceNames.has(imp.packageName)) {
+			internalNames.push(imp.packageName);
+		} else {
+			externalNames.push(imp.packageName);
+		}
+	}
+
 	// Read the destination package.json fresh so additions compute against its
 	// real, current maps and unrelated fields are preserved on write.
 	const destJson = await readPackageJson(targetPkg.packageJsonPath);
@@ -343,19 +363,20 @@ async function syncCrossPackageDependencies(
 		return [];
 	}
 
-	const additions = computeDependencyAdditions(
-		externalImports.map((imp) => imp.packageName),
-		{
-			dependencies: sourcePkg.dependencies,
-			peerDependencies: sourcePkg.peerDependencies,
-		},
-		{
-			dependencies: destJson.dependencies as Record<string, string> | undefined,
-			peerDependencies: destJson.peerDependencies as
-				| Record<string, string>
-				| undefined,
-		}
-	);
+	const sourceDeps = {
+		dependencies: sourcePkg.dependencies,
+		peerDependencies: sourcePkg.peerDependencies,
+	};
+	const destDeps = {
+		dependencies: destJson.dependencies as Record<string, string> | undefined,
+		peerDependencies: destJson.peerDependencies as
+			| Record<string, string>
+			| undefined,
+	};
+	const additions = [
+		...computeDependencyAdditions(externalNames, sourceDeps, destDeps),
+		...computeInternalDependencyAdditions(internalNames, sourceDeps, destDeps),
+	];
 	if (additions.length === 0) {
 		return [];
 	}

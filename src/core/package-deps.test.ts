@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	applyDependencyAdditions,
 	computeDependencyAdditions,
+	computeInternalDependencyAdditions,
 	serializePackageJson,
 } from "./package-deps.ts";
 import { packageNameFromSpecifier } from "./resolver.ts";
@@ -109,6 +110,73 @@ describe("computeDependencyAdditions (#118)", () => {
 		const additions = computeDependencyAdditions(
 			["lodash", "lodash"],
 			{ dependencies: { lodash: "^4.17.0" } },
+			{}
+		);
+		expect(additions).toHaveLength(1);
+	});
+});
+
+describe("computeInternalDependencyAdditions (#119)", () => {
+	test("adds a missing internal dep as workspace:*", () => {
+		const additions = computeInternalDependencyAdditions(
+			["@scope/core"],
+			{ dependencies: { "@scope/core": "workspace:*" } },
+			{}
+		);
+		expect(additions).toEqual([
+			{ name: "@scope/core", version: "workspace:*", field: "dependencies" },
+		]);
+	});
+
+	test("uses workspace:* even when the source declares a semver range", () => {
+		const additions = computeInternalDependencyAdditions(
+			["@scope/core"],
+			{ dependencies: { "@scope/core": "^1.2.3" } },
+			{}
+		);
+		expect(additions).toEqual([
+			{ name: "@scope/core", version: "workspace:*", field: "dependencies" },
+		]);
+	});
+
+	test("adds workspace:* even when the source does not declare the dep", () => {
+		const additions = computeInternalDependencyAdditions(
+			["@scope/core"],
+			{ dependencies: { lodash: "^4.17.0" } },
+			{}
+		);
+		expect(additions).toEqual([
+			{ name: "@scope/core", version: "workspace:*", field: "dependencies" },
+		]);
+	});
+
+	test("mirrors peerDependencies placement from the source", () => {
+		const additions = computeInternalDependencyAdditions(
+			["@scope/ui"],
+			{ peerDependencies: { "@scope/ui": "workspace:*" } },
+			{}
+		);
+		expect(additions).toEqual([
+			{ name: "@scope/ui", version: "workspace:*", field: "peerDependencies" },
+		]);
+	});
+
+	test("never duplicates or downgrades an existing destination entry", () => {
+		const additions = computeInternalDependencyAdditions(
+			["@scope/core", "@scope/ui"],
+			{ dependencies: { "@scope/core": "workspace:*" } },
+			{
+				dependencies: { "@scope/core": "workspace:^" },
+				peerDependencies: { "@scope/ui": "workspace:*" },
+			}
+		);
+		expect(additions).toEqual([]);
+	});
+
+	test("deduplicates repeated names", () => {
+		const additions = computeInternalDependencyAdditions(
+			["@scope/core", "@scope/core"],
+			{},
 			{}
 		);
 		expect(additions).toHaveLength(1);
