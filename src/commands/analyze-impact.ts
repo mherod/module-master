@@ -1,7 +1,28 @@
 import path from "node:path";
+import ts from "typescript";
 import { logger } from "../cli-logger.ts";
+import {
+	buildDependencyGraph,
+	buildProjectGraphs,
+	type DependencyGraph,
+	findAllReferences,
+	mergeDependencyGraphs,
+} from "../core/graph.ts";
+import {
+	createProgram,
+	loadProject,
+	resolveTsConfig,
+} from "../core/project.ts";
+import {
+	findPackageForPath,
+	normalizePath,
+	resolveModuleSpecifier,
+} from "../core/resolver.ts";
+import { parseSourceFile } from "../core/source-file.ts";
+import type { WorkspaceInfo } from "../core/workspace.ts";
+import { discoverWorkspace } from "../core/workspace.ts";
 import type { ImpactReport } from "../types/impact.ts";
-import type { ReadOnlyCommandOptions } from "../types.ts";
+import type { ProjectConfig, ReadOnlyCommandOptions } from "../types.ts";
 
 export interface AnalyzeImpactOptions extends ReadOnlyCommandOptions {
 	/** File proposed to move/rename. */
@@ -13,26 +34,183 @@ export interface AnalyzeImpactOptions extends ReadOnlyCommandOptions {
 /**
  * Compute the read-only impact radius of a proposed `move`/`rename`.
  *
- * Scaffold slice (#114): resolves the paths and returns a typed stub —
- * zero counts, empty deps, `"low"` risk. The real graph composition
- * (direct/indirect importers, boundary crossings, missing deps) lands in
- * the engine sub-issue (#115) and risk scoring in (#116); both build on
- * this `ImpactReport` shape. Side-effect free — safe to call speculatively.
+ * Composes existing read-only building blocks — no new graph engine:
+ *  - `impactedFiles`: direct + indirect importers via `findAllReferences`,
+ *    which already chains barrel re-exports (#99).
+ *  - `boundaryCrossedCount`: 1 when `source` and `target` resolve to distinct
+ *    workspace packages, else 0 (`discoverWorkspace` + `findPackageForPath`).
+ *  - `missingDependencies`: external imports of `source` (collected via the
+ *    resolver's `kind: "external"` classification, since `scanModuleReferences`
+ *    drops bare specifiers — see #102) absent from the target package's deps,
+ *    only meaningful for a cross-package move.
+ *
+ * `breakingRisk` stays `"low"` here — risk scoring is #116. Side-effect free.
  */
-export function analyzeImpact(options: AnalyzeImpactOptions): ImpactReport {
+export async function analyzeImpact(
+	options: AnalyzeImpactOptions
+): Promise<ImpactReport> {
+	const source = path.resolve(options.source);
+	const target = path.resolve(options.target);
+
+	const tsconfigPath = resolveTsConfig(options.project, path.dirname(source));
+	if (!tsconfigPath) {
+		throw new Error(`Could not find tsconfig.json for ${source}`);
+	}
+	const project = loadProject(tsconfigPath, source);
+
+	// Cross-tsconfig graph (mirrors analyze): a consumer living in a sibling
+	// config must still count as an impacted importer. See #59/#66.
+	const projectGraphs = await buildProjectGraphs(project.tsconfigPath);
+	const graph: DependencyGraph =
+		projectGraphs.length > 1
+			? mergeDependencyGraphs(projectGraphs.map((g) => g.graph))
+			: await buildDependencyGraph(project);
+
+	// Direct + indirect (barrel-chain) importers — findAllReferences already
+	// walks the re-export chain, so distinct source files = impact radius.
+	const normalizedSource = normalizePath(source);
+	const impactedSet = new Set<string>();
+	for (const ref of findAllReferences(source, graph)) {
+		const refFile = normalizePath(ref.sourceFile);
+		if (refFile !== normalizedSource) {
+			impactedSet.add(refFile);
+		}
+	}
+	const impactedFiles = [...impactedSet]
+		.map((f) => path.relative(project.rootDir, f))
+		.sort();
+
+	// Workspace package boundaries between source and target.
+	const wsDir = options.project
+		? path.resolve(options.project)
+		: path.dirname(tsconfigPath);
+	const workspace = await discoverWorkspace(wsDir);
+	const sourcePackage = workspace
+		? (findPackageForPath(source, workspace)?.packageName ?? null)
+		: null;
+	const targetPackage = workspace
+		? (findPackageForPath(target, workspace)?.packageName ?? null)
+		: null;
+	const crossesBoundary =
+		sourcePackage !== null &&
+		targetPackage !== null &&
+		sourcePackage !== targetPackage;
+	const boundaryCrossedCount = crossesBoundary ? 1 : 0;
+
+	// Missing deps only matter for a cross-package move: the source's external
+	// imports that the destination package does not already declare.
+	const missingDependencies =
+		crossesBoundary && workspace
+			? computeMissingDependencies(source, project, targetPackage, workspace)
+			: [];
+
 	return {
-		source: path.resolve(options.source),
-		target: path.resolve(options.target),
-		impactedFilesCount: 0,
-		boundaryCrossedCount: 0,
+		source,
+		target,
+		impactedFilesCount: impactedFiles.length,
+		impactedFiles,
+		boundaryCrossedCount,
+		sourcePackage,
+		targetPackage,
+		// Risk scoring is #116 — keep the stub band until then.
 		breakingRisk: "low",
-		missingDependencies: [],
+		missingDependencies,
 	};
 }
 
-export function analyzeImpactCommand(options: AnalyzeImpactOptions): void {
-	const report = analyzeImpact(options);
+export async function analyzeImpactCommand(
+	options: AnalyzeImpactOptions
+): Promise<void> {
+	let report: ImpactReport;
+	try {
+		report = await analyzeImpact(options);
+	} catch (error) {
+		logger.error(error instanceof Error ? error.message : String(error));
+		process.exit(1);
+	}
 	printImpact(report, options.verbose);
+}
+
+/**
+ * Collect the external (bare, non-relative, non-aliased) module specifiers
+ * imported by `source`. `scanModuleReferences` drops these — its
+ * `resolveDeclarationRef` returns null for `kind !== "resolved"` (#102) — so we
+ * walk the import/export/dynamic-import/require specifiers directly and keep
+ * those the resolver classifies as `external`.
+ */
+function collectExternalSpecifiers(
+	source: string,
+	project: ProjectConfig
+): string[] {
+	const program = createProgram(project, [source]);
+	const sourceFile =
+		program.getSourceFile(source) ?? parseSourceFile(source) ?? undefined;
+	if (!sourceFile) {
+		return [];
+	}
+
+	const specifiers = new Set<string>();
+	const visit = (node: ts.Node): void => {
+		const specifier = importSpecifierOf(node);
+		if (
+			specifier &&
+			resolveModuleSpecifier(specifier, sourceFile.fileName, project).kind ===
+				"external"
+		) {
+			specifiers.add(specifier);
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(sourceFile);
+	return [...specifiers];
+}
+
+/** Extract the string-literal module specifier from an import-like node, if any. */
+function importSpecifierOf(node: ts.Node): string | undefined {
+	if (
+		(ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+		node.moduleSpecifier &&
+		ts.isStringLiteral(node.moduleSpecifier)
+	) {
+		return node.moduleSpecifier.text;
+	}
+	if (ts.isCallExpression(node)) {
+		const isDynamicImport =
+			node.expression.kind === ts.SyntaxKind.ImportKeyword;
+		const isRequire =
+			ts.isIdentifier(node.expression) && node.expression.text === "require";
+		const [arg] = node.arguments;
+		if ((isDynamicImport || isRequire) && arg && ts.isStringLiteral(arg)) {
+			return arg.text;
+		}
+	}
+	return undefined;
+}
+
+/** Reduce a bare specifier to its package name (`@scope/pkg/sub` → `@scope/pkg`). */
+function packageNameFromSpecifier(specifier: string): string {
+	if (specifier.startsWith("@")) {
+		const [scope, pkg] = specifier.split("/");
+		return pkg ? `${scope}/${pkg}` : specifier;
+	}
+	return specifier.split("/")[0] ?? specifier;
+}
+
+function computeMissingDependencies(
+	source: string,
+	project: ProjectConfig,
+	targetPackage: string | null,
+	workspace: WorkspaceInfo
+): string[] {
+	const targetPkg = workspace.packages.find((p) => p.name === targetPackage);
+	const available = new Set<string>([
+		...Object.keys(targetPkg?.dependencies ?? {}),
+		...Object.keys(targetPkg?.peerDependencies ?? {}),
+	]);
+	const externalNames = new Set(
+		collectExternalSpecifiers(source, project).map(packageNameFromSpecifier)
+	);
+	return [...externalNames].filter((name) => !available.has(name)).sort();
 }
 
 function printImpact(report: ImpactReport, verbose?: boolean): void {
@@ -44,14 +222,36 @@ function printImpact(report: ImpactReport, verbose?: boolean): void {
 		logger.info(`   target: ${report.target}`);
 	}
 	logger.empty();
-	logger.info(`   Impacted files:     ${report.impactedFilesCount}`);
-	logger.info(`   Boundaries crossed: ${report.boundaryCrossedCount}`);
-	logger.info(`   Breaking risk:      ${report.breakingRisk}`);
-	logger.info(
-		`   Missing deps:       ${report.missingDependencies.length === 0 ? "(none)" : report.missingDependencies.join(", ")}`
-	);
+
+	logger.info(`🔗 Impacted files (${report.impactedFilesCount}):`);
+	if (report.impactedFiles.length === 0) {
+		logger.info("   (none)");
+	} else {
+		for (const file of report.impactedFiles) {
+			logger.info(`   • ${file}`);
+		}
+	}
 	logger.empty();
+
+	logger.info(`📦 Package boundaries crossed: ${report.boundaryCrossedCount}`);
+	if (report.sourcePackage || report.targetPackage) {
+		logger.info(
+			`   ${report.sourcePackage ?? "(none)"} → ${report.targetPackage ?? "(none)"}`
+		);
+	}
+	logger.empty();
+
 	logger.info(
-		"ℹ️  Impact computation is not yet implemented (scaffold #114). The engine lands in #99's sub-issues."
+		`⚠️  Missing dependencies (${report.missingDependencies.length}):`
 	);
+	if (report.missingDependencies.length === 0) {
+		logger.info("   (none)");
+	} else {
+		for (const dep of report.missingDependencies) {
+			logger.info(`   • ${dep}`);
+		}
+	}
+	logger.empty();
+
+	logger.info(`🚦 Breaking risk: ${report.breakingRisk}`);
 }

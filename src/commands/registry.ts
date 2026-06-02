@@ -203,10 +203,10 @@ Output includes:
 Examples:
   ${name} analyze-impact src/utils/foo.ts packages/shared/src/foo.ts
 `,
-		run: ([source, target], values) => {
+		run: async ([source, target], values) => {
 			requireArg("analyze-impact", "<source>", source);
 			requireArg("analyze-impact", "<target>", target);
-			analyzeImpactCommand({
+			await analyzeImpactCommand({
 				source,
 				target,
 				verbose: values.verbose,

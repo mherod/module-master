@@ -790,7 +790,7 @@ server.registerTool(
 	"analyze-impact",
 	{
 		description:
-			"Scout the blast radius of a proposed move/rename BEFORE you mutate anything. Given a source file and a proposed target path, returns the impact radius — impactedFilesCount (direct + indirect/barrel-chain importers), boundaryCrossedCount (workspace package boundaries crossed), breakingRisk ('low'|'medium'|'high'), and missingDependencies (external imports of the source absent from the target package). Call this speculatively instead of running move/rename and reading the fallout. Strictly read-only — no writes, no worktree gating. NOTE: this is the scaffold slice (#114); the impact computation is not yet wired, so counts are currently stubbed (zeros / 'low' / empty) until #99's engine sub-issue lands.",
+			"Scout the blast radius of a proposed move/rename BEFORE you mutate anything. Given a source file and a proposed target path, returns the impact radius — impactedFilesCount + impactedFiles (direct + indirect/barrel-chain importers), boundaryCrossedCount with source/target package (workspace boundaries crossed), missingDependencies (external imports of the source absent from the target package, for cross-package moves), and breakingRisk ('low'|'medium'|'high'). Call this speculatively instead of running move/rename and reading the fallout. Strictly read-only — no writes, no worktree gating. NOTE: breakingRisk is not yet scored (always 'low') until #116 lands.",
 		inputSchema: {
 			source: z
 				.string()
@@ -810,9 +810,9 @@ server.registerTool(
 				),
 		},
 	},
-	({ source, target, project }) => {
+	async ({ source, target, project }) => {
 		try {
-			return jsonText(analyzeImpact({ source, target, project }));
+			return jsonText(await analyzeImpact({ source, target, project }));
 		} catch (error) {
 			return toError(error);
 		}

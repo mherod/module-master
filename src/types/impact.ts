@@ -14,10 +14,16 @@ export interface ImpactReport {
 	source: string;
 	/** Absolute path of the proposed destination. */
 	target: string;
-	/** Direct + indirect (barrel-chain) importers of `source`. */
+	/** Count of direct + indirect (barrel-chain) importers of `source`. */
 	impactedFilesCount: number;
-	/** Distinct workspace package boundaries crossed between `source` and `target`. */
+	/** Project-relative paths of the distinct impacted importers (drives the CLI tree). */
+	impactedFiles: string[];
+	/** Distinct workspace package boundaries crossed between `source` and `target` (0 or 1). */
 	boundaryCrossedCount: number;
+	/** Workspace package owning `source`, or null outside a workspace. */
+	sourcePackage: string | null;
+	/** Workspace package owning `target`, or null outside a workspace. */
+	targetPackage: string | null;
 	/** Coarse breaking-risk band for the proposed change. */
 	breakingRisk: BreakingRisk;
 	/** External imports of `source` absent from the target package's `package.json`. */
