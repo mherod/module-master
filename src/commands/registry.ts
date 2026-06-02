@@ -2,6 +2,7 @@ import { name } from "../../package.json";
 import { logger } from "../cli-logger.ts";
 import { aliasCommand } from "./alias.ts";
 import { analyzeCommand } from "./analyze.ts";
+import { analyzeImpactCommand } from "./analyze-impact.ts";
 import { auditCommand } from "./audit.ts";
 import { barrelCommand } from "./barrel.ts";
 import { discoverCommand } from "./discover.ts";
@@ -174,6 +175,43 @@ Examples:
 				project: values.project,
 				workspace: values.workspace,
 				onlyRelatedTo: values["only-related-to"],
+			});
+		},
+	},
+
+	{
+		name: "analyze-impact",
+		helpText: `
+Usage: ${name} analyze-impact <source> <target> [options]
+
+Scout the impact radius of a proposed move/rename BEFORE mutating anything.
+Read-only — safe to call speculatively.
+
+Arguments:
+  source    Path to the file you plan to move or rename
+  target    Proposed destination path
+
+Options:
+  --verbose    Show resolved source/target paths
+
+Output includes:
+  • Impacted files (direct + indirect importers)
+  • Workspace package boundaries crossed
+  • Breaking-risk band (low/medium/high)
+  • Dependencies missing from the target package
+
+Examples:
+  ${name} analyze-impact src/utils/foo.ts packages/shared/src/foo.ts
+`,
+		run: ([source, target], values) => {
+			requireArg("analyze-impact", "<source>", source);
+			requireArg("analyze-impact", "<target>", target);
+			analyzeImpactCommand({
+				source,
+				target,
+				verbose: values.verbose,
+				project: values.project,
+				workspace: values.workspace,
 			});
 		},
 	},

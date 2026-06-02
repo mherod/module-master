@@ -59,6 +59,11 @@ export const COMMAND_SPECS: readonly CommandSpec[] = [
 		summary: "Analyze a module's imports, exports, and references",
 	},
 	{
+		name: "analyze-impact",
+		usage: "<source> <target>",
+		summary: "Scout the impact radius of a proposed move/rename",
+	},
+	{
 		name: "discover",
 		usage: "<directory>",
 		summary: "Discover tsconfig files and project structure",

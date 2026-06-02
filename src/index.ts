@@ -16,6 +16,12 @@ export { aliasCommand } from "./commands/alias.ts";
 // ── Commands: analyze ───────────────────────────────────────────────
 export type { AnalyzeOptions } from "./commands/analyze.ts";
 export { analyze, analyzeCommand } from "./commands/analyze.ts";
+// ── Commands: analyze-impact ────────────────────────────────────────
+export type { AnalyzeImpactOptions } from "./commands/analyze-impact.ts";
+export {
+	analyzeImpact,
+	analyzeImpactCommand,
+} from "./commands/analyze-impact.ts";
 // ── Commands: audit ─────────────────────────────────────────────────
 export type {
 	AuditOptions,
@@ -244,6 +250,7 @@ export type {
 	ModuleReference,
 	ReferenceType,
 } from "./types/graph.ts";
+export type { BreakingRisk, ImpactReport } from "./types/impact.ts";
 export type {
 	MockCleanupApplyResult,
 	MockCleanupOptions,

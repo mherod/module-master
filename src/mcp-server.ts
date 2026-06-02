@@ -42,6 +42,7 @@ import {
 	renameImportSpecifiers,
 } from "./commands/alias.ts";
 import { analyze } from "./commands/analyze.ts";
+import { analyzeImpact } from "./commands/analyze-impact.ts";
 import { buildAuditReport } from "./commands/audit.ts";
 import { analyzeBarrels, barrelReportToJson } from "./commands/barrel.ts";
 import { runExtractCommon } from "./commands/extract-common.ts";
@@ -779,6 +780,39 @@ server.registerTool(
 	async ({ file, project }) => {
 		try {
 			return await analyzeTool(file, project);
+		} catch (error) {
+			return toError(error);
+		}
+	}
+);
+
+server.registerTool(
+	"analyze-impact",
+	{
+		description:
+			"Scout the blast radius of a proposed move/rename BEFORE you mutate anything. Given a source file and a proposed target path, returns the impact radius — impactedFilesCount (direct + indirect/barrel-chain importers), boundaryCrossedCount (workspace package boundaries crossed), breakingRisk ('low'|'medium'|'high'), and missingDependencies (external imports of the source absent from the target package). Call this speculatively instead of running move/rename and reading the fallout. Strictly read-only — no writes, no worktree gating. NOTE: this is the scaffold slice (#114); the impact computation is not yet wired, so counts are currently stubbed (zeros / 'low' / empty) until #99's engine sub-issue lands.",
+		inputSchema: {
+			source: z
+				.string()
+				.describe(
+					"Absolute or cwd-relative path to the file you plan to move or rename (e.g. 'src/utils/foo.ts')"
+				),
+			target: z
+				.string()
+				.describe(
+					"Proposed destination path for the move/rename (e.g. 'packages/shared/src/foo.ts')"
+				),
+			project: z
+				.string()
+				.optional()
+				.describe(
+					"Optional path to the project root or tsconfig.json. Omit to auto-resolve the nearest tsconfig that owns the source file (recommended)"
+				),
+		},
+	},
+	({ source, target, project }) => {
+		try {
+			return jsonText(analyzeImpact({ source, target, project }));
 		} catch (error) {
 			return toError(error);
 		}
