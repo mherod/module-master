@@ -103,6 +103,38 @@ export function computeInternalDependencyAdditions(
 }
 
 /**
+ * Read the destination package's `restrictedDependencies` policy (issue #120)
+ * off its parsed package.json. The policy is a flat array of exact package
+ * names a cross-package move may not pull into this package. Returns the
+ * sanitised string entries; a missing or malformed field yields an empty list,
+ * so absence of a policy means no new blocking (back-compat with plain moves).
+ */
+export function normalizeRestrictedDependencies(value: unknown): string[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+	return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+/**
+ * Filter the would-be dependency additions of a cross-package move down to the
+ * ones the destination package forbids via `restrictedDependencies` (issue
+ * #120 — restricted-dependency guardrail). An exact name match against the
+ * policy set is a violation; an empty policy yields no violations. Pure and
+ * read-only — it reads off the additions A(#118)/B(#119) already computed.
+ */
+export function computeRestrictedViolations(
+	additions: DependencyAddition[],
+	restrictedDependencies: string[]
+): DependencyAddition[] {
+	if (restrictedDependencies.length === 0) {
+		return [];
+	}
+	const restricted = new Set(restrictedDependencies);
+	return additions.filter((addition) => restricted.has(addition.name));
+}
+
+/**
  * Apply dependency additions to a parsed package.json object, returning a new
  * object. The touched fields are sorted alphabetically for deterministic diffs
  * (matching the convention most package managers normalize to). Existing

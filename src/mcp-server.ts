@@ -1509,6 +1509,11 @@ async function moveTool(args: {
 			version: d.version,
 			field: d.field,
 		})),
+		restrictedViolations: (result.restrictedViolations ?? []).map((v) => ({
+			name: v.name,
+			destinationPackage: v.destinationPackage,
+			packageJson: path.relative(root, v.packageJsonPath),
+		})),
 		errors: result.errors.map((e) => ({
 			file: path.relative(root, e.file),
 			message: e.message,

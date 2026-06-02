@@ -22,6 +22,9 @@ import {
 	applyDependencyAdditions,
 	computeDependencyAdditions,
 	computeInternalDependencyAdditions,
+	computeRestrictedViolations,
+	type DependencyAddition,
+	normalizeRestrictedDependencies,
 	serializePackageJson,
 } from "../core/package-deps.ts";
 import { readPackageJson } from "../core/package-json.ts";
@@ -59,6 +62,7 @@ import {
 	filterToWorkspaceBoundary,
 	findBuildScript,
 	type WorkspaceInfo,
+	type WorkspacePackage,
 } from "../core/workspace.ts";
 import { getRuntime } from "../runtime/index.ts";
 import type { Runtime } from "../runtime/types.ts";
@@ -66,6 +70,7 @@ import type {
 	DependencyChange,
 	MoveError,
 	MoveResult,
+	RestrictedDependencyViolation,
 	UpdatedReference,
 } from "../types/move.ts";
 import type { MutatingCommandOptions, ProjectConfig } from "../types.ts";
@@ -209,6 +214,20 @@ export async function moveCommand(options: MoveOptions): Promise<void> {
 		logger.empty();
 	}
 
+	if (result.restrictedViolations && result.restrictedViolations.length > 0) {
+		const blocked = !(result.success || force);
+		logger.warn(
+			`🚫 ${result.restrictedViolations.length} restricted dependency(ies) ${blocked ? "blocked this move" : "pulled in via --force"}:`
+		);
+		for (const v of result.restrictedViolations) {
+			logger.warn(`   • "${v.name}" → ${v.destinationPackage}`);
+		}
+		if (blocked) {
+			logger.warn("   Re-run with --force to proceed.");
+		}
+		logger.empty();
+	}
+
 	if (!result.success) {
 		process.exit(1);
 	}
@@ -308,19 +327,32 @@ async function runPackageBuilds(
  * never duplicating/downgrading an existing destination entry. Returns the
  * entries added (empty when there is nothing to add); writes nothing on dryRun.
  */
-async function syncCrossPackageDependencies(
-	rt: Runtime,
+/**
+ * A computed-but-not-yet-applied cross-package dependency sync (issues
+ * #118/#119). Built read-only by `planCrossPackageDependencies` BEFORE the file
+ * move so the restricted-dependency guardrail (#120) can halt before any write,
+ * then applied by `applyCrossPackageDependencyPlan` once the move proceeds.
+ */
+interface CrossPackageDependencyPlan {
+	/** Dependency entries the move would add to the destination package.json. */
+	additions: DependencyAddition[];
+	/** Destination package the additions land in. */
+	targetPkg: WorkspacePackage;
+	/** Parsed destination package.json (snapshot read before the move). */
+	destJson: Record<string, unknown>;
+}
+
+async function planCrossPackageDependencies(
 	sourceAst: ts.SourceFile,
 	sourcePath: string,
 	targetPath: string,
 	project: ProjectConfig,
-	workspace: WorkspaceInfo,
-	dryRun: boolean
-): Promise<DependencyChange[]> {
+	workspace: WorkspaceInfo
+): Promise<CrossPackageDependencyPlan | null> {
 	const sourcePkgRef = findPackageForPath(sourcePath, workspace);
 	const targetPkgRef = findPackageForPath(targetPath, workspace);
 	if (!(sourcePkgRef && targetPkgRef)) {
-		return [];
+		return null;
 	}
 	const sourcePkg = workspace.packages.find(
 		(p) => p.name === sourcePkgRef.packageName
@@ -329,12 +361,12 @@ async function syncCrossPackageDependencies(
 		(p) => p.name === targetPkgRef.packageName
 	);
 	if (!(sourcePkg && targetPkg)) {
-		return [];
+		return null;
 	}
 
 	const externalImports = scanExternalImports(sourceAst, project);
 	if (externalImports.length === 0) {
-		return [];
+		return null;
 	}
 
 	// Partition the moved file's bare imports into internal monorepo packages
@@ -360,7 +392,7 @@ async function syncCrossPackageDependencies(
 	// real, current maps and unrelated fields are preserved on write.
 	const destJson = await readPackageJson(targetPkg.packageJsonPath);
 	if (!destJson) {
-		return [];
+		return null;
 	}
 
 	const sourceDeps = {
@@ -377,21 +409,37 @@ async function syncCrossPackageDependencies(
 		...computeDependencyAdditions(externalNames, sourceDeps, destDeps),
 		...computeInternalDependencyAdditions(internalNames, sourceDeps, destDeps),
 	];
-	if (additions.length === 0) {
+
+	return { additions, targetPkg, destJson };
+}
+
+/**
+ * Apply a previously-computed cross-package dependency plan to the destination
+ * package.json (issues #118/#119). Writes nothing on `dryRun` or when there is
+ * nothing to add; returns the entries added (with their destination path) so
+ * the caller can surface them. The restricted-dependency guardrail (#120) runs
+ * against the plan BEFORE this is called, so a write here is already cleared.
+ */
+async function applyCrossPackageDependencyPlan(
+	rt: Runtime,
+	plan: CrossPackageDependencyPlan,
+	dryRun: boolean
+): Promise<DependencyChange[]> {
+	if (plan.additions.length === 0) {
 		return [];
 	}
 
 	if (!dryRun) {
-		const updated = applyDependencyAdditions(destJson, additions);
+		const updated = applyDependencyAdditions(plan.destJson, plan.additions);
 		await rt.fs.writeFile(
-			targetPkg.packageJsonPath,
+			plan.targetPkg.packageJsonPath,
 			serializePackageJson(updated)
 		);
 	}
 
-	return additions.map((add) => ({
+	return plan.additions.map((add) => ({
 		...add,
-		packageJsonPath: targetPkg.packageJsonPath,
+		packageJsonPath: plan.targetPkg.packageJsonPath,
 	}));
 }
 
@@ -587,6 +635,64 @@ export async function moveModule(
 		}
 	}
 
+	// Restricted-dependency guardrail (issue #120): compute — read-only — the
+	// dependency entries this move WOULD add to the destination (#118/#119),
+	// then halt BEFORE any file move/write if one is forbidden by the
+	// destination's `restrictedDependencies` policy. The plan is reused for the
+	// actual write below, so the additions are computed exactly once.
+	let dependencyPlan: CrossPackageDependencyPlan | null = null;
+	const restrictedViolations: RestrictedDependencyViolation[] = [];
+	if (workspace && crossPackage && sourceAst) {
+		try {
+			dependencyPlan = await planCrossPackageDependencies(
+				sourceAst,
+				sourcePath,
+				targetPath,
+				project,
+				workspace
+			);
+		} catch {
+			dependencyPlan = null;
+		}
+		if (dependencyPlan) {
+			const policy = normalizeRestrictedDependencies(
+				dependencyPlan.destJson.restrictedDependencies
+			);
+			for (const add of computeRestrictedViolations(
+				dependencyPlan.additions,
+				policy
+			)) {
+				restrictedViolations.push({
+					name: add.name,
+					destinationPackage: dependencyPlan.targetPkg.name,
+					packageJsonPath: dependencyPlan.targetPkg.packageJsonPath,
+				});
+			}
+			if (restrictedViolations.length > 0) {
+				if (force) {
+					for (const v of restrictedViolations) {
+						logger.warn(
+							`⚠️  Restricted dependency "${v.name}" pulled into ${v.destinationPackage} (--force override)`
+						);
+					}
+				} else {
+					// Halt: write nothing, no file move (mirrors conflict handling).
+					return {
+						success: false,
+						movedFile: { from: sourcePath, to: targetPath },
+						updatedReferences: [],
+						errors: restrictedViolations.map((v) => ({
+							file: v.packageJsonPath,
+							message: `Restricted dependency "${v.name}" cannot be added to ${v.destinationPackage} (restrictedDependencies policy). Re-run with --force to proceed.`,
+							recoverable: false,
+						})),
+						restrictedViolations,
+					};
+				}
+			}
+		}
+	}
+
 	if (sourceAst) {
 		const internalRefs = scanModuleReferences(sourceAst, project);
 		if (internalRefs.length > 0) {
@@ -741,17 +847,14 @@ export async function moveModule(
 		}
 	}
 
-	// Sync the moved file's external dependencies into the destination
-	// package.json so the new package can build (issue #118).
-	if (workspace && crossPackage && sourceAst) {
+	// Apply the cross-package dependency plan computed read-only before the move
+	// (issues #118/#119). The #120 guardrail already halted above if a restricted
+	// dep was involved, so any write here is already cleared.
+	if (dependencyPlan) {
 		try {
-			const synced = await syncCrossPackageDependencies(
+			const synced = await applyCrossPackageDependencyPlan(
 				rt,
-				sourceAst,
-				sourcePath,
-				targetPath,
-				project,
-				workspace,
+				dependencyPlan,
 				dryRun
 			);
 			if (synced.length > 0) {
@@ -777,6 +880,7 @@ export async function moveModule(
 		updatedReferences,
 		errors,
 		dependencyChanges,
+		...(restrictedViolations.length > 0 ? { restrictedViolations } : {}),
 	};
 }
 

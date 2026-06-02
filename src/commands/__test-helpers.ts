@@ -18,7 +18,8 @@ export async function moveInFixture(
 	dir: string,
 	source: string,
 	target: string,
-	dryRun = false
+	dryRun = false,
+	force = false
 ): Promise<MoveResult> {
 	const absSource = path.join(dir, source);
 	const tsconfigPath = resolveTsConfig(dir, path.dirname(absSource));
@@ -33,7 +34,8 @@ export async function moveInFixture(
 		project,
 		dryRun,
 		false,
-		workspace
+		workspace,
+		force
 	);
 }
 

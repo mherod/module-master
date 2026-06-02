@@ -14,6 +14,27 @@ export interface MoveResult {
 	 * cross-package move (issue #118). Absent/empty for same-package moves.
 	 */
 	dependencyChanges?: DependencyChange[];
+	/**
+	 * Restricted dependencies a cross-package move would have pulled into the
+	 * destination, blocked by its `restrictedDependencies` policy (issue #120).
+	 * Present when a violation was found — the move halts (no write, no file
+	 * move) unless `--force`, in which case it lists the overridden violations.
+	 */
+	restrictedViolations?: RestrictedDependencyViolation[];
+}
+
+/**
+ * A restricted dependency a cross-package move would have added to the
+ * destination package, blocked by the destination's `restrictedDependencies`
+ * policy (issue #120 — restricted-dependency guardrail).
+ */
+export interface RestrictedDependencyViolation {
+	/** Restricted package name, e.g. "react-dom". */
+	name: string;
+	/** Destination package declaring the restriction. */
+	destinationPackage: string;
+	/** Absolute path to the destination package.json declaring the policy. */
+	packageJsonPath: string;
 }
 
 export interface UpdatedReference {

@@ -292,3 +292,141 @@ describe("move cross-package internal-dependency sync (#119)", () => {
 		).toBe("workspace:^");
 	});
 });
+
+/**
+ * End-to-end coverage for #120 (#102 C/3): a cross-package `move` must HALT
+ * (write nothing, no file move) when it would pull a dependency the destination
+ * package forbids via its `restrictedDependencies` policy, unless `--force`.
+ * The policy source is the destination package.json's `restrictedDependencies`
+ * array (decided on issue #120). pkg-b restricts `lodash`; foo.ts imports it.
+ */
+const RESTRICTED_WORKSPACE = {
+	"pnpm-workspace.yaml": 'packages:\n  - "packages/*"\n',
+	"tsconfig.json": JSON.stringify({
+		compilerOptions: { strict: true },
+		include: ["packages/**/*.ts"],
+	}),
+	"packages/pkg-a/package.json": JSON.stringify({
+		name: "@scope/pkg-a",
+		dependencies: { lodash: "^4.17.21" },
+	}),
+	"packages/pkg-a/src/foo.ts": 'import _ from "lodash";\nexport const foo = _;',
+	"packages/pkg-b/package.json": JSON.stringify({
+		name: "@scope/pkg-b",
+		dependencies: {},
+		restrictedDependencies: ["lodash"],
+	}),
+	"packages/pkg-b/src/keep.ts": "export const keep = true;",
+} as const;
+
+describe("move cross-package restricted-dependency guardrail (#120)", () => {
+	test("halts the move when a restricted dep would be added", async () => {
+		const dir = await fixture("restricted-blocked", {
+			...RESTRICTED_WORKSPACE,
+		});
+		const result = await moveInFixture(
+			dir,
+			"packages/pkg-a/src/foo.ts",
+			"packages/pkg-b/src/foo.ts"
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.restrictedViolations).toEqual([
+			{
+				name: "lodash",
+				destinationPackage: "@scope/pkg-b",
+				packageJsonPath: path.join(dir, "packages/pkg-b/package.json"),
+			},
+		]);
+		// No file move and no package.json write.
+		expect(
+			await Bun.file(path.join(dir, "packages/pkg-a/src/foo.ts")).exists()
+		).toBe(true);
+		expect(
+			await Bun.file(path.join(dir, "packages/pkg-b/src/foo.ts")).exists()
+		).toBe(false);
+		const destPkg = await readJson(
+			path.join(dir, "packages/pkg-b/package.json")
+		);
+		expect(destPkg.dependencies).toEqual({});
+	});
+
+	test("--force proceeds and reports the overridden violation", async () => {
+		const dir = await fixture("restricted-force", { ...RESTRICTED_WORKSPACE });
+		const result = await moveInFixture(
+			dir,
+			"packages/pkg-a/src/foo.ts",
+			"packages/pkg-b/src/foo.ts",
+			false,
+			true
+		);
+
+		expect(result.success).toBe(true);
+		expect(result.restrictedViolations).toEqual([
+			{
+				name: "lodash",
+				destinationPackage: "@scope/pkg-b",
+				packageJsonPath: path.join(dir, "packages/pkg-b/package.json"),
+			},
+		]);
+		// The move proceeded: file moved and the dep was synced despite the policy.
+		expect(
+			await Bun.file(path.join(dir, "packages/pkg-b/src/foo.ts")).exists()
+		).toBe(true);
+		const destPkg = await readJson(
+			path.join(dir, "packages/pkg-b/package.json")
+		);
+		expect((destPkg.dependencies as Record<string, string>).lodash).toBe(
+			"^4.17.21"
+		);
+	});
+
+	test("an unrestricted dep is unaffected by the policy", async () => {
+		const dir = await fixture("restricted-other-dep", {
+			...RESTRICTED_WORKSPACE,
+			// pkg-b restricts react-dom, but foo.ts only imports lodash.
+			"packages/pkg-b/package.json": JSON.stringify({
+				name: "@scope/pkg-b",
+				dependencies: {},
+				restrictedDependencies: ["react-dom"],
+			}),
+		});
+		const result = await moveInFixture(
+			dir,
+			"packages/pkg-a/src/foo.ts",
+			"packages/pkg-b/src/foo.ts"
+		);
+
+		expect(result.success).toBe(true);
+		expect(result.restrictedViolations).toBeUndefined();
+		const destPkg = await readJson(
+			path.join(dir, "packages/pkg-b/package.json")
+		);
+		expect((destPkg.dependencies as Record<string, string>).lodash).toBe(
+			"^4.17.21"
+		);
+	});
+
+	test("--dry-run reports the would-be violation without writing", async () => {
+		const dir = await fixture("restricted-dry-run", {
+			...RESTRICTED_WORKSPACE,
+		});
+		const result = await moveInFixture(
+			dir,
+			"packages/pkg-a/src/foo.ts",
+			"packages/pkg-b/src/foo.ts",
+			true
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.restrictedViolations).toHaveLength(1);
+		// Dry-run writes nothing and moves nothing.
+		expect(
+			await Bun.file(path.join(dir, "packages/pkg-b/src/foo.ts")).exists()
+		).toBe(false);
+		const destPkg = await readJson(
+			path.join(dir, "packages/pkg-b/package.json")
+		);
+		expect(destPkg.dependencies).toEqual({});
+	});
+});

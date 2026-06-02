@@ -3,6 +3,9 @@ import {
 	applyDependencyAdditions,
 	computeDependencyAdditions,
 	computeInternalDependencyAdditions,
+	computeRestrictedViolations,
+	type DependencyAddition,
+	normalizeRestrictedDependencies,
 	serializePackageJson,
 } from "./package-deps.ts";
 import { packageNameFromSpecifier } from "./resolver.ts";
@@ -180,6 +183,63 @@ describe("computeInternalDependencyAdditions (#119)", () => {
 			{}
 		);
 		expect(additions).toHaveLength(1);
+	});
+});
+
+describe("normalizeRestrictedDependencies (#120)", () => {
+	test("returns the string entries of a valid array", () => {
+		expect(normalizeRestrictedDependencies(["react-dom", "react"])).toEqual([
+			"react-dom",
+			"react",
+		]);
+	});
+
+	test("returns an empty list for a missing/undefined policy", () => {
+		expect(normalizeRestrictedDependencies(undefined)).toEqual([]);
+	});
+
+	test("returns an empty list for a non-array value", () => {
+		expect(normalizeRestrictedDependencies("react-dom")).toEqual([]);
+		expect(normalizeRestrictedDependencies({ react: true })).toEqual([]);
+	});
+
+	test("drops non-string entries from a malformed array", () => {
+		expect(
+			normalizeRestrictedDependencies(["react-dom", 42, null, "react"])
+		).toEqual(["react-dom", "react"]);
+	});
+});
+
+describe("computeRestrictedViolations (#120)", () => {
+	const additions: DependencyAddition[] = [
+		{ name: "react-dom", version: "^18.0.0", field: "dependencies" },
+		{ name: "lodash", version: "^4.17.21", field: "dependencies" },
+	];
+
+	test("returns the additions whose name is in the policy", () => {
+		expect(computeRestrictedViolations(additions, ["react-dom"])).toEqual([
+			{ name: "react-dom", version: "^18.0.0", field: "dependencies" },
+		]);
+	});
+
+	test("returns no violations for an empty policy", () => {
+		expect(computeRestrictedViolations(additions, [])).toEqual([]);
+	});
+
+	test("returns no violations when nothing matches", () => {
+		expect(computeRestrictedViolations(additions, ["react-native"])).toEqual(
+			[]
+		);
+	});
+
+	test("matches exactly — a subpath is not a restricted match", () => {
+		expect(computeRestrictedViolations(additions, ["lodash/fp"])).toEqual([]);
+	});
+
+	test("flags every matching addition", () => {
+		expect(
+			computeRestrictedViolations(additions, ["react-dom", "lodash"])
+		).toHaveLength(2);
 	});
 });
 
