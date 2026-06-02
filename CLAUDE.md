@@ -349,6 +349,25 @@ DON'T: Build the `unused` usage graph from one tsconfig — use `buildProjectGra
 
 DON'T: Re-implement sub-path-export matching; call `findSubpathExportForFile()` (`resolver.ts`), which shares `resolvePackageSubpath()`/`findExplicitSubpathExport()` with `move`.
 
+## Extract Component Command
+
+`extract-component` (`src/commands/extract-component.ts`) splits a JSX/TSX subtree into its own typed sub-component. Built across four slices (#107 locate → #108 classify → #109 codegen → #110 mutate), closing epic #101. It is a **mutating** command: `ExtractComponentOptions extends MutatingCommandOptions`; the CLI writes by default and previews with `--dry-run`, the MCP tool defaults `dryRun:true`.
+
+Pipeline (single `createProgram` pass, mirroring `analyze`): `resolveTsConfig` → `loadProject` → `createProgram(project, [file])` → `resolveJsxTsNode` (selector: `L<a>-<b>`/`<a>-<b>` line range or a JSX tag/component name) → `classifyFreeVariables` → `generateComponentModule` → `planExtractComponentWrites` → `executeExtractComponent`.
+
+- **`classifyFreeVariables(jsxNode, sourceFile, checker)`** resolves free identifiers by symbol identity (never name matching, so shadowing resolves). A free local declared in the owning component but outside the subtree becomes a `PropCandidate`; one whose value derives from a `use*` hook call becomes an `UnliftableHook` and sets `blocked: true`.
+- **`generateComponentModule`** emits imports (`collectJsxImports`), an optional `Props` interface (`renderPropsInterface` returns `null` for zero props — an empty interface trips Biome), and a typed component whose body re-emits the JSX verbatim from its source span (`reindentJsx`; never printer-reserialize).
+- **`planExtractComponentWrites`** (pure) computes the two original-file edits — insert `import { <Name> } from "<specifier>"` after the last import (`calculateRelativeSpecifier`), replace the JSX span with `<NewComponent propA={propA} … />` — plus the new-module write, all via `applyTextChanges`.
+- **`executeExtractComponent`** applies it: `ensureCleanWorktree` before any I/O; `fileDeclaresName` call-site conflict + destination-exists guards (both `--force`-overridable); `runTypeCheckDetailed` before/after; on any new error or incomplete verification, rolls back from an **in-memory snapshot** (restore originals, `rt.fs.deleteFile` created files) and exits non-zero. Writes run through `mapConcurrent`.
+
+DON'T: roll this command back with `rollbackFiles`/`git restore` like `mock-cleanup`/`move`. It creates a NEW file and must work in non-git trees (and tests), so it snapshots each target's pre-write content in memory and restores/deletes from that.
+
+DON'T: block extraction silently when hooks are unliftable — return `blocked:true` with the offending `unliftableHooks` and write nothing.
+
+Tests live in `src/commands/extract-component.test.ts`. The #110 end-to-end tests (happy-path, hook-block, rollback) need a real `tsc` run, so they use `makeFixture(..., { outsideRepo: true })` (tmpdir) with a `tsconfig.json` (`jsx:"preserve"`) and an ambient `globals.d.ts` JSX shim — `tsc` resolves via `process.cwd()` (the repo's binary), so no React dependency is needed. The rollback test forces a new error by typing a lifted prop with a function-local `interface` the child module cannot see.
+
+DON'T: use `node:fs` sync APIs (`writeFileSync`/`rmSync`/`mkdtempSync`) in this test file — a hook blocks them. Use `makeFixture`/`cleanup` (async, from `./__test-helpers`) and `Bun.file`.
+
 ## Workspace Discovery
 
 The `workspace` command (`src/commands/workspace.ts`) discovers monorepo structure:
