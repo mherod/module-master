@@ -1,14 +1,20 @@
 import path from "node:path";
 import ts from "typescript";
 import { logger } from "../cli-logger.ts";
+import { mapConcurrent } from "../core/concurrency.ts";
 import { removeExtension } from "../core/constants.ts";
+import { ensureCleanWorktree } from "../core/git.ts";
 import {
 	createProgram,
 	loadProject,
 	resolveTsConfig,
 } from "../core/project.ts";
+import { calculateRelativeSpecifier } from "../core/resolver.ts";
 import { parseSourceFile } from "../core/source-file.ts";
-import type { ReadOnlyCommandOptions } from "../types.ts";
+import { applyTextChanges, type TextChange } from "../core/text-changes.ts";
+import { runTypeCheckDetailed } from "../core/verify.ts";
+import { getRuntime } from "../runtime/index.ts";
+import type { MutatingCommandOptions } from "../types.ts";
 
 /**
  * `extract-component` — pull a JSX/TSX subtree into its own typed module.
@@ -19,7 +25,7 @@ import type { ReadOnlyCommandOptions } from "../types.ts";
  * + component codegen (#109), and the call-site rewrite + verify/rollback (#110)
  * land in later slices. No files are written here.
  */
-export interface ExtractComponentOptions extends ReadOnlyCommandOptions {
+export interface ExtractComponentOptions extends MutatingCommandOptions {
 	/** Path to the source file containing the JSX to extract */
 	file: string;
 	/**
@@ -749,9 +755,424 @@ export function buildExtractComponentModule(
 	});
 }
 
-export function extractComponentCommand(
+// ── Write + call-site rewrite + verify/rollback (#110) ────────────────
+
+/** A single file write planned by the extraction. */
+export interface ExtractComponentWrite {
+	/** Absolute path of the file. */
+	file: string;
+	/** `create` for the new module, `modify` for the rewritten original. */
+	kind: "create" | "modify";
+	/** Full new contents of the file. */
+	content: string;
+}
+
+/** Before/after tsc diagnostic delta for an applied extraction. */
+export interface ExtractComponentTypecheck {
+	errorsBefore: string[];
+	errorsAfter: string[];
+	newErrors: string[];
+	verificationIncomplete: boolean;
+}
+
+/** Result of writing + rewriting (or planning, under dry-run) an extraction. */
+export interface ExtractComponentApplyResult {
+	dryRun: boolean;
+	success: boolean;
+	/** True when unliftable hooks prevented extraction; nothing was written. */
+	blocked: boolean;
+	unliftableHooks: UnliftableHook[];
+	/** A call-site name/binding or destination-exists conflict, when one aborted the write. */
+	conflict: string | null;
+	componentName: string;
+	/** Absolute destination path of the generated module. */
+	newFile: string;
+	/** Relative specifier inserted into the original file's import. */
+	importSpecifier: string;
+	/** The `<NewComponent … />` element that replaced the extracted span. */
+	callSite: string;
+	/** Planned writes — populated even on dry-run / conflict so callers can preview. */
+	writes: ExtractComponentWrite[];
+	/** Files actually written (empty on dry-run, conflict, block, or rollback). */
+	modifiedFiles: string[];
+	rolledBack: boolean;
+	errors: string[];
+	typecheck?: ExtractComponentTypecheck;
+}
+
+/** True when `decl`'s import clause binds `name` (default, namespace, or named). */
+function importClauseBindsName(
+	decl: ts.ImportDeclaration,
+	name: string
+): boolean {
+	const clause = decl.importClause;
+	if (!clause) {
+		return false;
+	}
+	if (clause.name?.text === name) {
+		return true;
+	}
+	const bindings = clause.namedBindings;
+	if (!bindings) {
+		return false;
+	}
+	if (ts.isNamespaceImport(bindings)) {
+		return bindings.name.text === name;
+	}
+	return bindings.elements.some((element) => element.name.text === name);
+}
+
+/**
+ * Whether `sourceFile` already declares `name` at the top level — an import
+ * binding or a variable/function/class/type/interface/enum declaration. Mirrors
+ * the `hasLocalBinding()` conflict checks in `move`/`rename`: the inserted
+ * component import would collide with any existing binding of the same name.
+ */
+function fileDeclaresName(sourceFile: ts.SourceFile, name: string): boolean {
+	for (const statement of sourceFile.statements) {
+		if (
+			ts.isImportDeclaration(statement) &&
+			importClauseBindsName(statement, name)
+		) {
+			return true;
+		}
+		if (
+			(ts.isFunctionDeclaration(statement) ||
+				ts.isClassDeclaration(statement) ||
+				ts.isTypeAliasDeclaration(statement) ||
+				ts.isInterfaceDeclaration(statement) ||
+				ts.isEnumDeclaration(statement)) &&
+			statement.name?.text === name
+		) {
+			return true;
+		}
+		if (
+			ts.isVariableStatement(statement) &&
+			statement.declarationList.declarations.some(
+				(declaration) =>
+					ts.isIdentifier(declaration.name) && declaration.name.text === name
+			)
+		) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/** Build the `<NewComponent propA={propA} … />` element for the call site. */
+function buildJsxCallSite(
+	componentName: string,
+	props: PropCandidate[]
+): string {
+	if (props.length === 0) {
+		return `<${componentName} />`;
+	}
+	const attrs = props.map((prop) => `${prop.name}={${prop.name}}`).join(" ");
+	return `<${componentName} ${attrs} />`;
+}
+
+/**
+ * Plan the two text edits an extraction makes to the original file — inserting
+ * the component import after the last existing import (or at the top), and
+ * replacing the extracted JSX span with the new element — plus the new module
+ * write. Pure: computes contents from the parsed source, writes nothing.
+ */
+export function planExtractComponentWrites(params: {
+	sourceFile: ts.SourceFile;
+	jsxNode: ts.Node;
+	codegen: ComponentCodegenResult;
+	originalFile: string;
+	newFile: string;
+}): {
+	writes: ExtractComponentWrite[];
+	importSpecifier: string;
+	callSite: string;
+	conflict: string | null;
+} {
+	const { sourceFile, jsxNode, codegen, originalFile, newFile } = params;
+	const { componentName, props } = codegen;
+
+	const conflict = fileDeclaresName(sourceFile, componentName)
+		? `Call-site conflict: "${componentName}" is already declared or imported in ${path.basename(originalFile)}.`
+		: null;
+
+	const importSpecifier = calculateRelativeSpecifier(originalFile, newFile);
+	const callSite = buildJsxCallSite(componentName, props);
+	const importStatement = `import { ${componentName} } from "${importSpecifier}";`;
+
+	const importDecls = sourceFile.statements.filter(ts.isImportDeclaration);
+	const lastImport = importDecls.at(-1);
+	const importChange: TextChange = lastImport
+		? {
+				start: lastImport.getEnd(),
+				end: lastImport.getEnd(),
+				newText: `\n${importStatement}`,
+			}
+		: { start: 0, end: 0, newText: `${importStatement}\n` };
+	const jsxChange: TextChange = {
+		start: jsxNode.getStart(sourceFile),
+		end: jsxNode.getEnd(),
+		newText: callSite,
+	};
+
+	const rewrittenOriginal = applyTextChanges(sourceFile.text, [
+		importChange,
+		jsxChange,
+	]);
+
+	return {
+		writes: [
+			{ file: newFile, kind: "create", content: codegen.moduleText },
+			{ file: originalFile, kind: "modify", content: rewrittenOriginal },
+		],
+		importSpecifier,
+		callSite,
+		conflict,
+	};
+}
+
+interface FileSnapshot {
+	file: string;
+	existed: boolean;
+	original: string | null;
+}
+
+/** Restore snapshotted files: rewrite originals back, delete files we created. */
+async function rollbackExtractComponent(
+	snapshots: FileSnapshot[]
+): Promise<void> {
+	const rt = getRuntime();
+	await mapConcurrent(snapshots, async (snapshot) => {
+		if (snapshot.existed && snapshot.original !== null) {
+			await rt.fs.writeFile(snapshot.file, snapshot.original);
+		} else if (await rt.fs.exists(snapshot.file)) {
+			await rt.fs.deleteFile(snapshot.file);
+		}
+	});
+}
+
+/**
+ * Apply an extraction end-to-end: locate + classify + codegen, then write the
+ * new module and rewrite the original call site, guarded by the dirty-worktree
+ * check, call-site conflict detection, and a closing `tsc --noEmit` gate that
+ * rolls every write back on any new type error or incomplete verification.
+ *
+ * Blocks (writing nothing) when the subtree references unliftable hook values.
+ * Honors `dryRun` (plan only) and `force` (override the worktree + conflict
+ * guards). Mirrors the apply/verify/rollback contract of `mock-cleanup`/`move`.
+ */
+export async function executeExtractComponent(
 	options: ExtractComponentOptions
+): Promise<ExtractComponentApplyResult> {
+	const dryRun = options.dryRun ?? false;
+	const force = options.force ?? false;
+	const absolutePath = path.resolve(options.file);
+	const newFileAbs = path.resolve(options.newFile);
+
+	const tsconfigPath = resolveTsConfig(
+		options.project,
+		path.dirname(absolutePath)
+	);
+	if (!tsconfigPath) {
+		throw new Error("Could not find tsconfig.json");
+	}
+	const project = loadProject(tsconfigPath, absolutePath);
+	const program = createProgram(project, [absolutePath]);
+	const sourceFile = program.getSourceFile(absolutePath);
+	if (!sourceFile) {
+		throw new Error(`Could not parse file: ${absolutePath}`);
+	}
+	const checker = program.getTypeChecker();
+	const jsxNode = resolveJsxTsNode(sourceFile, options.selector);
+	const classification = classifyFreeVariables(jsxNode, sourceFile, checker);
+	const { componentName } = componentNamesFromNewFile(options.newFile);
+
+	const base = {
+		dryRun,
+		componentName,
+		newFile: newFileAbs,
+		unliftableHooks: classification.unliftableHooks,
+		modifiedFiles: [] as string[],
+		rolledBack: false,
+	};
+
+	if (classification.blocked) {
+		const hooks = classification.unliftableHooks
+			.map((hook) => `${hook.name} (from ${hook.derivedFrom})`)
+			.join(", ");
+		return {
+			...base,
+			blocked: true,
+			success: false,
+			conflict: null,
+			importSpecifier: "",
+			callSite: "",
+			writes: [],
+			errors: [
+				`Extraction blocked: subtree references hook-derived value(s): ${hooks}. Nothing written.`,
+			],
+		};
+	}
+
+	const codegen = generateComponentModule({
+		jsxNode,
+		sourceFile,
+		checker,
+		classification,
+		newFile: options.newFile,
+	});
+	const plan = planExtractComponentWrites({
+		sourceFile,
+		jsxNode,
+		codegen,
+		originalFile: absolutePath,
+		newFile: newFileAbs,
+	});
+
+	const rt = getRuntime();
+	let conflict = plan.conflict;
+	if (!(conflict || force) && (await rt.fs.exists(newFileAbs))) {
+		conflict = `Destination file already exists: ${options.newFile}. Rerun with --force to overwrite.`;
+	}
+	if (conflict && !force) {
+		return {
+			...base,
+			blocked: false,
+			success: false,
+			conflict,
+			importSpecifier: plan.importSpecifier,
+			callSite: plan.callSite,
+			writes: plan.writes,
+			errors: [conflict],
+		};
+	}
+
+	const planned = {
+		...base,
+		blocked: false,
+		conflict,
+		importSpecifier: plan.importSpecifier,
+		callSite: plan.callSite,
+		writes: plan.writes,
+	};
+
+	if (dryRun) {
+		return { ...planned, success: true, errors: [] };
+	}
+
+	await ensureCleanWorktree(path.dirname(absolutePath), force, dryRun);
+
+	const snapshots = await mapConcurrent(plan.writes, async (write) => {
+		const existed = await rt.fs.exists(write.file);
+		return {
+			file: write.file,
+			existed,
+			original: existed ? await rt.fs.readFile(write.file) : null,
+		};
+	});
+
+	const before = await runTypeCheckDetailed(project);
+	await mapConcurrent(plan.writes, async (write) =>
+		rt.fs.writeFile(write.file, write.content)
+	);
+	const modifiedFiles = plan.writes.map((write) => write.file).sort();
+	const after = await runTypeCheckDetailed(project);
+
+	const errorsBefore = before.errors;
+	const newErrors = after.errors.filter(
+		(error) => !errorsBefore.includes(error)
+	);
+	const verificationIncomplete = before.incomplete || after.incomplete;
+	const typecheck: ExtractComponentTypecheck = {
+		errorsBefore,
+		errorsAfter: after.errors,
+		newErrors,
+		verificationIncomplete,
+	};
+
+	if (newErrors.length > 0 || verificationIncomplete) {
+		await rollbackExtractComponent(snapshots);
+		return {
+			...planned,
+			success: false,
+			modifiedFiles,
+			rolledBack: true,
+			errors: verificationIncomplete
+				? ["Type checking did not complete after extract-component."]
+				: newErrors,
+			typecheck,
+		};
+	}
+
+	return {
+		...planned,
+		success: true,
+		modifiedFiles,
+		errors: [],
+		typecheck,
+	};
+}
+
+/**
+ * CLI entry point. Mutates by default (writes the new module + rewrites the
+ * call site, gated by the dirty-worktree guard and a closing tsc check that
+ * rolls back on regression). `--dry-run` previews the locate + classify +
+ * codegen report without writing. Exits non-zero on failure, conflict, or block.
+ */
+export async function extractComponentCommand(
+	options: ExtractComponentOptions
+): Promise<void> {
+	if (options.dryRun) {
+		printExtractComponentDryRun(options);
+		return;
+	}
+
+	let result: ExtractComponentApplyResult;
+	try {
+		result = await executeExtractComponent(options);
+	} catch (error) {
+		logger.error(error instanceof Error ? error.message : String(error));
+		process.exit(1);
+	}
+
+	if (options.json) {
+		logger.info(JSON.stringify(result, null, 2));
+	} else {
+		printExtractComponentResult(result);
+	}
+	if (!result.success) {
+		process.exit(1);
+	}
+}
+
+function printExtractComponentResult(
+	result: ExtractComponentApplyResult
 ): void {
+	logger.info("\n🧩 extract-component");
+	logger.info(`   Component: ${result.componentName}`);
+	logger.info(`   New file:  ${result.newFile}`);
+	if (result.blocked || result.conflict) {
+		logger.error(`⛔ ${result.errors.join(" ")}`);
+		return;
+	}
+	if (result.rolledBack) {
+		logger.error(
+			`❌ Extraction introduced ${result.errors.length} new type error(s) — all writes rolled back:`
+		);
+		for (const error of result.errors.slice(0, 10)) {
+			logger.error(`   ${error}`);
+		}
+		return;
+	}
+	logger.info(`   Import:    ${result.importSpecifier}`);
+	logger.info(`   Call site: ${result.callSite}`);
+	logger.info(`✅ Wrote ${result.modifiedFiles.length} file(s):`);
+	for (const file of result.modifiedFiles) {
+		logger.info(`   ${file}`);
+	}
+}
+
+function printExtractComponentDryRun(options: ExtractComponentOptions): void {
 	const { file, selector, newFile, json } = options;
 	const absolutePath = path.resolve(file);
 

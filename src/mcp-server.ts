@@ -48,6 +48,7 @@ import { runExtractCommon } from "./commands/extract-common.ts";
 import {
 	analyzeExtractComponentFreeVariables,
 	buildExtractComponentModule,
+	executeExtractComponent,
 	type FreeVariableReport,
 	locateExtractComponentTarget,
 } from "./commands/extract-component.ts";
@@ -243,12 +244,15 @@ async function analyzeTool(
 	});
 }
 
-function extractComponentTool(
+async function extractComponentTool(
 	file: string,
 	selector: string,
-	newFile: string
-): CallToolResult {
+	newFile: string,
+	options: { dryRun?: boolean; force?: boolean } = {}
+): Promise<CallToolResult> {
 	const absolutePath = path.resolve(file);
+	// Default to a preview so callers always see the plan before any write.
+	const dryRun = options.dryRun ?? true;
 	const report = locateExtractComponentTarget(absolutePath, selector, newFile);
 	// Free-variable classification (#108) + codegen (#109) need the type-checker,
 	// so they only run when the file resolves to a tsconfig project; degrade to
@@ -274,11 +278,32 @@ function extractComponentTool(
 		classificationError =
 			error instanceof Error ? error.message : String(error);
 	}
+
+	if (dryRun) {
+		return jsonText({
+			...report,
+			dryRun: true,
+			classification,
+			classificationError,
+			generatedModule,
+		});
+	}
+
+	// Mutate: write the new module + rewrite the call site, with the
+	// dirty-worktree guard, conflict detection, and tsc verify/rollback.
+	const result = await executeExtractComponent({
+		file: absolutePath,
+		selector,
+		newFile,
+		dryRun: false,
+		force: options.force,
+	});
 	return jsonText({
 		...report,
+		dryRun: false,
 		classification,
 		classificationError,
-		generatedModule,
+		result,
 	});
 }
 
@@ -764,7 +789,7 @@ server.registerTool(
 	"extract-component",
 	{
 		description:
-			"Locate the JSX/TSX subtree you intend to split into its own typed sub-component, BEFORE any mutation. Resolves a selector — a line range ('L12-40' or '12-40', 1-based inclusive) or a JSX tag/component name ('Card', 'div') — to exactly ONE JSX node and reports its kind (element/self-closing/fragment), tag name, character span, and line range. When the file resolves to a tsconfig project, it also returns a `classification`: prop candidates (name + resolved type, for the eventual Props interface) and unliftable hooks (values derived from useState/use* that cannot be lifted into a child) with a `blocked` flag; `classificationError` is set instead when the type-checker is unavailable. Errors clearly when nothing matches or the selector is ambiguous (lists the candidates so you can narrow with a line range). READ-ONLY and writes nothing — Props-interface codegen and the call-site rewrite + tsc verify/rollback arrive in later slices.",
+			"Split a JSX/TSX subtree into its own typed sub-component. Resolves a selector — a line range ('L12-40' or '12-40', 1-based inclusive) or a JSX tag/component name ('Card', 'div') — to exactly ONE JSX node. Returns its kind (element/self-closing/fragment), tag name, character span, line range, and (when the file resolves to a tsconfig project) a `classification`: prop candidates (name + resolved type) and unliftable hooks (values derived from useState/use* that cannot be lifted into a child) with a `blocked` flag; `classificationError` is set instead when the type-checker is unavailable. Defaults to `dryRun: true`, returning the located node plus the `generatedModule` text WITHOUT writing. When `dryRun: false`, it writes the new module to newFile, inserts its import into the source file, replaces the extracted span with `<NewComponent propA={propA} … />`, then runs `tsc --noEmit` before/after and returns a `result` with success, the writes, modifiedFiles, and the typecheck delta — rolling every write back on any new type error. Refuses to write when the subtree references hook-derived values (blocked), on a dirty worktree unless `force: true`, or when a call-site name conflict is detected. Errors clearly when nothing matches or the selector is ambiguous (lists candidates so you can narrow with a line range).",
 		inputSchema: {
 			file: z
 				.string()
@@ -779,13 +804,28 @@ server.registerTool(
 			newFile: z
 				.string()
 				.describe(
-					"Destination module the extracted component will eventually live in (e.g. 'src/Card.tsx'). Validated now; written in a later slice"
+					"Destination module the extracted component will be written to (e.g. 'src/Card.tsx')"
+				),
+			dryRun: z
+				.boolean()
+				.optional()
+				.describe(
+					"Preview the located node + generated module without writing (default true). Set false to apply the extraction."
+				),
+			force: z
+				.boolean()
+				.optional()
+				.describe(
+					"Override the dirty-worktree guard and call-site conflict check when dryRun=false"
 				),
 		},
 	},
-	({ file, selector, newFile }) => {
+	async ({ file, selector, newFile, dryRun, force }) => {
 		try {
-			return extractComponentTool(file, selector, newFile);
+			return await extractComponentTool(file, selector, newFile, {
+				dryRun,
+				force,
+			});
 		} catch (error) {
 			return toError(error);
 		}

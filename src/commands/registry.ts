@@ -570,11 +570,15 @@ Examples:
 		helpText: `
 Usage: ${name} extract-component <file> <selector> <new-file> [options]
 
-Locate a JSX/TSX subtree to extract into its own typed sub-component.
+Extract a JSX/TSX subtree into its own typed sub-component.
 
-NOTE: This is slice 1 of the feature — read-only / dry-run only. It resolves the
-selector to a single JSX node and reports it; it does not yet write files.
-Free-variable analysis, codegen, and the call-site rewrite land in later slices.
+Writes the generated module to <new-file>, inserts its import into the source
+file, and replaces the extracted span with <NewComponent propA={propA} … />
+passing each classified prop. Refuses to write when the subtree references
+hook-derived values, on a dirty worktree (unless --force), or when a call-site
+name conflict is detected. Runs tsc --noEmit before/after and rolls every write
+back on any new type error. Use --dry-run to preview locate + classify + codegen
+without writing.
 
 Arguments:
   file        Path to the source file containing the JSX
@@ -583,14 +587,16 @@ Arguments:
   new-file    Destination module the extracted component will live in
 
 Options:
-  --json          Output the located-node report as JSON
+  -n, --dry-run   Preview the locate + classify + codegen report; write nothing
+  --force         Override the dirty-worktree guard and call-site conflict check
+  --json          Output the result/report as JSON
   -p, --project   Path to project directory or tsconfig.json
 
 Examples:
   ${name} extract-component src/App.tsx Card src/Card.tsx
-  ${name} extract-component src/App.tsx L12-40 src/Panel.tsx --json
+  ${name} extract-component src/App.tsx L12-40 src/Panel.tsx --dry-run --json
 `,
-		run: ([file, selector, newFile], values) => {
+		run: async ([file, selector, newFile], values) => {
 			if (!(file && selector && newFile)) {
 				logger.error(
 					"Error: extract-component requires <file>, <selector>, and <new-file> arguments"
@@ -598,11 +604,13 @@ Examples:
 				logger.error(`Run '${name} extract-component --help' for usage`);
 				process.exit(1);
 			}
-			extractComponentCommand({
+			await extractComponentCommand({
 				file,
 				selector,
 				newFile,
 				json: values.json,
+				dryRun: values["dry-run"],
+				force: values.force,
 				verbose: values.verbose,
 				project: values.project,
 			});

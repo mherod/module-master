@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import ts from "typescript";
 import { createSourceFileFromText } from "../core/source-file.ts";
+import { cleanup, makeFixture } from "./__test-helpers";
 import {
 	classifyFreeVariables,
 	componentNamesFromNewFile,
+	executeExtractComponent,
 	generateComponentModule,
 	type LocatedJsxNode,
 	locateExtractComponentTarget,
@@ -133,30 +133,36 @@ describe("locateJsxNode — line-range selector", () => {
 });
 
 describe("locateExtractComponentTarget", () => {
-	test("reads a file from disk and reports the located node", () => {
-		const dir = mkdtempSync(path.join(tmpdir(), "resect-extract-component-"));
+	test("reads a file from disk and reports the located node", async () => {
+		const dir = await makeFixture(
+			"extract-locate",
+			{ "App.tsx": SAMPLE },
+			{ outsideRepo: true }
+		);
 		try {
 			const file = path.join(dir, "App.tsx");
-			writeFileSync(file, SAMPLE);
 			const report = locateExtractComponentTarget(file, "Card", "Card.tsx");
 			expect(report.file).toBe(file);
 			expect(report.newFile).toBe("Card.tsx");
 			expect(report.located.tagName).toBe("Card");
 		} finally {
-			rmSync(dir, { recursive: true, force: true });
+			await cleanup(dir);
 		}
 	});
 
-	test("rejects an empty destination", () => {
-		const dir = mkdtempSync(path.join(tmpdir(), "resect-extract-component-"));
+	test("rejects an empty destination", async () => {
+		const dir = await makeFixture(
+			"extract-locate-empty",
+			{ "App.tsx": SAMPLE },
+			{ outsideRepo: true }
+		);
 		try {
 			const file = path.join(dir, "App.tsx");
-			writeFileSync(file, SAMPLE);
 			expect(() => locateExtractComponentTarget(file, "Card", "  ")).toThrow(
 				/must not be empty/
 			);
 		} finally {
-			rmSync(dir, { recursive: true, force: true });
+			await cleanup(dir);
 		}
 	});
 
@@ -396,5 +402,171 @@ describe("generateComponentModule — codegen", () => {
 		expect(result.moduleText).toContain('status: "on" | "off";');
 		expect(result.moduleText).toContain("meta:");
 		expect(result.moduleText).toContain("id: number");
+	});
+});
+
+// End-to-end mutation (#110): write + call-site rewrite + tsc verify/rollback.
+// Fixtures live under the OS tmpdir (outside the repo) so the closing tsc gate
+// resolves the repo's own `tsc` binary via process.cwd(); a minimal ambient JSX
+// namespace keeps them type-checkable without a real React dependency.
+const EC_TSCONFIG = JSON.stringify({
+	compilerOptions: {
+		jsx: "preserve",
+		strict: false,
+		noEmit: true,
+		skipLibCheck: true,
+		module: "esnext",
+		moduleResolution: "bundler",
+		target: "esnext",
+	},
+	include: ["**/*.ts", "**/*.tsx"],
+});
+
+const EC_JSX_SHIM = `declare namespace JSX {
+	interface IntrinsicElements {
+		[elemName: string]: unknown;
+	}
+	interface Element {}
+}
+`;
+
+async function makeEcFixture(
+	name: string,
+	files: Record<string, string>
+): Promise<string> {
+	return makeFixture(
+		`extract-exec-${name}`,
+		{
+			"tsconfig.json": EC_TSCONFIG,
+			"globals.d.ts": EC_JSX_SHIM,
+			...files,
+		},
+		{ outsideRepo: true }
+	);
+}
+
+describe("executeExtractComponent — apply", () => {
+	test("happy-path: writes the new module and rewrites the call site", async () => {
+		const dir = await makeEcFixture("happy", {
+			"Panel.tsx": `export function Panel() {
+	const title = "hello";
+	return (
+		<section>
+			<div className="body">
+				<span>{title}</span>
+			</div>
+		</section>
+	);
+}
+`,
+		});
+		try {
+			const result = await executeExtractComponent({
+				file: path.join(dir, "Panel.tsx"),
+				selector: "div",
+				newFile: path.join(dir, "PanelBody.tsx"),
+			});
+
+			expect(result.blocked).toBe(false);
+			expect(result.conflict).toBeNull();
+			expect(result.rolledBack).toBe(false);
+			expect(result.success).toBe(true);
+			expect(result.componentName).toBe("PanelBody");
+			expect(result.callSite).toBe("<PanelBody title={title} />");
+			expect(result.typecheck?.newErrors).toEqual([]);
+
+			const created = await Bun.file(path.join(dir, "PanelBody.tsx")).text();
+			expect(created).toContain(
+				"export function PanelBody({ title }: PanelBodyProps)"
+			);
+			expect(created).toContain("interface PanelBodyProps");
+
+			const rewritten = await Bun.file(path.join(dir, "Panel.tsx")).text();
+			expect(rewritten).toContain('import { PanelBody } from "./PanelBody";');
+			expect(rewritten).toContain("<PanelBody title={title} />");
+			expect(rewritten).not.toContain('<div className="body">');
+		} finally {
+			await cleanup(dir);
+		}
+	});
+
+	test("hook-block: refuses to write when the subtree references hook state", async () => {
+		const dir = await makeEcFixture("hook", {
+			"Counter.tsx": `function useState<T>(value: T): [T, (next: T) => void] {
+	return [value, () => undefined];
+}
+
+export function Counter() {
+	const [count, setCount] = useState(0);
+	return (
+		<div>
+			<span>{count}</span>
+		</div>
+	);
+}
+`,
+		});
+		try {
+			const result = await executeExtractComponent({
+				file: path.join(dir, "Counter.tsx"),
+				selector: "div",
+				newFile: path.join(dir, "CounterBody.tsx"),
+			});
+
+			expect(result.blocked).toBe(true);
+			expect(result.success).toBe(false);
+			expect(result.modifiedFiles).toEqual([]);
+			expect(result.unliftableHooks.map((hook) => hook.name)).toContain(
+				"count"
+			);
+
+			expect(await Bun.file(path.join(dir, "CounterBody.tsx")).exists()).toBe(
+				false
+			);
+			const original = await Bun.file(path.join(dir, "Counter.tsx")).text();
+			expect(original).toContain("const [count, setCount] = useState(0);");
+			expect(original).not.toContain("CounterBody");
+		} finally {
+			await cleanup(dir);
+		}
+	});
+
+	test("rollback: restores originals when extraction introduces a type error", async () => {
+		const dir = await makeEcFixture("rollback", {
+			"Panel.tsx": `export function Panel() {
+	interface Local {
+		label: string;
+	}
+	const data: Local = { label: "x" };
+	return (
+		<div>
+			<span>{data.label}</span>
+		</div>
+	);
+}
+`,
+		});
+		const panelPath = path.join(dir, "Panel.tsx");
+		const before = await Bun.file(panelPath).text();
+		try {
+			const result = await executeExtractComponent({
+				file: panelPath,
+				selector: "div",
+				newFile: path.join(dir, "PanelBody.tsx"),
+			});
+
+			// The lifted prop's type references a function-local interface that the
+			// child module cannot see → a new tsc error → automatic rollback.
+			expect(result.success).toBe(false);
+			expect(result.rolledBack).toBe(true);
+			expect(result.errors.length).toBeGreaterThan(0);
+
+			expect(await Bun.file(path.join(dir, "PanelBody.tsx")).exists()).toBe(
+				false
+			);
+			expect(await Bun.file(panelPath).text()).toBe(before);
+		} finally {
+			await cleanup(dir);
+		}
 	});
 });
