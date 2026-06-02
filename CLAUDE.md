@@ -250,13 +250,13 @@ DON'T: Duplicate `runTypeCheck` or unresolvable-import scanning in command files
 
 ## Dirty Worktree Guard
 
-The four mutating commands (`move`, `rename`, `alias`, `extract-common`) refuse to write when the git tree has uncommitted changes (staged/unstaged/untracked), keeping refactors on a clean commit boundary. `--force` overrides; `--dry-run` bypasses (no writes); non-git dirs are allowed. Implemented in `src/core/git.ts` (`ensureCleanWorktree()`), called before any file I/O.
+The four mutating commands (`move`/`rename`/`alias`/`extract-common`) refuse to write on a dirty git tree (staged/unstaged/untracked), keeping refactors on a clean commit boundary. `--force` overrides; `--dry-run` bypasses; non-git dirs allowed. `ensureCleanWorktree()` (`src/core/git.ts`), called before any file I/O.
 
 DON'T: Add a new mutating command without calling `ensureCleanWorktree()` before writes.
 
 ## Conflict Detection
 
-The four mutating commands (`move`, `rename`, `alias`, `extract-common`) perform conflict detection before applying changes; read-only commands (`find`, `discover`, `workspace`, `analyze`) need none.
+The four mutating commands (`move`/`rename`/`alias`/`extract-common`) perform conflict detection before applying changes; read-only commands need none.
 
 ### Rename Conflict Detection (`src/commands/rename.ts`)
 
@@ -272,13 +272,13 @@ The four mutating commands (`move`, `rename`, `alias`, `extract-common`) perform
 
 ### `hasLocalBinding()` Helper
 
-`move.ts` and `rename.ts` each implement `hasLocalBinding()` — an AST walker checking whether a file already declares a name via variable/function/class/type/interface/enum declarations or import bindings (excluding the import being changed). New mutating commands need equivalent detection.
+`move.ts`/`rename.ts` each implement `hasLocalBinding()` — an AST walker checking whether a file already declares a name (variable/function/class/type/interface/enum or import binding, excluding the changed import). New mutating commands need equivalent detection.
 
 ### Duplicate-Declaration Similarity Guard (`src/core/duplicate-detection.ts`)
 
-When a name conflict hits an existing declaration (`move` into a barrel declaring the same name; `rename` onto a name already declared locally), the conflict message gains a similarity verdict. `compareDeclarations(fileA, nameA, fileB, nameB)` reuses `similar` scoring (`collectFunctions` + `findSimilarGroups`), returning `{ comparable, similarity, isDuplicate }`; `isDuplicate` ≥ `DUPLICATE_DECLARATION_THRESHOLD` (0.85, `high` bucket). `describeComparison()` builds the suffix.
+When a name conflict hits an existing declaration (`move` into a barrel; `rename` onto a locally-declared name), the message gains a similarity verdict. `compareDeclarations(fileA, nameA, fileB, nameB)` reuses `similar` scoring (`collectFunctions` + `findSimilarGroups`) → `{ comparable, similarity, isDuplicate }`; `isDuplicate` ≥ `DUPLICATE_DECLARATION_THRESHOLD` (0.85, `high` bucket). `describeComparison()` builds the suffix.
 
-- `move`/`rename` block these by default and require `--force`; under `--force` they `logger.warn("⚠️  Proceeding past conflict (--force)")` per conflict. `moveCommand`/`renameCommand` thread a trailing `force = false` into `moveModule()`/`renameSymbol()`. `extract-common --output` runs the guard via `checkOutputDeclarationConflicts()` before appending a canonical into an existing output file.
+- `move`/`rename` block these by default, require `--force` (warn per conflict), and thread `force` into `moveModule()`/`renameSymbol()`. `extract-common --output` runs the guard via `checkOutputDeclarationConflicts()` before appending into an existing output file.
 - Only `collectFunctions` kinds score (functions, const arrow/function exprs, type aliases, interfaces with enough tokens); classes/enums/tiny bodies → `comparable: false`.
 - `move` scores only when the destination barrel file itself declares the name; `export … from` re-exports aren't declarations (`scanExports` skips them).
 
@@ -298,7 +298,7 @@ bun src/cli.ts audit src --fan-out-threshold=8
 
 ## Tidy Command
 
-`bun src/cli.ts tidy src --experimental [--json]` runs the orchestrator in `src/commands/tidy.ts`: `unused` + `similar` + `audit`, schema `1-experimental`. `--fix` applies mutations behind a dirty-worktree guard, `--max-changes` ceiling, one closing `tsc --noEmit` gate, and `git restore` rollback on new errors or `verificationIncomplete`. Safe-by-default: `dead-exports`; `alias-normalisation` needs `--alias-prefer=<alias|relative|shortest>`. Aggressive categories are opt-in (`--fix=<cat>`, not in `SAFE_TIDY_FIX_CATEGORIES`): `mock-cleanup` wired; `file-moves`/`case-renames`/`layout-relocations` no-op (#90). Each reuses its command's compute seam (`normalizeImports`, `computeMockCleanupChanges`) via `plan*Changes`; `mutationKindForCategory` sets `mutationKind`. MCP defaults `dryRun:true`.
+`bun src/cli.ts tidy src --experimental [--json]` runs the orchestrator in `src/commands/tidy.ts`: `unused` + `similar` + `audit`, schema `1-experimental`. `--fix` applies mutations behind a dirty-worktree guard, `--max-changes` ceiling, one closing `tsc --noEmit` gate, and `git restore` rollback on new errors or `verificationIncomplete`. Safe-by-default: `dead-exports`; `alias-normalisation` needs `--alias-prefer=<alias|relative|shortest>`. Aggressive categories are opt-in (`--fix=<cat>`, not in `SAFE_TIDY_FIX_CATEGORIES`), all wired (#90): `mock-cleanup`, `file-moves` (#98), `layout-relocations` (#97), `case-renames`. Each reuses its command's compute seam via `plan*Changes`; `mutationKindForCategory` sets `mutationKind`. MCP defaults `dryRun:true`.
 
 ### Metrics
 
@@ -329,13 +329,13 @@ bun src/cli.ts unused src --json --ignore="*.test.ts"  # JSON, exclude tests
 
 ### De-export vs delete (issue #58)
 
-A hit means "no OTHER file imports this" — a **de-export** signal, NOT a **delete** signal. `countInternalReferences(sourceFile, exp)` counts same-file references (excluding the declaration and export statement); each `UnusedExport` carries `internalUsage` + `internalRefCount`. `internalUsage: false` → referenced nowhere, safe to delete; `true` → only the `export` keyword is redundant. Report exposes aggregate `deadCount`/`internalOnlyCount`; MCP `unused` surfaces all of these.
+A hit means "no OTHER file imports this" — a **de-export**, NOT a **delete** signal. `countInternalReferences(sourceFile, exp)` counts same-file references (excluding the declaration + export statement); each `UnusedExport` carries `internalUsage`/`internalRefCount`. `false` → safe to delete; `true` → only the `export` keyword is redundant. Report exposes `deadCount`/`internalOnlyCount` (all MCP-surfaced).
 
 `countInternalReferences` resolves references by **symbol identity** with a checker (#92, so a shadowing local isn't counted); else name-based, biased "used". DON'T read `node.parent` while walking — unbound source files leave it undefined; track parent explicitly.
 
 ### Cross-tsconfig usage scope (issue #59)
 
-Usage is counted across EVERY non-solution tsconfig discovered, not just the one `resolveTsConfig` picks. `buildProjectGraphs(tsconfigPath)` calls `discoverProject(dir)`, builds a graph per config (each cached by `buildDependencyGraph`), and `mergeImportedBindings()` unions their imported-bindings maps (keys normalized via `normalizePath`). Without this, an export consumed only by a sibling config (`scripts/` on `tsconfig.scripts.json`) is falsely reported dead. Report exposes `scannedConfigs`/`scannedFileCount`.
+Usage is counted across EVERY non-solution tsconfig, not just the one `resolveTsConfig` picks. `buildProjectGraphs(tsconfigPath)` calls `discoverProject(dir)`, builds a cached graph per config, and `mergeImportedBindings()` unions their imported-bindings maps (keys via `normalizePath`). Without this, an export consumed only by a sibling config (`scripts/` on `tsconfig.scripts.json`) is falsely reported dead. Report exposes `scannedConfigs`/`scannedFileCount`.
 
 The `ignore` glob suppresses reported CANDIDATES only — ignored files still feed the usage graph (`importedBindings` is built from the full graph), so a test-only export is not reported dead.
 
@@ -351,22 +351,11 @@ DON'T: Re-implement sub-path-export matching; call `findSubpathExportForFile()` 
 
 ## Extract Component Command
 
-`extract-component` (`src/commands/extract-component.ts`) splits a JSX/TSX subtree into its own typed sub-component. Built across four slices (#107 locate → #108 classify → #109 codegen → #110 mutate), closing epic #101. It is a **mutating** command: `ExtractComponentOptions extends MutatingCommandOptions`; the CLI writes by default and previews with `--dry-run`, the MCP tool defaults `dryRun:true`.
+`extract-component` (`src/commands/extract-component.ts`) splits a JSX/TSX subtree into a typed sub-component (slices #107→#110; closes epic #101). Mutating (`extends MutatingCommandOptions`): CLI writes by default (`--dry-run` previews), MCP defaults `dryRun:true`. `executeExtractComponent` runs `ensureCleanWorktree` + `fileDeclaresName`/destination-exists guards (`--force`-overridable) + `runTypeCheckDetailed` before/after; `classifyFreeVariables` resolves by symbol identity (`use*`-derived → `UnliftableHook` → `blocked:true`, write nothing).
 
-Pipeline (single `createProgram` pass, mirroring `analyze`): `resolveTsConfig` → `loadProject` → `createProgram(project, [file])` → `resolveJsxTsNode` (selector: `L<a>-<b>`/`<a>-<b>` line range or a JSX tag/component name) → `classifyFreeVariables` → `generateComponentModule` → `planExtractComponentWrites` → `executeExtractComponent`.
+DON'T: roll back with `rollbackFiles`/`git restore` (unlike mock-cleanup/move) — it creates a NEW file and must work in non-git trees, so it snapshots pre-write content in memory, restoring originals + `rt.fs.deleteFile`ing created files.
 
-- **`classifyFreeVariables(jsxNode, sourceFile, checker)`** resolves free identifiers by symbol identity (never name matching, so shadowing resolves). A free local declared in the owning component but outside the subtree becomes a `PropCandidate`; one whose value derives from a `use*` hook call becomes an `UnliftableHook` and sets `blocked: true`.
-- **`generateComponentModule`** emits imports (`collectJsxImports`), an optional `Props` interface (`renderPropsInterface` returns `null` for zero props — an empty interface trips Biome), and a typed component whose body re-emits the JSX verbatim from its source span (`reindentJsx`; never printer-reserialize).
-- **`planExtractComponentWrites`** (pure) computes the two original-file edits — insert `import { <Name> } from "<specifier>"` after the last import (`calculateRelativeSpecifier`), replace the JSX span with `<NewComponent propA={propA} … />` — plus the new-module write, all via `applyTextChanges`.
-- **`executeExtractComponent`** applies it: `ensureCleanWorktree` before any I/O; `fileDeclaresName` call-site conflict + destination-exists guards (both `--force`-overridable); `runTypeCheckDetailed` before/after; on any new error or incomplete verification, rolls back from an **in-memory snapshot** (restore originals, `rt.fs.deleteFile` created files) and exits non-zero. Writes run through `mapConcurrent`.
-
-DON'T: roll this command back with `rollbackFiles`/`git restore` like `mock-cleanup`/`move`. It creates a NEW file and must work in non-git trees (and tests), so it snapshots each target's pre-write content in memory and restores/deletes from that.
-
-DON'T: block extraction silently when hooks are unliftable — return `blocked:true` with the offending `unliftableHooks` and write nothing.
-
-Tests live in `src/commands/extract-component.test.ts`. The #110 end-to-end tests (happy-path, hook-block, rollback) need a real `tsc` run, so they use `makeFixture(..., { outsideRepo: true })` (tmpdir) with a `tsconfig.json` (`jsx:"preserve"`) and an ambient `globals.d.ts` JSX shim — `tsc` resolves via `process.cwd()` (the repo's binary), so no React dependency is needed. The rollback test forces a new error by typing a lifted prop with a function-local `interface` the child module cannot see.
-
-DON'T: use `node:fs` sync APIs (`writeFileSync`/`rmSync`/`mkdtempSync`) in this test file — a hook blocks them. Use `makeFixture`/`cleanup` (async, from `./__test-helpers`) and `Bun.file`.
+DON'T: use `node:fs` sync APIs in `extract-component.test.ts` (hook-blocked) — use async `makeFixture`/`cleanup` + `Bun.file`. The #110 e2e tests need real `tsc`: `makeFixture(..., {outsideRepo:true})` + `jsx:"preserve"` + an ambient `globals.d.ts` JSX shim (`tsc` via `process.cwd()`).
 
 ## Workspace Discovery
 
@@ -574,20 +563,20 @@ const exportCount = withSourceFile(graph.program, file, scanExports, []).length;
 
 ### `buildDependencyGraph` Does Not Expose Its Internal `ts.Program`
 
-`buildDependencyGraph` builds a `ts.Program` internally but returns only `DependencyGraph`, so `move.ts`/`rename.ts` call `createProgram()` a second time. If fixed, add a `program: ts.Program` field to `DependencyGraph`.
+`buildDependencyGraph` builds a `ts.Program` internally but returns only `DependencyGraph`, so `move.ts`/`rename.ts` call `createProgram()` a second time (known inefficiency). If fixed, add a `program: ts.Program` field to `DependencyGraph`.
 
-DON'T: Add a third `createProgram` call to `move.ts`/`rename.ts` — the dual build is already a known inefficiency.
+DON'T: Add a third `createProgram` call to `move.ts`/`rename.ts`.
 
 ### `discoverWorkspace` Has No Cache
 
-`discoverProject` (tsconfig-discovery.ts) has `discoveryCache` and `buildDependencyGraph` (graph.ts) has `graphCache`, but `discoverWorkspace` (workspace.ts) has **no cache** — every call re-globs and reads all `package.json` files (20+ reads per call in a 20-package monorepo), and it is called at 9 sites.
+`discoverWorkspace` (workspace.ts) has **no cache** (unlike `discoveryCache`/`graphCache`) — every call re-globs + reads all `package.json` (20+ reads in a 20-package monorepo), called at 9 sites.
 
 DON'T: Call `discoverWorkspace` in a loop or in a hot path. Call it once per command invocation and pass the result downstream.
 DO: When adding a per-invocation workspace cache, mirror the `graphCache` Map pattern in `graph.ts` — key by absolute directory, store `WorkspaceInfo | null`.
 
 ### `graphCache` / `discoveryCache` Invalidation — Hot Path (issues #78, #87, #88)
 
-`graphCache` (graph.ts) and `discoveryCache` (tsconfig-discovery.ts) both invalidate on content change via the shared mtime helpers in `path-utils.ts`: `snapshotMtimes(paths)` records mtimes at build time and `mtimesUnchanged(snapshot)` re-probes with cheap sync `statSync().mtimeMs` (catches in-place edits + deletions, NOT additions). `graphCache` keys by file set (`isCacheValid` — count + membership, #78) + per-file content mtime (#87); `discoveryCache` keys by discovered-tsconfig mtime (#88 — catches tsconfig edits/removals; additions caught by a throttled ~2s re-glob). Matters for the long-lived MCP server. Cache invalidation is **hot-path**: `buildProjectGraphs` builds and re-checks one graph per non-solution tsconfig, and `unused` exercises that across many sibling configs.
+`graphCache` (graph.ts) and `discoveryCache` (tsconfig-discovery.ts) invalidate on content change via `path-utils.ts` mtime helpers: `snapshotMtimes(paths)` + `mtimesUnchanged(snapshot)` (cheap sync `statSync().mtimeMs`; catches edits + deletions, NOT additions). `graphCache` keys by file set (`isCacheValid`, #78) + per-file mtime (#87); `discoveryCache` by discovered-tsconfig mtime (#88; additions via a throttled ~2s re-glob). Hot-path for the long-lived MCP server: `buildProjectGraphs` re-checks one graph per non-solution tsconfig, exercised by `unused` across sibling configs.
 
 DO: Keep the validity probe the shared cheap sync `mtimesUnchanged` (`statSync().mtimeMs`) so unchanged files never force a rebuild. When changing invalidation, write the regression test FIRST (extend `graph.test.ts` / `tsconfig-discovery.test.ts`) and re-measure `unused`/`audit` against the 20s `bun test` timeout.
 DON'T: Use async `Bun.file().lastModified` or a content hash in the validity check — both make `unused`/`audit` blow past the 20s timeout with full rebuilds every call.
