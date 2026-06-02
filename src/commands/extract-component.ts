@@ -1,6 +1,7 @@
 import path from "node:path";
 import ts from "typescript";
 import { logger } from "../cli-logger.ts";
+import { removeExtension } from "../core/constants.ts";
 import {
 	createProgram,
 	loadProject,
@@ -302,14 +303,7 @@ function isFunctionLike(node: ts.Node): node is FunctionLike {
 
 /** Nearest function-like ancestor of `node` — the component owning the JSX. */
 function enclosingFunction(node: ts.Node): ts.Node | undefined {
-	let current: ts.Node | undefined = node.parent;
-	while (current) {
-		if (isFunctionLike(current)) {
-			return current;
-		}
-		current = current.parent;
-	}
-	return undefined;
+	return ts.findAncestor(node.parent, isFunctionLike) ?? undefined;
 }
 
 function isWithinSpan(
@@ -329,20 +323,24 @@ function isWithinSpan(
  * `const value = useMemo(...)` and destructured `const [v, setV] = useState(...)`.
  */
 function hookOrigin(declaration: ts.Node): string | null {
-	let current: ts.Node | undefined = declaration;
-	while (
-		current &&
-		!ts.isVariableDeclaration(current) &&
-		(ts.isBindingElement(current) ||
-			ts.isObjectBindingPattern(current) ||
-			ts.isArrayBindingPattern(current))
-	) {
-		current = current.parent;
-	}
-	if (!(current && ts.isVariableDeclaration(current))) {
+	// Climb from the binding (BindingElement / pattern) to its VariableDeclaration,
+	// bailing out ("quit") the moment we leave binding-pattern territory so an
+	// unrelated outer variable declaration is never mistaken for the origin.
+	const variableDeclaration = ts.findAncestor(declaration, (node) => {
+		if (ts.isVariableDeclaration(node)) {
+			return true;
+		}
+		const isBindingNode =
+			node === declaration ||
+			ts.isBindingElement(node) ||
+			ts.isObjectBindingPattern(node) ||
+			ts.isArrayBindingPattern(node);
+		return isBindingNode ? false : "quit";
+	});
+	if (!(variableDeclaration && ts.isVariableDeclaration(variableDeclaration))) {
 		return null;
 	}
-	const { initializer } = current;
+	const { initializer } = variableDeclaration;
 	if (
 		initializer &&
 		ts.isCallExpression(initializer) &&
@@ -492,6 +490,265 @@ export function analyzeExtractComponentFreeVariables(
 	return classifyFreeVariables(jsxNode, sourceFile, program.getTypeChecker());
 }
 
+// ── Props-interface + component codegen (#109) ────────────────────────
+
+/** Names derived deterministically from the destination module's basename. */
+export interface ComponentNames {
+	componentName: string;
+	interfaceName: string;
+}
+
+/** Result of generating the extracted component's module text. */
+export interface ComponentCodegenResult extends ComponentNames {
+	props: PropCandidate[];
+	moduleText: string;
+}
+
+const NON_WORD_PATTERN = /[^a-zA-Z0-9]+/;
+const CAMEL_BOUNDARY_PATTERN = /(?<=[a-z0-9])(?=[A-Z])/;
+
+/**
+ * Convert an arbitrary basename to PascalCase: split on non-word characters and
+ * camelCase boundaries, then capitalize each token. `user-card` → `UserCard`,
+ * `panel.view` → `PanelView`, `fooBar` → `FooBar`.
+ */
+export function toPascalCase(raw: string): string {
+	const tokens = raw
+		.split(NON_WORD_PATTERN)
+		.flatMap((part) => part.split(CAMEL_BOUNDARY_PATTERN))
+		.filter((token) => token.length > 0);
+	const pascal = tokens
+		.map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+		.join("");
+	return pascal.length > 0 ? pascal : "Component";
+}
+
+/** Derive `<Name>` and `<Name>Props` from a destination file path. */
+export function componentNamesFromNewFile(newFile: string): ComponentNames {
+	const base = removeExtension(path.basename(newFile));
+	const componentName = toPascalCase(base);
+	return { componentName, interfaceName: `${componentName}Props` };
+}
+
+/**
+ * Re-indent a verbatim JSX source span so it nests cleanly inside the generated
+ * component's `return (` block. The span's first line starts at the opening `<`
+ * (leading trivia is excluded by `getStart`); subsequent lines keep their
+ * relative nesting after the common leading indentation is stripped and
+ * `baseIndent` re-applied. Tab-based, matching the project's Biome config.
+ */
+export function reindentJsx(raw: string, baseIndent: string): string {
+	const lines = raw.split("\n");
+	const [firstLine, ...rest] = lines;
+	const nonEmptyRest = rest.filter((line) => line.trim().length > 0);
+	const minIndent =
+		nonEmptyRest.length === 0
+			? 0
+			: Math.min(
+					...nonEmptyRest.map(
+						(line) => line.length - line.replace(/^[\t ]+/, "").length
+					)
+				);
+	const body = rest.map((line) =>
+		line.trim().length === 0 ? "" : `${baseIndent}${line.slice(minIndent)}`
+	);
+	return [`${baseIndent}${firstLine?.trimStart() ?? ""}`, ...body].join("\n");
+}
+
+/**
+ * Render `interface <Name>Props { ... }`, or `null` when there are no props —
+ * an empty interface trips Biome's no-empty-interface rule, so the zero-prop
+ * component omits both the interface and the destructured parameter.
+ */
+export function renderPropsInterface(
+	interfaceName: string,
+	props: PropCandidate[]
+): string | null {
+	if (props.length === 0) {
+		return null;
+	}
+	const members = props
+		.map((prop) => `\t${prop.name}: ${prop.type};`)
+		.join("\n");
+	return `interface ${interfaceName} {\n${members}\n}`;
+}
+
+function importDeclarationOf(node: ts.Node): ts.ImportDeclaration | undefined {
+	const found = ts.findAncestor(node, ts.isImportDeclaration);
+	return found && ts.isImportDeclaration(found) ? found : undefined;
+}
+
+interface ModuleImports {
+	defaults: Set<string>;
+	namespaces: Set<string>;
+	named: Map<string, string>;
+}
+
+function emptyModuleImports(): ModuleImports {
+	return { defaults: new Set(), namespaces: new Set(), named: new Map() };
+}
+
+/**
+ * Re-emit the module-level imports the extracted JSX still needs. Walks the
+ * subtree, resolves each identifier by symbol, and reconstructs the import
+ * statement(s) for any binding that resolves to an `import` in the source file
+ * (components, helpers, React). Grouped per module, deterministically ordered.
+ */
+export function collectJsxImports(
+	jsxNode: ts.Node,
+	checker: ts.TypeChecker
+): string[] {
+	const byModule = new Map<string, ModuleImports>();
+	const seen = new Set<ts.Symbol>();
+
+	const record = (declaration: ts.Node, localName: string): void => {
+		const importDecl = importDeclarationOf(declaration);
+		if (!(importDecl && ts.isStringLiteral(importDecl.moduleSpecifier))) {
+			return;
+		}
+		const moduleName = importDecl.moduleSpecifier.text;
+		const entry = byModule.get(moduleName) ?? emptyModuleImports();
+		if (ts.isNamespaceImport(declaration)) {
+			entry.namespaces.add(localName);
+		} else if (ts.isImportClause(declaration)) {
+			entry.defaults.add(localName);
+		} else if (ts.isImportSpecifier(declaration)) {
+			const imported = declaration.propertyName?.text ?? declaration.name.text;
+			entry.named.set(imported, localName);
+		}
+		byModule.set(moduleName, entry);
+	};
+
+	const visit = (node: ts.Node): void => {
+		if (ts.isIdentifier(node)) {
+			const symbol = checker.getSymbolAtLocation(node);
+			const declaration = symbol?.getDeclarations()?.[0];
+			if (
+				symbol &&
+				declaration &&
+				!seen.has(symbol) &&
+				(ts.isImportSpecifier(declaration) ||
+					ts.isImportClause(declaration) ||
+					ts.isNamespaceImport(declaration))
+			) {
+				seen.add(symbol);
+				record(declaration, node.text);
+			}
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(jsxNode);
+
+	const statements: string[] = [];
+	for (const moduleName of [...byModule.keys()].sort()) {
+		const entry = byModule.get(moduleName);
+		if (!entry) {
+			continue;
+		}
+		for (const namespace of [...entry.namespaces].sort()) {
+			statements.push(`import * as ${namespace} from "${moduleName}";`);
+		}
+		const clauses: string[] = [];
+		for (const def of [...entry.defaults].sort()) {
+			clauses.push(def);
+		}
+		if (entry.named.size > 0) {
+			const named = [...entry.named.entries()]
+				.sort(([a], [b]) => a.localeCompare(b))
+				.map(([imported, local]) =>
+					imported === local ? imported : `${imported} as ${local}`
+				)
+				.join(", ");
+			clauses.push(`{ ${named} }`);
+		}
+		if (clauses.length > 0) {
+			statements.push(`import ${clauses.join(", ")} from "${moduleName}";`);
+		}
+	}
+	return statements;
+}
+
+/**
+ * Generate the extracted component's module text from a classified JSX node.
+ * Emits collected imports, an optional `Props` interface, and a typed function
+ * component whose body re-emits the JSX verbatim from its source span. Does not
+ * write to disk or rewrite the call site (#110).
+ */
+export function generateComponentModule(params: {
+	jsxNode: ts.Node;
+	sourceFile: ts.SourceFile;
+	checker: ts.TypeChecker;
+	classification: FreeVariableReport;
+	newFile: string;
+}): ComponentCodegenResult {
+	const { jsxNode, sourceFile, checker, classification, newFile } = params;
+	const { componentName, interfaceName } = componentNamesFromNewFile(newFile);
+	const props = classification.propCandidates;
+
+	const imports = collectJsxImports(jsxNode, checker);
+	const propsInterface = renderPropsInterface(interfaceName, props);
+	const jsxText = sourceFile.text.slice(
+		jsxNode.getStart(sourceFile),
+		jsxNode.getEnd()
+	);
+	const body = reindentJsx(jsxText, "\t\t");
+
+	const signature =
+		props.length === 0
+			? `export function ${componentName}() {`
+			: `export function ${componentName}({ ${props
+					.map((prop) => prop.name)
+					.join(", ")} }: ${interfaceName}) {`;
+	const component = `${signature}\n\treturn (\n${body}\n\t);\n}`;
+
+	const sections = [
+		imports.length > 0 ? imports.join("\n") : null,
+		propsInterface,
+		component,
+	].filter((section): section is string => section !== null);
+
+	return {
+		componentName,
+		interfaceName,
+		props,
+		moduleText: `${sections.join("\n\n")}\n`,
+	};
+}
+
+/**
+ * Locate the target JSX node, build the shared program/checker, classify the
+ * free variables, and generate the extracted component module text. Read-only:
+ * returns the module text in memory; writing + call-site rewrite land in #110.
+ */
+export function buildExtractComponentModule(
+	options: ExtractComponentOptions
+): ComponentCodegenResult {
+	const absolutePath = path.resolve(options.file);
+	const tsconfigPath = resolveTsConfig(
+		options.project,
+		path.dirname(absolutePath)
+	);
+	if (!tsconfigPath) {
+		throw new Error("Could not find tsconfig.json");
+	}
+	const project = loadProject(tsconfigPath, absolutePath);
+	const program = createProgram(project, [absolutePath]);
+	const sourceFile = program.getSourceFile(absolutePath);
+	if (!sourceFile) {
+		throw new Error(`Could not parse file: ${absolutePath}`);
+	}
+	const checker = program.getTypeChecker();
+	const jsxNode = resolveJsxTsNode(sourceFile, options.selector);
+	const classification = classifyFreeVariables(jsxNode, sourceFile, checker);
+	return generateComponentModule({
+		jsxNode,
+		sourceFile,
+		checker,
+		classification,
+		newFile: options.newFile,
+	});
+}
+
 export function extractComponentCommand(
 	options: ExtractComponentOptions
 ): void {
@@ -506,26 +763,36 @@ export function extractComponentCommand(
 		process.exit(1);
 	}
 
-	// Free-variable classification (#108) requires the type-checker, so it can
-	// only run when the file resolves to a tsconfig project. Degrade gracefully
-	// when it doesn't — the locate report is still useful on its own.
+	// Free-variable classification (#108) and codegen (#109) require the
+	// type-checker, so they only run when the file resolves to a tsconfig
+	// project. Degrade gracefully when it doesn't — the locate report is still
+	// useful on its own. Codegen is suppressed when extraction is blocked by
+	// unliftable hooks.
 	let classification: FreeVariableReport | null = null;
 	let classificationError: string | null = null;
+	let codegen: ComponentCodegenResult | null = null;
 	try {
+		codegen = buildExtractComponentModule(options);
 		classification = analyzeExtractComponentFreeVariables(options);
 	} catch (error) {
 		classificationError =
 			error instanceof Error ? error.message : String(error);
 	}
+	const generatedModule =
+		classification && !classification.blocked
+			? (codegen?.moduleText ?? null)
+			: null;
 
 	if (json) {
-		logger.info(JSON.stringify({ ...report, classification }, null, 2));
+		logger.info(
+			JSON.stringify({ ...report, classification, generatedModule }, null, 2)
+		);
 		return;
 	}
 
 	const { located } = report;
 	logger.info(
-		"\n🧩 extract-component (dry-run — slices 1-2: locate + classify)"
+		"\n🧩 extract-component (dry-run — slices 1-3: locate + classify + codegen)"
 	);
 	logger.info(`   File:     ${report.file}`);
 	logger.info(`   Selector: ${report.selector}`);
@@ -537,8 +804,13 @@ export function extractComponentCommand(
 	logger.info(`   span: chars ${located.start}-${located.end}`);
 	logger.empty();
 	printClassification(classification, classificationError);
+	if (generatedModule) {
+		logger.info(`🛠️  Generated module (${report.newFile}):`);
+		logger.info(generatedModule);
+		logger.empty();
+	}
 	logger.info(
-		"Read-only: no files written. Codegen (#109) and rewrite+verify (#110) follow."
+		"Read-only: no files written. The call-site rewrite + tsc verify/rollback (#110) follows."
 	);
 }
 

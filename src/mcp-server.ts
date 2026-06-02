@@ -47,6 +47,7 @@ import { analyzeBarrels, barrelReportToJson } from "./commands/barrel.ts";
 import { runExtractCommon } from "./commands/extract-common.ts";
 import {
 	analyzeExtractComponentFreeVariables,
+	buildExtractComponentModule,
 	type FreeVariableReport,
 	locateExtractComponentTarget,
 } from "./commands/extract-component.ts";
@@ -249,22 +250,36 @@ function extractComponentTool(
 ): CallToolResult {
 	const absolutePath = path.resolve(file);
 	const report = locateExtractComponentTarget(absolutePath, selector, newFile);
-	// Free-variable classification (#108) needs the type-checker, so it only runs
-	// when the file resolves to a tsconfig project; degrade to locate-only when
-	// it doesn't rather than failing the tool call.
+	// Free-variable classification (#108) + codegen (#109) need the type-checker,
+	// so they only run when the file resolves to a tsconfig project; degrade to
+	// locate-only when it doesn't rather than failing the tool call. The generated
+	// module is suppressed when extraction is blocked by unliftable hooks.
 	let classification: FreeVariableReport | null = null;
 	let classificationError: string | null = null;
+	let generatedModule: string | null = null;
 	try {
 		classification = analyzeExtractComponentFreeVariables({
 			file: absolutePath,
 			selector,
 			newFile,
 		});
+		if (!classification.blocked) {
+			generatedModule = buildExtractComponentModule({
+				file: absolutePath,
+				selector,
+				newFile,
+			}).moduleText;
+		}
 	} catch (error) {
 		classificationError =
 			error instanceof Error ? error.message : String(error);
 	}
-	return jsonText({ ...report, classification, classificationError });
+	return jsonText({
+		...report,
+		classification,
+		classificationError,
+		generatedModule,
+	});
 }
 
 function discoverTool(directory: string): CallToolResult {

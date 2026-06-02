@@ -6,11 +6,14 @@ import ts from "typescript";
 import { createSourceFileFromText } from "../core/source-file.ts";
 import {
 	classifyFreeVariables,
+	componentNamesFromNewFile,
+	generateComponentModule,
 	type LocatedJsxNode,
 	locateExtractComponentTarget,
 	locateJsxNode,
 	parseSelector,
 	resolveJsxTsNode,
+	toPascalCase,
 } from "./extract-component.ts";
 
 const SAMPLE = `export function App() {
@@ -291,5 +294,107 @@ describe("classifyFreeVariables — shadowing", () => {
 		expect(propNames).not.toContain("label");
 		expect(report.unliftableHooks).toEqual([]);
 		expect(report.blocked).toBe(false);
+	});
+});
+
+function generate(text: string, selector: string, newFile: string) {
+	const { sourceFile, checker } = buildProgram(text);
+	const jsxNode = resolveJsxTsNode(sourceFile, selector);
+	const classification = classifyFreeVariables(jsxNode, sourceFile, checker);
+	return generateComponentModule({
+		jsxNode,
+		sourceFile,
+		checker,
+		classification,
+		newFile,
+	});
+}
+
+describe("componentNamesFromNewFile", () => {
+	test("derives PascalCase component + Props names from the basename", () => {
+		expect(componentNamesFromNewFile("src/user-card.tsx")).toEqual({
+			componentName: "UserCard",
+			interfaceName: "UserCardProps",
+		});
+	});
+
+	test("normalizes camelCase and dotted basenames", () => {
+		expect(componentNamesFromNewFile("panel.view.tsx").componentName).toBe(
+			"PanelView"
+		);
+		expect(componentNamesFromNewFile("fooBar.tsx").componentName).toBe(
+			"FooBar"
+		);
+	});
+});
+
+describe("toPascalCase", () => {
+	test("falls back to Component for a nameless basename", () => {
+		expect(toPascalCase("---")).toBe("Component");
+	});
+});
+
+describe("generateComponentModule — codegen", () => {
+	test("emits a typed Props interface + component for a pure-prop subtree", () => {
+		const text = `function Greeting({ name }: { name: string }) {
+	return <h1>Hello {name}</h1>;
+}
+`;
+		const result = generate(text, "h1", "src/Greeting.tsx");
+		expect(result.componentName).toBe("Greeting");
+		expect(result.interfaceName).toBe("GreetingProps");
+		expect(result.moduleText).toContain("interface GreetingProps {");
+		expect(result.moduleText).toContain("name: string;");
+		expect(result.moduleText).toContain(
+			"export function Greeting({ name }: GreetingProps) {"
+		);
+		expect(result.moduleText).toContain("<h1>Hello {name}</h1>");
+		expect(result.moduleText.endsWith("\n")).toBe(true);
+	});
+
+	test("omits the interface and destructure for a zero-prop subtree", () => {
+		const text = `function Logo() {
+	return <span className="logo">resect</span>;
+}
+`;
+		const result = generate(text, "span", "src/Logo.tsx");
+		expect(result.props).toEqual([]);
+		expect(result.moduleText).not.toContain("interface");
+		expect(result.moduleText).toContain("export function Logo() {");
+		expect(result.moduleText).toContain('<span className="logo">resect</span>');
+	});
+
+	test("preserves a fragment root and its nested children verbatim", () => {
+		const text = `function Nav({ label }: { label: string }) {
+	return (
+		<>
+			<a href="/">home</a>
+			<span>{label}</span>
+		</>
+	);
+}
+`;
+		const result = generate(text, "2-6", "src/Nav.tsx");
+		expect(result.moduleText).toContain(
+			"export function Nav({ label }: NavProps)"
+		);
+		expect(result.moduleText).toContain('<a href="/">home</a>');
+		expect(result.moduleText).toContain("<span>{label}</span>");
+		// Fragment delimiters preserved verbatim.
+		expect(result.moduleText).toContain("<>");
+		expect(result.moduleText).toContain("</>");
+	});
+
+	test("renders multi-prop interfaces with union and object types", () => {
+		const text = `function Badge({ status, meta }: { status: "on" | "off"; meta: { id: number } }) {
+	return <div data-status={status}>{meta.id}</div>;
+}
+`;
+		const result = generate(text, "div", "src/Badge.tsx");
+		const propNames = result.props.map((p) => p.name).sort();
+		expect(propNames).toEqual(["meta", "status"]);
+		expect(result.moduleText).toContain('status: "on" | "off";');
+		expect(result.moduleText).toContain("meta:");
+		expect(result.moduleText).toContain("id: number");
 	});
 });

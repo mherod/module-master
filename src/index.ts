@@ -48,6 +48,8 @@ export type { ExtractCommonOptions } from "./commands/extract-common.ts";
 export { extractCommonCommand } from "./commands/extract-common.ts";
 // ── Commands: extract-component ─────────────────────────────────────
 export type {
+	ComponentCodegenResult,
+	ComponentNames,
 	ExtractComponentOptions,
 	ExtractComponentReport,
 	FreeVariableReport,
@@ -58,12 +60,19 @@ export type {
 } from "./commands/extract-component.ts";
 export {
 	analyzeExtractComponentFreeVariables,
+	buildExtractComponentModule,
 	classifyFreeVariables,
+	collectJsxImports,
+	componentNamesFromNewFile,
 	extractComponentCommand,
+	generateComponentModule,
 	locateExtractComponentTarget,
 	locateJsxNode,
 	parseSelector,
+	reindentJsx,
+	renderPropsInterface,
 	resolveJsxTsNode,
+	toPascalCase,
 } from "./commands/extract-component.ts";
 // ── Commands: find ──────────────────────────────────────────────────
 export type {
