@@ -1,8 +1,41 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { loadProject, resolveTsConfig } from "../core/project.ts";
+import { discoverWorkspace } from "../core/workspace.ts";
+import type { MoveResult } from "../types/move.ts";
+import { moveModule } from "./move.ts";
 
 export const CLI = ["bun", path.resolve(import.meta.dir, "../cli.ts")];
+
+/**
+ * Run `moveModule` against a fixture directory, resolving its tsconfig and
+ * (optional) workspace the way the cross-package move suites need. Shared by
+ * the move test suites (#118 dependency sync, #121 self-import rewrite) so the
+ * fixture-move plumbing lives in one place.
+ */
+export async function moveInFixture(
+	dir: string,
+	source: string,
+	target: string,
+	dryRun = false
+): Promise<MoveResult> {
+	const absSource = path.join(dir, source);
+	const tsconfigPath = resolveTsConfig(dir, path.dirname(absSource));
+	if (!tsconfigPath) {
+		throw new Error("tsconfig not found");
+	}
+	const project = loadProject(tsconfigPath, absSource);
+	const workspace = (await discoverWorkspace(dir)) ?? undefined;
+	return moveModule(
+		absSource,
+		path.join(dir, target),
+		project,
+		dryRun,
+		false,
+		workspace
+	);
+}
 
 interface CliResult {
 	stdout: string;

@@ -1,9 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import path from "node:path";
-import { loadProject, resolveTsConfig } from "../core/project.ts";
-import { discoverWorkspace } from "../core/workspace.ts";
-import { cleanup, makeFixture } from "./__test-helpers.ts";
-import { moveModule } from "./move.ts";
+import { cleanup, makeFixture, moveInFixture } from "./__test-helpers.ts";
 
 /**
  * End-to-end coverage for #118: a cross-package `move` must sync the moved
@@ -45,33 +42,10 @@ async function readJson(filePath: string): Promise<Record<string, unknown>> {
 	return JSON.parse(await Bun.file(filePath).text());
 }
 
-async function move(
-	dir: string,
-	source: string,
-	target: string,
-	dryRun = false
-) {
-	const absSource = path.join(dir, source);
-	const tsconfigPath = resolveTsConfig(dir, path.dirname(absSource));
-	if (!tsconfigPath) {
-		throw new Error("tsconfig not found");
-	}
-	const project = loadProject(tsconfigPath, absSource);
-	const workspace = (await discoverWorkspace(dir)) ?? undefined;
-	return moveModule(
-		absSource,
-		path.join(dir, target),
-		project,
-		dryRun,
-		false,
-		workspace
-	);
-}
-
 describe("move cross-package dependency sync (#118)", () => {
 	test("adds the moved file's external dep to the destination package.json", async () => {
 		const dir = await fixture("external-added", { ...WORKSPACE });
-		const result = await move(
+		const result = await moveInFixture(
 			dir,
 			"packages/pkg-a/src/foo.ts",
 			"packages/pkg-b/src/foo.ts"
@@ -103,7 +77,7 @@ describe("move cross-package dependency sync (#118)", () => {
 				dependencies: { lodash: "^4.0.0" },
 			}),
 		});
-		const result = await move(
+		const result = await moveInFixture(
 			dir,
 			"packages/pkg-a/src/foo.ts",
 			"packages/pkg-b/src/foo.ts"
@@ -121,7 +95,7 @@ describe("move cross-package dependency sync (#118)", () => {
 
 	test("dry-run reports the proposed addition without writing", async () => {
 		const dir = await fixture("dry-run", { ...WORKSPACE });
-		const result = await move(
+		const result = await moveInFixture(
 			dir,
 			"packages/pkg-a/src/foo.ts",
 			"packages/pkg-b/src/foo.ts",
@@ -142,7 +116,7 @@ describe("move cross-package dependency sync (#118)", () => {
 			"packages/pkg-a/src/foo.ts":
 				'import fp from "lodash/fp";\nexport const foo = fp;',
 		});
-		const result = await move(
+		const result = await moveInFixture(
 			dir,
 			"packages/pkg-a/src/foo.ts",
 			"packages/pkg-b/src/foo.ts"
@@ -160,7 +134,7 @@ describe("move cross-package dependency sync (#118)", () => {
 
 	test("same-package move does not touch any package.json", async () => {
 		const dir = await fixture("same-pkg", { ...WORKSPACE });
-		const result = await move(
+		const result = await moveInFixture(
 			dir,
 			"packages/pkg-a/src/foo.ts",
 			"packages/pkg-a/src/bar.ts"

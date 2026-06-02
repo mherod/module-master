@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type ts from "typescript";
 import type { ProjectConfig } from "../types.ts";
 import {
+	calculateNewSpecifier,
 	calculateRelativeSpecifier,
 	findAliasForPath,
 	findCrossPackageImport,
@@ -598,5 +599,44 @@ describe("findSubpathExportForFile", () => {
 		]);
 		const result = findSubpathExportForFile("/other/cn.ts", workspace);
 		expect(result).toBeNull();
+	});
+});
+
+// ─── calculateNewSpecifier — intra-package self-import (#121) ─────────────────
+
+describe("calculateNewSpecifier intra-package self-import (#121)", () => {
+	// `@scope/web-analytics` aliases the package `src` dir, so the bare
+	// specifier resolves to the barrel `src/index.ts`.
+	const project = makeProject("/repo", {
+		"@scope/web-analytics": ["packages/web-analytics/src"],
+	});
+	const barrel = "/repo/packages/web-analytics/src/index.ts";
+
+	test("rewrites a self-import of the package barrel to a relative path", () => {
+		// File moved INTO the package; the barrel did not move.
+		const fromFile = "/repo/packages/web-analytics/src/base-provider.ts";
+		const result = calculateNewSpecifier(
+			"@scope/web-analytics",
+			fromFile,
+			barrel,
+			barrel,
+			project
+		);
+		expect(result).not.toContain("@scope/web-analytics/index");
+		expect(result).toBe(".");
+	});
+
+	test("keeps the alias for an importer outside the package root", () => {
+		// An app file outside the alias root keeps using the package specifier.
+		const fromFile = "/repo/apps/web/consumer.ts";
+		const result = calculateNewSpecifier(
+			"@scope/web-analytics",
+			fromFile,
+			barrel,
+			barrel,
+			project
+		);
+		expect(result.startsWith(".")).toBe(false);
+		expect(result).toContain("@scope/web-analytics");
 	});
 });

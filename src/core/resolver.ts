@@ -263,7 +263,25 @@ function updateAliasedSpecifier(
 					? aliasMatch.alias.slice(0, -1)
 					: aliasMatch.alias;
 
-				return aliasPrefix + newRemainder;
+				const aliased = aliasPrefix + newRemainder;
+
+				// #121: when the importing file now lives inside this alias's own
+				// root directory, an alias specifier that resolves to a barrel
+				// `index` (`<alias>/index`) is a self-referential, unexported
+				// subpath that fails to resolve (TS2307). Rewrite it as a relative
+				// import to the (sibling) target instead.
+				if (
+					aliased.endsWith("/index") &&
+					normalizePath(fromFile).startsWith(`${absolutePattern}/`)
+				) {
+					return calculateRelativeSpecifier(
+						fromFile,
+						newTargetPath,
+						oldSpecifier
+					);
+				}
+
+				return aliased;
 			}
 			// New target is OUTSIDE this alias scope - need a different approach
 			break;
